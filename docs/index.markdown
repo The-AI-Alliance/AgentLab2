@@ -10,16 +10,16 @@ has_children: false
 | **Authors**     | [Foundation Models and Datasets](https://thealliance.ai/focus-areas/foundation-models){:target="wg"} (See the [Contributors]({{site.baseurl}}/contributing/#contributors)) |
 | **Last Update** | {{site.last_version}}, {{site.last_modified_timestamp}} |
 
-Welcome to the **The AI Alliance**: **Agent Lab 2**. 
+Welcome to the **The AI Alliance**: **Agent Lab 2** project. 
 
 {: .tip }
 > **TIP:** Use the search box at the top of this page to find specific content.
 
-{: .attention }
-> We are looking for collaborators. Please join us! See our [contributing]({{site.baseurl}}/contributing) page for details.
-
 {: .note }
 > **NOTE:** This is a work-in-progress website for the Agent Lab 2.
+
+{: .attention }
+> We are looking for collaborators. Please join us! See our [contributing]({{site.baseurl}}/contributing) page for details.
 
 {: .important }
 > **IMPORTANT:** The "boilerplate" text on this page mixes content you might want to use, as well as tips on writing Markdown. See also the comments in the source files. Make sure you search for and change all TODOs on all the pages!
