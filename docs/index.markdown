@@ -5,12 +5,12 @@ nav_order: 10
 has_children: false
 ---
 
-# MICROSITE_TITLE
+# Agent Lab 2
 
-| **Authors**     | [WORK_GROUP_NAME](WORK_GROUP_URL){:target="wg"} (See the [Contributors]({{site.baseurl}}/contributing/#contributors)) |
+| **Authors**     | [Foundation Models and Datasets](https://thealliance.ai/focus-areas/foundation-models){:target="wg"} (See the [Contributors]({{site.baseurl}}/contributing/#contributors)) |
 | **Last Update** | {{site.last_version}}, {{site.last_modified_timestamp}} |
 
-Welcome to the **The AI Alliance**: **MICROSITE_TITLE**. 
+Welcome to the **The AI Alliance**: **Agent Lab 2**. 
 
 {: .tip }
 > **TIP:** Use the search box at the top of this page to find specific content.
@@ -19,7 +19,7 @@ Welcome to the **The AI Alliance**: **MICROSITE_TITLE**.
 > We are looking for collaborators. Please join us! See our [contributing]({{site.baseurl}}/contributing) page for details.
 
 {: .note }
-> **NOTE:** This is a work-in-progress website for the MICROSITE_TITLE.
+> **NOTE:** This is a work-in-progress website for the Agent Lab 2.
 
 {: .important }
 > **IMPORTANT:** The "boilerplate" text on this page mixes content you might want to use, as well as tips on writing Markdown. See also the comments in the source files. Make sure you search for and change all TODOs on all the pages!
@@ -54,7 +54,7 @@ Some additional links.[^2]
 
 * [Contributing]({{site.baseurl}}/contributing): We welcome your contributions! Here's how you can contribute.
 * [About Us]({{site.baseurl}}/about): More about the AI Alliance and this project.
-* [Project GitHub Repo](https://github.com/The-AI-Alliance/REPO_NAME){:target="repo"}
+* [Project GitHub Repo](https://github.com/The-AI-Alliance/AgentLab2){:target="repo"}
 * [The AI Alliance](https://thealliance.ai){:target="ai-alliance"}: The AI Alliance website.
 
 Note our convention that external URLs include a target, specified with `{:target="some_name"}`. Adding these targets means browsers will automatically open external links in a new tab. You will also notice that external links get a little box and arrow adornment. This is done automatically through a clever CSS hack in `docs/_includes/css/custom.scss.liquid`.
