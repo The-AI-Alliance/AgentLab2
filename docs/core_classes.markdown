@@ -8,7 +8,7 @@ All objects are derived from the Pydantic `BaseModel` class, which provides data
 ```
 class Tool(BaseModel):
     """
-    Tool is a model that represents a tool specification with a type, name, description and arguments.
+    Represents a tool specification with a type, name, description and arguments.
     Compatible with OAI, Anthropic and VLLM definitions.
 
     Attributes:
@@ -52,7 +52,7 @@ class ToolCall(BaseModel):
 [https://docs.litellm.ai/docs/completion/output](https://docs.litellm.ai/docs/completion/output)
 ```
 class LLMMessage(BaseModel):
-    """ LLMMessage represents a message for the LLM input"""
+    """Represents a message for the LLM input"""
     role: Literal["system", "user", "assistant", "function", "tool"]
     content: str | list[Dict[str, Any]] | None #  may be null for assistant messages with function calls.
     name: Optional[str] = None  #  required if the role is "function". The name should match the name of the function represented in the content
@@ -60,7 +60,7 @@ class LLMMessage(BaseModel):
     tool_call_id: Optional[str] = None  #  may be present if the message is from a tool result
 
 class Prompt(BaseModel):
-    """ Prompt represents the input prompt to chat completion api of LLM"""
+    """Represents the input prompt to chat completion api of LLM"""
     messages: List[LLMMessage]
     tools: list[dict]
 
@@ -136,6 +136,10 @@ class Task(BaseModel):
     """if evaluate_per_step=True this will be called to produce reward for each step"""
         pass
 
+    def filter_actions(actions: list[ToolCall]) -> list[ToolCall]:
+        """ allows the task to whitelist subset of all the actions provided by the environment"""
+        pass
+
 class Benchmark(BaseModel):
     name: str
     tasks: List[Task]
@@ -149,6 +153,10 @@ class Benchmark(BaseModel):
 ## Agent abstraction
 ```
 class Trace(BaseModel):
+    """
+    Stores history of the previous interaction. Metadata contains info about agent, env and task. 
+    reward_info represents episode level reward data.
+    """
     steps: List[Observation | LLMOutput]
     metadata: dict = Field(default_factory=dict)
     reward_info: dict = Field(default_factory=dict)
@@ -187,6 +195,7 @@ class AgentRun(BaseModel):
         return AgentRun(agent, task, environment)
 
     def run(self) -> Dict[str, Any] -> Trace:
+        """ Main loop to run the agent on a single specific task"""
         self.agent.reset()
         self.environment.reset()
         observations, task_info = self.task.setup(self.environment)
