@@ -146,7 +146,7 @@ class Benchmark(BaseModel):
     environment: Environment
 
     def initialize(self):
-    """loads data for tasks from the storage, prepares the environment"""
+    """loads data for tasks from the storage, prepares the environment, create list of AgentRun objects to run"""
         pass
 ```
 
@@ -201,12 +201,9 @@ class AgentRun(BaseModel):
         observations, task_info = self.task.setup(self.environment)
         trace = Trace(
             steps=observations,
-            metadata=dict(
-                agent_info=self.agent.metadata,
-                env_info=self.environment.metadata,
-                task_info=task_info,
-            )
+            metadata=dict(agent_info=self.agent.metadata, env_info=self.environment.metadata, task_info=task_info)
         )
+
         while not self.task.finished() and not self.agent.finished():
             llm_output = self.agent.step(trace)
             trace.steps.append(llm_output)
@@ -217,7 +214,7 @@ class AgentRun(BaseModel):
                     self.task.validate_step(self.environment, llm_output.tool_calls, observations)
                 trace.steps.extend(observations)
 
-        self.task.teardown(self.environment)         
         trace.reward_info = self.task.validate(self.environment, trace)
+        self.task.teardown(self.environment)
         return trace
 ```
