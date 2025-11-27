@@ -1,6 +1,6 @@
 # Core Classes Schema
 
-![Core Classes Diagram](docs/assets/images/classes_schema.png)
+![Core Classes Diagram](assets/images/classes_schema.png)
 
 All objects are derived from the Pydantic `BaseModel` class, which provides data validation and serialization capabilities.
 
