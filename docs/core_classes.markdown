@@ -4,9 +4,8 @@
 
 All objects are derived from the Pydantic `BaseModel` class, which provides data validation and serialization capabilities.
 
-```
 ## Tools/Actions abstractions
-
+```
 class Tool(BaseModel):
     """
     Tool is a model that represents a tool specification with a type, name, description and arguments.
@@ -25,11 +24,13 @@ class Tool(BaseModel):
     parameters: dict
 
     @classmethod
+    """create tool object from python function"""
     def from_function(cls, func: Callable) -> "Tool":
         pass
 
     @property
     def schema(self) -> Dict[str, Any]:
+    """produce dict that could be passed as tool schema into LLM api"""
         return self.json_dump()
 
 class ToolCall(BaseModel):
@@ -44,12 +45,12 @@ class ToolCall(BaseModel):
     id: str
     name: str
     arguments: Dict[str, Any]
-
+```
 
 ## LLM interaction abstractions, LiteLLM based:
-# https://docs.litellm.ai/docs/completion/input
-# https://docs.litellm.ai/docs/completion/output
-
+[https://docs.litellm.ai/docs/completion/input](https://docs.litellm.ai/docs/completion/input)
+[https://docs.litellm.ai/docs/completion/output](https://docs.litellm.ai/docs/completion/output)
+```
 class LLMMessage(BaseModel):
     """ LLMMessage represents a message for the LLM input"""
     role: Literal["system", "user", "assistant", "function", "tool"]
@@ -79,10 +80,10 @@ class LLMOutput(BaseModel):
     @classmethod
     def from_litellm_response(cls, response: Response) -> "LLMOutput":
         pass
-
+```
 
 ## Environment, Benchmark and Task abstractions
-
+```
 class Content(BaseModel):
     type: str  # e.g., "text/plain", "image/png"
     data: Any  # The actual content data
@@ -116,7 +117,6 @@ class Environment(BaseModel):
     def close(self):
         pass
 
-
 class Task(BaseModel):
     id: str
     evaluate_per_step: bool = False
@@ -144,10 +144,10 @@ class Benchmark(BaseModel):
     def initialize(self):
     """loads data for tasks from the storage, prepares the environment"""
         pass
-
+```
 
 ## Agent abstraction
-
+```
 class Trace(BaseModel):
     steps: List[Observation | LLMOutput]
     metadata: dict = Field(default_factory=dict)
@@ -159,6 +159,7 @@ class Agent(BaseModel):
     description: str | None = None
     input_content_types: List[str] # values ["image/png", "image/jpeg", "text/plain", "application/json"]
     output_content_types: List[str]
+    actions: list[Tool]
     metadata: dict = Field(default_factory=dict)
 
     def reset(self):
@@ -169,18 +170,21 @@ class Agent(BaseModel):
 
     def finished(self) -> bool:
         pass
-
+```
 
 ## Single run abstraction
-
+```
 class AgentRun(BaseModel):
     agent: Agent
     task: Task
     environment: Environment
 
     @classmethod
-    def from_config(cls, config: Config) -> "AgentRun":
-        pass
+    def from_config(cls, task: Task, config: Config) -> "AgentRun":
+        environment = Environment(**config.environment)
+        actions = task.filter_actions(environment.actions)
+        agent = Agent(**config.agent, actions=actions)
+        return AgentRun(agent, task, environment)
 
     def run(self) -> Dict[str, Any] -> Trace:
         self.agent.reset()
