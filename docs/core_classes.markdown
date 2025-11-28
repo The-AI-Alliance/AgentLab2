@@ -5,11 +5,11 @@
 All objects are derived from the Pydantic `BaseModel` class, which provides data validation and serialization capabilities.
 
 ## Action and Observation abstractions
-Tool is the synonym of function that has its signature containing name, decsription and arguments, and could be executed.
-We need 1 class to represent tool to the LLM and 1 class to represent the specific tool call produced by the LLM.
-Also the tool is the synonym of the action in the RL sense - something that produced by the agent and changes state of the environment.
-Our definitions based on the defacto standards for tool calling from OAI and LiteLLM implementation:
-https://platform.openai.com/docs/guides/function-calling
+Tool is the synonym of function that has its signature containing name, decsription and arguments, and could be executed.  
+We need 1 class to represent tool to the LLM and 1 class to represent the specific tool call produced by the LLM.  
+Also the tool is the synonym of the action in the RL sense - something that produced by the agent and changes state of the environment.  
+Our definitions based on the defacto standards for tool calling from OAI and LiteLLM implementation:  
+https://platform.openai.com/docs/guides/function-calling  
 https://docs.litellm.ai/docs/completion/function_call
 ```
 class Tool(BaseModel):
