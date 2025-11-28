@@ -1,0 +1,25 @@
+{
+  // Set Ruff as the default Python formatter
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll": "always",
+      "source.organizeImports": "always"
+    }
+  },
+  
+  // Enable Ruff for linting
+  "python.linting.enabled": true,
+  "python.linting.ruffEnabled": true,
+  
+  // Disable other linters to avoid conflicts
+  "python.linting.pylintEnabled": false,
+  "python.linting.flake8Enabled": false,
+  "python.linting.mypyEnabled": false,
+  
+  // Ruff extension settings
+  "ruff.enable": true,
+  "ruff.organizeImports": true,
+  "ruff.fixAll": true
+}
