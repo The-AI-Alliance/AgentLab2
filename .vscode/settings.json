@@ -4,5 +4,4 @@
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,
   },
-  "ruff.configuration": "ruff.toml"
 }
