@@ -4,7 +4,7 @@
 
 All objects are derived from the Pydantic `BaseModel` class, which provides data validation and serialization capabilities.
 
-## Tools/Actions abstractions
+## Action and Observation abstractions
 ```
 class Tool(BaseModel):
     """
@@ -45,6 +45,21 @@ class ToolCall(BaseModel):
     id: str
     name: str
     arguments: Dict[str, Any]
+
+class Content(BaseModel):
+    """Represents a piece of content in an observation."""
+    type: str  # e.g., "text/plain", "image/png"
+    data: Any  # The actual content data
+
+class Observation(BaseModel):
+    tool_call_id: str | None = None # first observation may not be linked to any tool call
+    contents: list[Content]
+    metadata: dict = Field(default_factory=dict)
+    reward_info: dict = Field(default_factory=dict)
+
+    def to_messages(self) -> List[LLMMessage]:
+    """Convert observation to a list of message suitable for sending to LLM""'
+        pass
 ```
 
 ## LLM interaction abstractions, LiteLLM based:
@@ -84,20 +99,6 @@ class LLMOutput(BaseModel):
 
 ## Environment, Benchmark and Task abstractions
 ```
-class Content(BaseModel):
-    type: str  # e.g., "text/plain", "image/png"
-    data: Any  # The actual content data
-
-class Observation(BaseModel):
-    tool_call_id: str | None = None # first observation may not be linked to any tool call
-    contents: list[Content]
-    metadata: dict = Field(default_factory=dict)
-    reward_info: dict = Field(default_factory=dict)
-
-    def to_messages(self) -> List[LLMMessage]:
-    """Convert observation to a list of message suitable for sending to LLM""'
-        pass
-
 class Environment(BaseModel):
     def reset(self):
         pass
