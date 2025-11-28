@@ -68,8 +68,9 @@ class Observation(BaseModel):
         pass
 ```
 
-## LLM interaction abstractions, LiteLLM based:
-[https://docs.litellm.ai/docs/completion/input](https://docs.litellm.ai/docs/completion/input)
+## LLM interaction abstractions
+Based on LiteLLM conventions:  
+[https://docs.litellm.ai/docs/completion/input](https://docs.litellm.ai/docs/completion/input)  
 [https://docs.litellm.ai/docs/completion/output](https://docs.litellm.ai/docs/completion/output)
 ```
 class LLMMessage(BaseModel):
