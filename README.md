@@ -18,6 +18,18 @@ make lint      # Lint and auto-fix
 make help      # Show all commands
 ```
 
+## Project Structure
+
+```
+AgentLab2/
+├── src/agentlab2/       # Source code for the framework
+├── tests/               # Test suite
+├── recipes/             # Example recipes and configurations
+├── docs/                # Project documentation
+├── pyproject.toml       # Package metadata and dependencies
+├── Makefile             # Common development tasks
+└── .vscode/             # VS Code settings (Ruff formatter/linter)
+```
 
 The rest of this README provides information for contributors, developers, and users of this project repo.
 
