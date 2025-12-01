@@ -1,13 +1,24 @@
-# README for Agent Lab 2
+# AgentLab2
 
+Open source framework for building and evaluating UI agents.
 <!-- [Published Documentation](https://the-ai-alliance.github.io/AgentLab2/) -->
 Published Documentation - Coming soon.
 
-This repo contains the code and documentation for the AI Alliance: Agent Lab 2.
+## Setup
 
-See the [repo README](https://github.com/The-AI-Alliance/AgentLab2/) for additional details about this project.
+```bash
+cd agentlab2
+make install
+```
 
-TODO - Describe this project
+## Development
+
+```bash
+make format    # Format code
+make lint      # Lint and auto-fix
+make help      # Show all commands
+```
+
 
 The rest of this README provides information for contributors, developers, and users of this project repo.
 
