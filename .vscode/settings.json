@@ -4,4 +4,8 @@
     "editor.defaultFormatter": "charliermarsh.ruff",
     "editor.formatOnSave": true,
   },
+    "ruff.nativeServer": "on",
+    "notebook.defaultFormatter": "charliermarsh.ruff",
+    "python.analysis.languageServerMode": "full",
+    "python.analysis.typeCheckingMode": "standard", 
 }
