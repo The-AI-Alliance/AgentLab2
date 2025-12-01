@@ -7,7 +7,6 @@ Published Documentation - Coming soon.
 ## Setup
 
 ```bash
-cd agentlab2
 make install
 ```
 
@@ -22,7 +21,7 @@ make help      # Show all commands
 
 The rest of this README provides information for contributors, developers, and users of this project repo.
 
-## Getting Involved
+<!-- ## Getting Involved
 
 We welcome contributions as PRs. Please see our [Alliance community repo](https://github.com/The-AI-Alliance/community/) for general information about contributing to any of our projects. This section provides some specific details you need to know.
 
@@ -34,10 +33,6 @@ All _documentation_ contributions are licensed under the [Creative Commons Attri
 
 All _data_ contributions are licensed under the [Community Data License Agreement - Permissive - Version 2.0](https://github.com/The-AI-Alliance/community/blob/main/LICENSE.CDLA-2.0) (which is also in this repo, [LICENSE.CDLA-2.0](LICENSE.CDLA-2.0)).
 
-### Quick Tip - View the Website Locally
-
-See [GITHUB_PAGES.md](GITHUB_PAGES.md) for information on viewing the site locally with `jekyll`.
-
 ### We use the "Developer Certificate of Origin" (DCO).
 
 > [!WARNING]
@@ -45,11 +40,6 @@ See [GITHUB_PAGES.md](GITHUB_PAGES.md) for information on viewing the site local
 
 See the Alliance contributing guide [section on DCO](https://github.com/The-AI-Alliance/community/blob/main/CONTRIBUTING.md#developer-certificate-of-origin) for details. In practical terms, supporting this requirement means you must use the `-s` flag with your `git commit` commands.
 
-## About the GitHub Pages Website Published from this Repo
+## Documentation
 
-The website is published using [GitHub Pages](https://pages.github.com/), where the pages are written in Markdown and served using [Jekyll](https://github.com/jekyll/jekyll). We use the [Just the Docs](https://just-the-docs.github.io/just-the-docs/) Jekyll theme.
-
-See [GITHUB_PAGES.md](GITHUB_PAGES.md) for more information.
-
-> [!NOTE]
-> As described above, all documentation is licensed under Creative Commons Attribution 4.0 International. See [LICENSE.CDLA-2.0](LICENSE.CDLA-2.0)).
+Project documentation is available in the [docs/](docs/) directory. -->
