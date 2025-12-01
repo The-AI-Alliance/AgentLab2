@@ -1,7 +1,7 @@
 [project]
 name = "agentlab2"
 version = "0.1.0"
-description = "Add your description here"
+description = "agentlab2, open source framework."
 readme = "README.md"
 authors = [
     { name = "Aman Jaiswal", email = "amanjaiswal73892@gmail.com" }
