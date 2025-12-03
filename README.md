@@ -1,6 +1,7 @@
 # README for Agent Lab 2
 
-[Published Documentation](https://the-ai-alliance.github.io/AgentLab2/)
+<!-- [Published Documentation](https://the-ai-alliance.github.io/AgentLab2/) -->
+Published Documentation - Coming soon.
 
 This repo contains the code and documentation for the AI Alliance: Agent Lab 2.
 
