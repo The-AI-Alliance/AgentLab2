@@ -1,39 +1,32 @@
 """Agent abstraction."""
 
-from typing import List
+from pydantic import BaseModel
 
-from pydantic import BaseModel, Field
-
-from agentlab2.core import ActionSchema, Trace
+from agentlab2.core import Observation
 from agentlab2.llm import LLMOutput
 
 
-class Agent(BaseModel):
-    """
-    ACP based definition.
+class AgentConfig(BaseModel):
+    """Configuration for creating an Agent."""
 
-    See: https://agentcommunicationprotocol.dev/core-concepts/agent-manifest
-    """
+    def make(self, **kwargs) -> "Agent":
+        return Agent(self, **kwargs)
 
-    name: str
-    description: str | None = None
-    input_content_types: List[
-        str
-    ]  # values ["image/png", "image/jpeg", "text/plain", "application/json"]
-    output_content_types: List[str]
-    actions: List[ActionSchema]
-    metadata: dict = Field(default_factory=dict)
+
+class Agent:
+    def __init__(self, config: AgentConfig):
+        self.config = config
 
     def reset(self) -> None:
         """Reset the agent state."""
         pass
 
-    def step(self, trace: Trace) -> LLMOutput:
+    def step(self, observation: Observation) -> LLMOutput:
         """
-        Agent given not the last observation, but the full trace of all previous steps.
+        Take a step given an observation.
 
         Returns:
-            LLMOutput containing the agent's response and any tool calls.
+            Actions to perform.
         """
         raise NotImplementedError("Subclasses must implement step()")
 
