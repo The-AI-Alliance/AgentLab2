@@ -1,10 +1,6 @@
-import base64
-import io
 import re
 
-import numpy as np
 from bs4 import BeautifulSoup
-from PIL import Image
 
 
 def prune_html(html):
@@ -30,14 +26,3 @@ def prune_html(html):
     html = soup.prettify()
 
     return html
-
-
-def image_to_png_base64_url(image: np.ndarray | Image.Image):
-    if isinstance(image, np.ndarray):
-        image = Image.fromarray(image)
-    if image.mode in ("RGBA", "LA"):
-        image = image.convert("RGB")
-    buffered = io.BytesIO()
-    image.save(buffered, "PNG")
-    image_base64 = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{image_base64}"
