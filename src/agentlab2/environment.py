@@ -51,6 +51,10 @@ class Environment:
         """Execute a single action and return the observation."""
         raise NotImplementedError("Subclasses must implement step()")
 
+    def finished(self) -> bool:
+        """Check if the environment has reached a terminal state."""
+        raise NotImplementedError
+
     def close(self) -> None:
         """Clean up environment resources."""
         pass

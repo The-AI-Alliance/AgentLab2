@@ -47,7 +47,7 @@ class AgentRun(BaseModel):
             metadata={"task_id": self.task.id, "task_info": task_info},
         )
         steps = 0
-        while not self.task.finished(steps) and not agent.finished():
+        while not self.task.finished(steps) and not agent.finished() and not env.finished():
             agent_output = agent.step(obs)
             steps += 1
             logger.info(

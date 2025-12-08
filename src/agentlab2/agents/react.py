@@ -92,7 +92,7 @@ class ReactAgent(Agent):
             output = self.llm(prompt)
             logger.debug(f"LLM Response: {output}")
         except Exception as e:
-            logger.exception(f"Error getting LLM response: {e}. Prompt: {prompt}")
+            logger.exception(f"\033[91mError getting LLM response: {e}. Prompt: {prompt}\033[0m")  # red color
             raise e
 
         self.history.append(output)
