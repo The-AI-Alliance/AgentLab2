@@ -1,13 +1,16 @@
+import logging
 import os
 import subprocess
 import tempfile
 import time
 import urllib.request
-from typing import Any
+from typing import Any, TextIO
 
 from agentlab2.benchmark import Benchmark
 from agentlab2.benchmarks.miniwob.all_tasks import ALL_MINIWOB_TASKS
 from agentlab2.benchmarks.miniwob.task import MiniWobTask
+
+logger = logging.getLogger(__name__)
 
 
 class MiniWobBenchmark(Benchmark):
@@ -20,6 +23,13 @@ class MiniWobBenchmark(Benchmark):
     base_url: str = "http://localhost:8000/miniwob"
     remove_human_display: bool = True
     episode_max_time: int = 1000000
+
+    # Runtime state (not serialized)
+    _server_process: subprocess.Popen | None = None
+    _stdout_file: TextIO | None = None
+    _stderr_file: TextIO | None = None
+
+    model_config = {"arbitrary_types_allowed": True}
 
     def model_post_init(self, context: Any) -> None:
         super().model_post_init(context)
@@ -35,21 +45,42 @@ class MiniWobBenchmark(Benchmark):
             for task in ALL_MINIWOB_TASKS
         ]
 
-    def prepare(self):
+    def setup(self):
         html_path = os.path.join(self.dataset_dir, "miniwob", "html")
         tmp_dir = tempfile.gettempdir()
-        stdout_file = open(os.path.join(tmp_dir, "miniwob_server_stdout.log"), "w")
-        stderr_file = open(os.path.join(tmp_dir, "miniwob_server_stderr.log"), "w")
-        subprocess.Popen(
+        self._stdout_file = open(os.path.join(tmp_dir, "miniwob_server_stdout.log"), "w")
+        self._stderr_file = open(os.path.join(tmp_dir, "miniwob_server_stderr.log"), "w")
+        self._server_process = subprocess.Popen(
             ["python", "-m", "http.server", "8000"],
             cwd=html_path,
-            stdout=stdout_file,
-            stderr=stderr_file,
+            stdout=self._stdout_file,
+            stderr=self._stderr_file,
         )
         time.sleep(1)
         # Check if the server is running by attempting to connect
-
         try:
             urllib.request.urlopen(f"{self.base_url}/", timeout=5)
+            logger.info(f"MiniWob server responding at {self.base_url}")
         except Exception as e:
-            raise RuntimeError(f"MiniWob server failed to start: {e}")
+            self.close()
+            raise RuntimeError(f"MiniWob server failed to respond: {e}")
+
+    def close(self):
+        """Shutdown the MiniWob server and close file handles."""
+        if self._server_process is not None:
+            logger.info("Shutting down MiniWob server...")
+            self._server_process.terminate()
+            try:
+                self._server_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.warning("Server did not terminate gracefully, killing...")
+                self._server_process.kill()
+            self._server_process = None
+
+        if self._stdout_file is not None:
+            self._stdout_file.close()
+            self._stdout_file = None
+
+        if self._stderr_file is not None:
+            self._stderr_file.close()
+            self._stderr_file = None

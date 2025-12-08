@@ -5,6 +5,7 @@ import pprint
 from functools import partial
 from typing import Any, Callable, Dict, List, Literal, Optional
 
+from PIL import Image
 from litellm import Message, completion
 from litellm.utils import token_counter
 from pydantic import BaseModel, Field
@@ -55,7 +56,7 @@ class Prompt(BaseModel):
 
     def __str__(self) -> str:
         """Debug view of the prompt."""
-        messages = pprint.pformat([str(m)[:300] for m in self.messages], width=120)
+        messages = "\n".join([f">>{m}"[:400] for m in self.messages])
         tools = pprint.pformat(self.tools, width=120)
         return f"Tools:\n{tools}\nMessages[{len(self.messages)}]:\n{messages}"
 
@@ -68,7 +69,7 @@ class LLM(BaseModel):
     max_total_tokens: int = 128000
     max_new_tokens: int = 8192
     reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
-    tool_choice: Literal["auto", "none", "all"] = "auto"
+    tool_choice: Literal["auto", "none", "required"] = "auto"
     parallel_tool_calls: bool = False
     max_retries: int = 3
 
@@ -97,7 +98,7 @@ def obs_to_messages(obs: Observation) -> List[LLMMessage]:
     """Convert observation to a list of messages suitable for sending to LLM."""
 
     messages = []
-    images = {k: v for k, v in obs.contents.items() if v.type.startswith("image/")}
+    images = {k: v for k, v in obs.contents.items() if isinstance(v.data, Image.Image)}
     non_images = {k: v for k, v in obs.contents.items() if k not in images}
     for name, content in non_images.items():
         message = LLMMessage(
@@ -107,11 +108,12 @@ def obs_to_messages(obs: Observation) -> List[LLMMessage]:
         )
         messages.append(message)
     for name, content in images.items():
+        image_base64 = content.model_dump()["data"]
         message = LLMMessage(
             role="user",
             content=[
                 {"type": "text", "text": name},
-                {"type": "image_url", "image_url": {"url": image_to_png_base64_url(content.data)}},
+                {"type": "image_url", "image_url": {"url": image_base64}},
             ],
             tool_call_id=obs.tool_call_id,
         )

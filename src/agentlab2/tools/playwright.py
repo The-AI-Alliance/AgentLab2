@@ -114,7 +114,7 @@ class SyncPlaywrightTool(Tool):
         axtree = self._page.accessibility.snapshot()
         return flatten_axtree(axtree)
 
-    def page_obs(self, tool_call_id: str, action_result: str | None) -> Observation:
+    def page_obs(self, tool_call_id: str | None, action_result: str | None) -> Observation:
         html = self.page_html()
         screenshot = self.page_screenshot()
         axtree = self.page_axtree()
@@ -122,13 +122,17 @@ class SyncPlaywrightTool(Tool):
             contents={
                 "html": Content(data=html),
                 "axtree_txt": Content(data=axtree),
-                "screenshot": Content(data=screenshot, type="image/png"),
+                "screenshot": Content(data=screenshot),
             },
             tool_call_id=tool_call_id,
         )
         if action_result is not None:
             obs.contents["action_result"] = Content(data=action_result)
         return obs
+
+    def reset(self):
+        self._page.close()
+        self._page = self._browser.new_page()
 
     def execute_action(self, action: Action) -> Any:
         fn = self._actions[action.name]

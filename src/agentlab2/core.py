@@ -1,9 +1,11 @@
-import uuid
+import base64
+import io
 from typing import Any, Callable, Dict, List, Optional, Self
 
+from PIL import Image
 import litellm.utils
 from litellm import Message
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
 class ActionSchema(BaseModel):
@@ -44,11 +46,34 @@ class Action(BaseModel):
     arguments: Dict[str, Any] = Field(default_factory=dict)
 
 
+image_prefix = "data:image/png;base64,"
+
+
 class Content(BaseModel):
     """Represents a piece of content in an observation."""
 
-    type: str = "text/plain"  # e.g., "text/plain", "image/png"
-    data: Any  # The actual content data
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    data: str | Image.Image  # The actual content data
+
+    @field_serializer("data")
+    def serialize_image(self, data: str | Image.Image) -> str:
+        if isinstance(data, str):
+            return data
+        byte_arr = io.BytesIO()
+        data.save(byte_arr, format="PNG")
+        encoded_image = base64.b64encode(byte_arr.getvalue()).decode("utf-8")
+        return f"{image_prefix}{encoded_image}"
+
+    @field_validator("data", mode="before")
+    @classmethod
+    def deserialize_image(cls, v: str):
+        if isinstance(v, str) and v.startswith(image_prefix):
+            v = v[len(image_prefix) :]
+            # Decode base64 string to bytes
+            decoded_image = base64.b64decode(v)
+            # Open bytes as PIL Image
+            return Image.open(io.BytesIO(decoded_image))
+        return v  # Return original value if not a string (e.g., already an Image object)
 
 
 class Observation(BaseModel):

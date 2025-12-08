@@ -1,6 +1,8 @@
 import logging
 from typing import Any, ClassVar
 
+from PIL import Image
+
 from agentlab2.benchmark import Task
 from agentlab2.core import Action, Content, Observation
 from agentlab2.envs.browser import BrowserEnv
@@ -54,7 +56,6 @@ class MiniWobTask(Task):
         self._env = env
         obs = env.step(Action(name="noop"))
         obs.contents["goal"] = Content(data=goal)
-        obs.tool_call_id = None
         obs = self.obs_postprocess(obs)
         return obs, info
 
@@ -69,7 +70,7 @@ class MiniWobTask(Task):
         if teardown_js:
             self._env.evaluate_js(teardown_js)
 
-    def validate_step(self, actions: list[Action], obs: Observation) -> dict:
+    def validate_step(self, action: Action, obs: Observation) -> dict:
         """
         Validate the task, either per step or at the end.
 
@@ -198,5 +199,9 @@ return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GL
             obs.contents["pruned_html"] = Content(data=prune_html(html.data))
         if screenshot := obs.contents.get("screenshot", None):
             # crop to 332x214 because this is the viewport size for MiniWob
-            obs.contents["screenshot"] = Content(data=screenshot.data.crop((0, 0, 332, 214)), type=screenshot.type)
+            if isinstance(screenshot.data, Image.Image):
+                obs.contents["screenshot"] = Content(data=screenshot.data.crop((0, 0, 332, 214)))
         return obs
+
+    def finished(self, steps: int) -> bool:
+        return steps >= self.max_turns
