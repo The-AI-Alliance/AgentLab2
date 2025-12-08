@@ -4,7 +4,7 @@ from termcolor import colored
 
 from agentlab2.agent import Agent, AgentConfig
 from agentlab2.core import ActionSchema, AgentOutput, Observation
-from agentlab2.llm import LLM, LLMMessage, Prompt, obs_to_messages
+from agentlab2.llm import LLM, Prompt, obs_to_messages
 
 logger = logging.getLogger(__name__)
 
@@ -55,8 +55,8 @@ class ReactAgent(Agent):
     def __init__(self, config: ReactAgentConfig, actions: list[ActionSchema]):
         self.config = config
         self.llm = config.llm
-        self.actions = actions
-        self.history: list[LLMMessage | AgentOutput] = []
+        self.tools: list[dict] = [action.schema() for action in actions]
+        self.history: list[dict | AgentOutput] = []
 
     def reset(self) -> None:
         self.history = []
@@ -84,11 +84,11 @@ class ReactAgent(Agent):
         self.history += obs_to_messages(obs)
         self.maybe_compact_history()
         messages = [
-            LLMMessage(role="system", content=self.config.system_prompt),
+            dict(role="system", content=self.config.system_prompt),
             *self.history,
-            LLMMessage(role="user", content=self.config.react_prompt),
+            dict(role="user", content=self.config.react_prompt),
         ]
-        prompt = Prompt(messages=messages, tools=self.actions)
+        prompt = Prompt(messages=messages, tools=self.tools)
         try:
             logger.debug(f"Prompt: {prompt}")
             output = self.llm(prompt)
@@ -121,9 +121,9 @@ class ReactAgent(Agent):
         first_half = self.history[:midpoint]
         second_half = self.history[midpoint:]
         messages = [
-            LLMMessage(role="system", content=self.config.summarize_system_prompt),
+            dict(role="system", content=self.config.summarize_system_prompt),
             *first_half,
-            LLMMessage(role="user", content=self.config.summarize_prompt),
+            dict(role="user", content=self.config.summarize_prompt),
         ]
         prompt = Prompt(messages=messages)
         try:
@@ -135,10 +135,10 @@ class ReactAgent(Agent):
         summary = llm_message.content
         logger.info(f"Compacted {midpoint} messages into summary:\n{summary}")
         # Rebuild history: system + summary + remaining messages
-        summary_message = LLMMessage(role="assistant", content=f"## Previous Interactions summary:\n{summary}")
+        summary_message = dict(role="assistant", content=f"## Previous Interactions summary:\n{summary}")
         self.history = [summary_message, *second_half]
 
-    def get_training_pairs(self) -> list[tuple[list[LLMMessage | AgentOutput], AgentOutput]]:
+    def get_training_pairs(self) -> list[tuple[list[dict | AgentOutput], AgentOutput]]:
         input_output_pairs = []
         prev_history = []
         for msg in self.history:

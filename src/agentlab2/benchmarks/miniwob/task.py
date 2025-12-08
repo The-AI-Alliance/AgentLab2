@@ -15,8 +15,7 @@ class MiniWobTask(Task):
     dataset: str = "miniwob"
     desc: str
     subdomain: str
-    base_url: str = None  # type: ignore
-    url: str = None  # type: ignore
+    base_url: str
     remove_human_display: bool = True
     episode_max_time: int = 1000000
     max_turns: int = 10
@@ -35,7 +34,10 @@ class MiniWobTask(Task):
     def model_post_init(self, __context: Any):
         if self.base_url.endswith("/"):
             self.base_url = self.base_url[:-1]
-        self.url = f"{self.base_url}/{self.subdomain}.html"
+
+    @property
+    def url(self) -> str:
+        return f"{self.base_url}/{self.subdomain}.html"
 
     def setup(self, env: BrowserEnv) -> tuple[Observation, dict]:
         """

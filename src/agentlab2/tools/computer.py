@@ -2,19 +2,18 @@ import logging
 
 from PIL import Image
 
-from agentlab2 import Tool
+from agentlab2.environment import Tool
 
 logger = logging.getLogger(__name__)
 
 
 class Computer(Tool):
-    container_name: str
-    image_name: str
-    docker_sock: str = "/var/run/docker.sock"
+    def __init__(self, container_name: str, image_name: str, docker_sock: str = "/var/run/docker.sock"):
+        self.container_name = container_name
+        self.image_name = image_name
+        self.docker_sock = docker_sock
 
-    def mouse_click_xy(
-        self, x: int, y: int, button: str = "left", double: bool = False
-    ):
+    def mouse_click_xy(self, x: int, y: int, button: str = "left", double: bool = False):
         """Click at the specified (x, y) coordinates on the computer screen."""
         pass  # Implementation goes here
 
@@ -32,12 +31,12 @@ class Computer(Tool):
 
     def run_cli_command(self, command: str) -> str:
         """Run a CLI command on the computer and return its output."""
-        pass  # Implementation goes here
+        raise NotImplementedError
 
     def get_screenshot(self) -> Image.Image:
         """Capture and return a screenshot of the computer screen."""
-        pass  # Implementation goes here
+        raise NotImplementedError
 
     def get_current_window_axtree(self) -> dict:
         """Get the accessibility tree of the current active window."""
-        pass  # Implementation goes here
+        raise NotImplementedError

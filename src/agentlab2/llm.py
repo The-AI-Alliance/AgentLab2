@@ -1,57 +1,49 @@
 """LLM interaction abstractions, LiteLLM based."""
 
-import logging
 import pprint
 from functools import partial
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Callable, List, Literal
 
 from litellm import Message, completion
 from litellm.utils import token_counter
 from PIL import Image
 from pydantic import BaseModel, Field
 
-from agentlab2.core import Action, ActionSchema, Observation
-
-logger = logging.getLogger(__name__)
+from agentlab2.core import Observation
 
 
-class LLMMessage(BaseModel):
-    """Represents a message for the LLM input."""
+def obs_to_messages(obs: Observation) -> List[dict]:
+    """Convert observation to a list of messages suitable for sending to LLM."""
 
-    role: Literal["system", "user", "assistant", "function", "tool"]
-    content: str | List[Dict[str, Any]] | None = None  # may be null for assistant messages with function calls
-    name: Optional[str] = None  # required if the role is "function"
-    action: Optional[Action] = None  # may be present if the assistant is calling a function
-    tool_call_id: Optional[str] = None  # may be present if the message is from a tool result
+    messages = []
+    images = {k: v for k, v in obs.contents.items() if isinstance(v.data, Image.Image)}
+    non_images = {k: v for k, v in obs.contents.items() if k not in images}
+    for name, content in non_images.items():
+        message = dict(
+            role="tool" if obs.tool_call_id else "user",
+            content=f"##{name}\n{content.data}",
+        )
+        if obs.tool_call_id:
+            message["tool_call_id"] = obs.tool_call_id
+        messages.append(message)
+    for name, content in images.items():
+        image_base64 = content.model_dump()["data"]
+        message = dict(
+            role="user",
+            content=[
+                {"type": "text", "text": name},
+                {"type": "image_url", "image_url": {"url": image_base64}},
+            ],
+        )
+        messages.append(message)
+    return messages
 
 
 class Prompt(BaseModel):
     """Represents the input prompt to chat completion api of LLM."""
 
-    messages: List[LLMMessage | Message]
-    tools: List[ActionSchema] = Field(default_factory=list)
-
-    def message_dicts(self) -> List[Dict[str, Any] | Message]:
-        """Convert messages to a list of dictionaries."""
-        return [
-            message.model_dump(exclude_none=True) if isinstance(message, LLMMessage) else message
-            for message in self.messages
-        ]
-
-    def tool_dicts(self) -> List[Dict[str, Any]]:
-        """Convert tools to a list of dictionaries."""
-        return [self.schema(tool) for tool in self.tools]
-
-    def schema(self, tool: ActionSchema) -> Dict[str, Any]:
-        """Produce dict that could be passed as tool schema into LLM api."""
-        return {
-            "type": "function",
-            "function": {
-                "name": tool.name,
-                "description": tool.description,
-                "parameters": tool.parameters,
-            },
-        }
+    messages: List[dict | Message]
+    tools: List[dict] = Field(default_factory=list)
 
     def __str__(self) -> str:
         """Debug view of the prompt."""
@@ -82,8 +74,8 @@ class LLM(BaseModel):
             max_retries=self.max_retries,
             tool_choice=self.tool_choice,
             parallel_tool_calls=self.parallel_tool_calls,
-            tools=prompt.tool_dicts(),
-            messages=prompt.message_dicts(),
+            tools=prompt.tools,
+            messages=prompt.messages,
         )
         return response.choices[0].message  # type: ignore
 
@@ -91,30 +83,3 @@ class LLM(BaseModel):
     def counter(self) -> Callable[..., int]:
         """Get a token counter function for the LLM model."""
         return partial(token_counter, model=self.model_name)
-
-
-def obs_to_messages(obs: Observation) -> List[LLMMessage]:
-    """Convert observation to a list of messages suitable for sending to LLM."""
-
-    messages = []
-    images = {k: v for k, v in obs.contents.items() if isinstance(v.data, Image.Image)}
-    non_images = {k: v for k, v in obs.contents.items() if k not in images}
-    for name, content in non_images.items():
-        message = LLMMessage(
-            role="tool" if obs.tool_call_id else "user",
-            content=f"##{name}\n{content.data}",
-            tool_call_id=obs.tool_call_id,
-        )
-        messages.append(message)
-    for name, content in images.items():
-        image_base64 = content.model_dump()["data"]
-        message = LLMMessage(
-            role="user",
-            content=[
-                {"type": "text", "text": name},
-                {"type": "image_url", "image_url": {"url": image_base64}},
-            ],
-            tool_call_id=obs.tool_call_id,
-        )
-        messages.append(message)
-    return messages
