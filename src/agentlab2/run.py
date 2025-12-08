@@ -51,7 +51,7 @@ class AgentRun(BaseModel):
         while not self.task.finished(steps) and not agent.finished() and not env.finished():
             agent_output = agent.step(obs)
             steps += 1
-            logger.info(colored(f"Step {steps} Agent output: {agent_output.model_dump_json(indent=2)}", "purple"))
+            logger.info(colored(f"Step {steps} Agent output: {agent_output.model_dump_json(indent=2)}", "magenta"))
             trace.steps.append(TraceStep(agent_output=agent_output))
             actions = self._actions_from_output(agent_output)
             # TODO: support parallel actions if the environment allows it
