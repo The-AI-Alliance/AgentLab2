@@ -1,5 +1,7 @@
 import logging
 
+from termcolor import colored
+
 from agentlab2.agent import Agent, AgentConfig
 from agentlab2.core import ActionSchema, AgentOutput, Observation
 from agentlab2.llm import LLM, LLMMessage, Prompt, obs_to_messages
@@ -92,7 +94,7 @@ class ReactAgent(Agent):
             output = self.llm(prompt)
             logger.debug(f"LLM Response: {output}")
         except Exception as e:
-            logger.exception(f"\033[91mError getting LLM response: {e}. Prompt: {prompt}\033[0m")  # red color
+            logger.exception(colored(f"Error getting LLM response: {e}. Prompt: {prompt}", "red"))
             raise e
 
         self.history.append(output)

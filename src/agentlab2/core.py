@@ -2,9 +2,9 @@ import base64
 import io
 from typing import Any, Callable, Dict, List, Optional, Self
 
-from PIL import Image
 import litellm.utils
 from litellm import Message
+from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 

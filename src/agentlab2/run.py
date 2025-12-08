@@ -2,6 +2,7 @@ import json
 import logging
 
 from pydantic import BaseModel
+from termcolor import colored
 
 from agentlab2.agent import AgentConfig
 from agentlab2.benchmark import Task
@@ -40,7 +41,7 @@ class AgentRun(BaseModel):
         agent = self.agent_config.make(actions=env.actions)
         agent.reset()
         obs, task_info = self.task.setup(env)
-        logger.info(f"\033[94mInitial observation: {obs.model_dump_json(indent=2)}\033[0m")  # blue color
+        logger.info(colored(f"Initial observation: {obs.model_dump_json(indent=2)}", "blue"))
         logger.info(f"Task info: {task_info}")
         trace = Trace(
             steps=[TraceStep(observation=obs)],
@@ -50,17 +51,15 @@ class AgentRun(BaseModel):
         while not self.task.finished(steps) and not agent.finished() and not env.finished():
             agent_output = agent.step(obs)
             steps += 1
-            logger.info(
-                f"\033[95mStep {steps} Agent output: {agent_output.model_dump_json(indent=2)}\033[0m"
-            )  # magenta color
+            logger.info(colored(f"Step {steps} Agent output: {agent_output.model_dump_json(indent=2)}", "purple"))
             trace.steps.append(TraceStep(agent_output=agent_output))
             actions = self._actions_from_output(agent_output)
             # TODO: support parallel actions if the environment allows it
             for action in actions:
                 obs = env.step(action)
                 obs = self.task.obs_postprocess(obs)
-                logger.info(f"\033[94mStep {steps} Observation: {obs.model_dump_json(indent=2)}\033[0m")  # blue color
-                if self.task.evaluate_per_step:
+                logger.info(colored(f"Step {steps} Observation: {obs.model_dump_json(indent=2)}", "blue"))
+                if self.task.validate_per_step:
                     reward_info = self.task.validate_step(action, obs)
                 else:
                     reward_info = {}
