@@ -1,8 +1,8 @@
 import logging
 
 from agentlab2.agent import Agent, AgentConfig
-from agentlab2.core import Action, ActionSchema, LLMMessage, Observation
-from agentlab2.llm import LLM, LLMOutput, Prompt
+from agentlab2.core import Action, ActionSchema, AgentOutput, Observation
+from agentlab2.llm import LLM, LLMMessage, Prompt, obs_to_messages
 
 logger = logging.getLogger(__name__)
 
@@ -53,14 +53,14 @@ class ReactAgent(Agent):
         self.config = config
         self.llm = llm
         self.actions = actions
-        self.history = []
+        self.history: list[LLMMessage | AgentOutput] = []
 
     def reset(self) -> None:
         self.history = []
 
     def obs_preprocess(self, obs: Observation) -> Observation:
         """
-        Filter observation contents based on agent config and convert to messages.
+        Filter observation contents based on agent config.
         """
         obs = obs.model_copy(deep=True)
         if not self.config.use_html:
@@ -72,13 +72,13 @@ class ReactAgent(Agent):
             obs.contents.pop("screenshot", None)
         return obs
 
-    def step(self, obs: Observation) -> LLMOutput:
+    def step(self, obs: Observation) -> AgentOutput:
         if self.max_actions_reached():
             logger.warning("Max actions reached, stopping agent.")
-            return LLMOutput(text="", actions=[Action(name="final_step")])
+            return AgentOutput(text="", actions=[Action(name="final_step")])
 
         obs = self.obs_preprocess(obs)
-        self.history += obs.to_messages()
+        self.history += obs_to_messages(obs)
         self.maybe_compact_history()
         messages = [
             LLMMessage(role="system", content=self.config.system_prompt),
@@ -97,7 +97,7 @@ class ReactAgent(Agent):
         return response
 
     def max_actions_reached(self) -> bool:
-        prev_actions = [msg for msg in self.history if isinstance(msg, LLMOutput) and len(msg.actions)]
+        prev_actions = [msg for msg in self.history if isinstance(msg, AgentOutput) and len(msg.actions)]
         return len(prev_actions) >= self.config.max_actions
 
     def maybe_compact_history(self):
@@ -134,11 +134,11 @@ class ReactAgent(Agent):
         summary_message = LLMMessage(role="assistant", content=f"## Previous Interactions summary:\n{summary}")
         self.history = [summary_message, *second_half]
 
-    def get_training_pairs(self) -> list[tuple[list[LLMMessage | LLMOutput], LLMOutput]]:
+    def get_training_pairs(self) -> list[tuple[list[LLMMessage | AgentOutput], AgentOutput]]:
         input_output_pairs = []
         prev_history = []
         for msg in self.history:
-            if isinstance(msg, LLMOutput):
+            if isinstance(msg, AgentOutput):
                 input_output_pairs.append((prev_history, msg))
             prev_history.append(msg)
         return input_output_pairs

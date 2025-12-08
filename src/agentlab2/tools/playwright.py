@@ -2,7 +2,6 @@ import asyncio
 import logging
 import time
 from io import BytesIO
-from typing import Callable
 
 from PIL import Image
 from playwright.async_api import Page as AsyncPage
@@ -19,8 +18,9 @@ logger = logging.getLogger(__name__)
 class SyncPlaywrightTool(Tool):
     """Fully synchronous Playwright tool using playwright.sync_api."""
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, max_wait: int = 60, **kwargs) -> None:
         super().__init__()
+        self.max_wait = max_wait
         self._actions = {
             "browser_press_key": self.browser_press_key,
             "browser_type": self.browser_type,
@@ -30,6 +30,9 @@ class SyncPlaywrightTool(Tool):
             "browser_select_option": self.browser_select_option,
             "browser_mouse_click_xy": self.browser_mouse_click_xy,
             "browser_wait": self.browser_wait,
+            "browser_back": self.browser_back,
+            "browser_forward": self.browser_forward,
+            "noop": self.noop,
         }
         self.pw_kwargs = kwargs
         self._pw = sync_playwright().start()
@@ -75,8 +78,20 @@ class SyncPlaywrightTool(Tool):
         self._page.mouse.click(x, y, delay=100)
 
     def browser_wait(self, seconds: int):
-        """Wait for a given number of seconds, up to 10 seconds."""
-        time.sleep(min(seconds, 10))
+        """Wait for a given number of seconds, up to max_wait"""
+        time.sleep(min(seconds, self.max_wait))
+
+    def browser_back(self):
+        """Navigate back in browser history."""
+        self._page.go_back()
+
+    def browser_forward(self):
+        """Navigate forward in browser history."""
+        self._page.go_forward()
+
+    def noop(self):
+        """No operation action."""
+        pass
 
     def evaluate_js(self, js: str):
         js_result = self._page.evaluate(js)
@@ -86,14 +101,6 @@ class SyncPlaywrightTool(Tool):
     def goto(self, url: str):
         """Navigate to a specified URL."""
         self._page.goto(url)
-
-    def browser_back(self):
-        """Navigate back in browser history."""
-        self._page.go_back()
-
-    def browser_forward(self):
-        """Navigate forward in browser history."""
-        self._page.go_forward()
 
     def page_html(self) -> str:
         return self._page.content()
@@ -106,7 +113,22 @@ class SyncPlaywrightTool(Tool):
         axtree = self._page.accessibility.snapshot()
         return flatten_axtree(axtree)
 
-    def step(self, action: Action) -> Observation:
+    def page_obs(self, action_result: str | None) -> Observation:
+        html = self.page_html()
+        screenshot = self.page_screenshot()
+        axtree = self.page_axtree()
+        obs = Observation(
+            contents={
+                "html": Content(data=html),
+                "axtree_txt": Content(data=axtree),
+                "screenshot": Content(data=screenshot, type="image/png"),
+            }
+        )
+        if action_result is not None:
+            obs.contents["action_result"] = Content(data=action_result)
+        return obs
+
+    def execute_action(self, action: Action) -> str:
         fn = self._actions[action.name]
         try:
             action_result = fn(**action.arguments)
@@ -115,17 +137,7 @@ class SyncPlaywrightTool(Tool):
             logger.exception(action_result)
         if action_result is None:
             action_result = "Success"
-        html = self.page_html()
-        screenshot = self.page_screenshot()
-        axtree = self.page_axtree()
-        return Observation(
-            contents={
-                "action_result": Content(data=str(action_result)),
-                "html": Content(data=html),
-                "axtree_txt": Content(data=axtree),
-                "screenshot": Content(data=screenshot, type="image/png"),
-            }
-        )
+        return action_result
 
     @property
     def actions(self) -> list[ActionSchema]:
@@ -140,8 +152,9 @@ class SyncPlaywrightTool(Tool):
 class AsyncPlaywrightTool(Tool):
     """Fully asynchronous Playwright tool using playwright.async_api."""
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, max_wait: int = 60, **kwargs) -> None:
         super().__init__()
+        self.max_wait = max_wait
         self._actions = {
             "browser_press_key": self.browser_press_key,
             "browser_type": self.browser_type,
@@ -151,6 +164,9 @@ class AsyncPlaywrightTool(Tool):
             "browser_select_option": self.browser_select_option,
             "browser_mouse_click_xy": self.browser_mouse_click_xy,
             "browser_wait": self.browser_wait,
+            "browser_back": self.browser_back,
+            "browser_forward": self.browser_forward,
+            "noop": self.noop,
         }
         self.pw_kwargs = kwargs
         self._apw = None
@@ -197,8 +213,20 @@ class AsyncPlaywrightTool(Tool):
         await self._page.mouse.click(x, y, delay=100)
 
     async def browser_wait(self, seconds: int):
-        """Wait for a given number of seconds, up to 10 seconds."""
-        await asyncio.sleep(min(seconds, 10))
+        """Wait for a given number of seconds, up to max_wait."""
+        await asyncio.sleep(min(seconds, self.max_wait))
+
+    async def browser_back(self):
+        """Navigate back in browser history."""
+        await self._page.go_back()
+
+    async def browser_forward(self):
+        """Navigate forward in browser history."""
+        await self._page.go_forward()
+
+    async def noop(self):
+        """No operation action."""
+        pass
 
     async def evaluate_js(self, js: str):
         js_result = await self._page.evaluate(js)
@@ -219,7 +247,7 @@ class AsyncPlaywrightTool(Tool):
         axtree = await self._page.accessibility.snapshot()
         return flatten_axtree(axtree)
 
-    async def step(self, action: Action) -> Observation:
+    async def execute_action(self, action: Action) -> Observation:
         fn = self._actions[action.name]
         try:
             action_result = await fn(**action.arguments)

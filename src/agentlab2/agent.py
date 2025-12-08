@@ -3,7 +3,7 @@
 from pydantic import BaseModel
 
 from agentlab2.core import Observation
-from agentlab2.llm import LLMOutput
+from agentlab2.core import AgentOutput
 
 
 class AgentConfig(BaseModel):
@@ -21,7 +21,7 @@ class Agent:
         """Reset the agent state."""
         pass
 
-    def step(self, observation: Observation) -> LLMOutput:
+    def step(self, observation: Observation) -> AgentOutput:
         """
         Take a step given an observation.
 

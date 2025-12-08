@@ -44,24 +44,24 @@ class AgentRun(BaseModel):
     def _run_with_env(self, env):
         agent = self.agent_config.make(llm=self.llm, actions=env.actions)
         agent.reset()
-        observation, task_info = self.task.setup(env)
+        initial_observation, task_info = self.task.setup(env)
 
         trace = Trace(
-            steps=[TraceStep(observation=observation)],
+            steps=[TraceStep(observation=initial_observation)],
             metadata={"task_id": self.task.id, "task_info": task_info},
         )
 
         while not self.task.finished() and not agent.finished():
-            llm_output = agent.step(observation)
+            llm_output = agent.step(initial_observation)
             trace.steps.append(TraceStep(llm_output=llm_output))
 
             if llm_output.actions:
-                observation = env.step(llm_output.actions)
+                initial_observation = env.step(llm_output.actions)
 
                 if self.task.evaluate_per_step:
                     # validator will update obs.reward_info in-place
-                    self.task.validate_step(env, llm_output.actions, observation)
-                trace.steps.append(TraceStep(observation=observation))
+                    self.task.validate_step(env, llm_output.actions, initial_observation)
+                trace.steps.append(TraceStep(observation=initial_observation))
 
         trace.reward_info = self.task.validate(env, trace)
         self.task.teardown(env)
