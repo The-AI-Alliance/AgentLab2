@@ -23,21 +23,20 @@ class Task(BaseModel):
         """Optional clean up after task completion."""
         pass
 
-    def validate(self, environment: Environment, trace: Trace) -> dict:
+    def validate(self, trace: Trace) -> dict:
         """Validate the whole trace and state of the env at the end of the run."""
         raise NotImplementedError
 
     def validate_step(
         self,
-        environment: Environment,
         actions: list[Action],
         observation: Observation,
-    ) -> None:
+    ) -> dict:
         """
         If evaluate_per_step=True this will be called to produce reward for each step.
         Updates observation.reward_info in-place.
         """
-        pass
+        return {}
 
     def filter_actions(self, actions: list[ActionSchema]) -> list[ActionSchema]:
         """Allows the task to whitelist subset of all the actions provided by the environment."""
@@ -49,7 +48,7 @@ class Task(BaseModel):
         """
         raise NotImplementedError
 
-    def obs_postprocess(self, obs: dict) -> dict:
+    def obs_postprocess(self, obs: Observation) -> Observation:
         return obs
 
     def finished(self) -> bool:

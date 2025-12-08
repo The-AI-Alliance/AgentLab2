@@ -54,6 +54,7 @@ class MiniWobTask(Task):
         self._env = env
         obs = env.step([Action(name="noop")])
         obs.contents["goal"] = Content(data=goal)
+        obs = self.obs_postprocess(obs)
         return obs, info
 
     def teardown(self) -> None:
@@ -67,7 +68,7 @@ class MiniWobTask(Task):
         if teardown_js:
             self._env.evaluate_js(teardown_js)
 
-    def validate(self) -> tuple[float, dict]:
+    def validate_step(self, actions: list[Action], obs: Observation) -> dict:
         """
         Validate the task, either per step or at the end.
 
@@ -78,7 +79,10 @@ class MiniWobTask(Task):
         validate_js = self._get_step_validate_js() if self.validate_per_step else self._get_task_validate_js()
         validate_result = self._env.evaluate_js(validate_js)
         reward, info = self._parse_validation_result(validate_result)
-        return reward, info
+        return {"reward": reward, **info}
+
+    def validate(self, trace: Any) -> dict:
+        return {}
 
     def _get_setup_js(self) -> str:
         if self.remove_human_display:
@@ -188,11 +192,10 @@ return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GL
             "done": done,
         }
 
-    def obs_postprocess(self, obs: dict) -> dict:
-        html = obs.pop("html", "")
-        obs["pruned_html"] = prune_html(html)
-        if screenshot := obs.get("screenshot", None):
-            obs["screenshot"] = screenshot.crop(
-                (0, 0, 332, 214)
-            )  # crop to 332x214 because this is the viewport size for MiniWob
+    def obs_postprocess(self, obs: Observation) -> Observation:
+        if html := obs.contents.pop("html", None):
+            obs.contents["pruned_html"] = Content(data=prune_html(html.data))
+        if screenshot := obs.contents.get("screenshot", None):
+            # crop to 332x214 because this is the viewport size for MiniWob
+            obs.contents["screenshot"] = Content(data=screenshot.data.crop((0, 0, 332, 214)), type=screenshot.type)
         return obs

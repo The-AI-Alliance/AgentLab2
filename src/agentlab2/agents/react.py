@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 
 class ReactAgentConfig(AgentConfig):
+    llm: LLM
     use_html: bool = True
     use_axtree: bool = False
     use_screenshot: bool = True
@@ -37,8 +38,8 @@ Focus on:
 - Current progress toward the goal
 Provide a concise summary that preserves all information needed to continue the task."""
 
-    def make(self, llm: LLM, actions: list[ActionSchema]) -> "ReactAgent":
-        return ReactAgent(config=self, llm=llm, actions=actions)
+    def make(self, actions: list[ActionSchema]) -> "ReactAgent":
+        return ReactAgent(config=self, actions=actions)
 
 
 class ReactAgent(Agent):
@@ -49,9 +50,9 @@ class ReactAgent(Agent):
         "output_content_types": ["application/json"],
     }
 
-    def __init__(self, config: ReactAgentConfig, llm: LLM, actions: list[ActionSchema]):
+    def __init__(self, config: ReactAgentConfig, actions: list[ActionSchema]):
         self.config = config
-        self.llm = llm
+        self.llm = config.llm
         self.actions = actions
         self.history: list[LLMMessage | AgentOutput] = []
 
@@ -75,7 +76,7 @@ class ReactAgent(Agent):
     def step(self, obs: Observation) -> AgentOutput:
         if self.max_actions_reached():
             logger.warning("Max actions reached, stopping agent.")
-            return AgentOutput(text="", actions=[Action(name="final_step")])
+            return AgentOutput(content="Max actions reached, stopping agent.")
 
         obs = self.obs_preprocess(obs)
         self.history += obs_to_messages(obs)
@@ -87,8 +88,9 @@ class ReactAgent(Agent):
         ]
         prompt = Prompt(messages=messages, tools=self.actions)
         try:
-            logger.debug(f"Prompt:\n{prompt}")
+            logger.info(f"Prompt:\n{prompt}")
             response = self.llm(prompt)
+            logger.info(f"LLM Response:\n{response}")
         except Exception as e:
             logger.exception(f"Error getting LLM response: {e}. Prompt: {prompt}")
             raise e
@@ -97,7 +99,7 @@ class ReactAgent(Agent):
         return response
 
     def max_actions_reached(self) -> bool:
-        prev_actions = [msg for msg in self.history if isinstance(msg, AgentOutput) and len(msg.actions)]
+        prev_actions = [msg for msg in self.history if isinstance(msg, AgentOutput) and msg.tool_calls]
         return len(prev_actions) >= self.config.max_actions
 
     def maybe_compact_history(self):
