@@ -62,6 +62,7 @@ class ReactAgent(Agent):
         """
         Filter observation contents based on agent config and convert to messages.
         """
+        obs = obs.model_copy(deep=True)
         if not self.config.use_html:
             obs.contents.pop("pruned_html", None)
             obs.contents.pop("html", None)
@@ -112,12 +113,12 @@ class ReactAgent(Agent):
         Compact the history by summarizing the first half of messages with the LLM.
         Updates self.history in place by replacing the first half with the summary message.
         """
-        system_msg = self.history[0]
-        rest = self.history[1:]
-        midpoint = len(rest) // 2
+        midpoint = len(self.history) // 2
+        first_half = self.history[:midpoint]
+        second_half = self.history[midpoint:]
         messages = [
             LLMMessage(role="system", content=self.config.summarize_system_prompt),
-            *rest[:midpoint],
+            *first_half,
             LLMMessage(role="user", content=self.config.summarize_prompt),
         ]
         prompt = Prompt(messages=messages)
@@ -131,7 +132,7 @@ class ReactAgent(Agent):
         logger.info(f"Compacted {midpoint} messages into summary:\n{summary}")
         # Rebuild history: system + summary + remaining messages
         summary_message = LLMMessage(role="assistant", content=f"## Previous Interactions summary:\n{summary}")
-        self.history = [system_msg, summary_message, *rest[midpoint:]]
+        self.history = [summary_message, *second_half]
 
     def get_training_pairs(self) -> list[tuple[list[LLMMessage | LLMOutput], LLMOutput]]:
         input_output_pairs = []

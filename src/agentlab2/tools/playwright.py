@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from io import BytesIO
@@ -9,13 +10,10 @@ from playwright.async_api import async_playwright
 from playwright.sync_api import Page as SyncPage
 from playwright.sync_api import sync_playwright
 
-from agentlab2 import Action, ActionSchema, Tool
+from agentlab2.core import Action, ActionSchema, Content, Observation
+from agentlab2.environment import Tool
 
 logger = logging.getLogger(__name__)
-
-
-_pw = None  # Global Playwright instance for SyncPlaywright
-_browser = None  # Global Browser instance for SyncPlaywright
 
 
 class SyncPlaywrightTool(Tool):
@@ -23,7 +21,6 @@ class SyncPlaywrightTool(Tool):
 
     def __init__(self, **kwargs) -> None:
         super().__init__()
-        self.has_sync_pw_page = True
         self._actions = {
             "browser_press_key": self.browser_press_key,
             "browser_type": self.browser_type,
@@ -32,16 +29,12 @@ class SyncPlaywrightTool(Tool):
             "browser_hover": self.browser_hover,
             "browser_select_option": self.browser_select_option,
             "browser_mouse_click_xy": self.browser_mouse_click_xy,
+            "browser_wait": self.browser_wait,
         }
         self.pw_kwargs = kwargs
-
-    def initialize(self):
-        global _pw, _browser
-        if _pw is None:
-            _pw = sync_playwright().start()
-        if _browser is None:
-            _browser = _pw.chromium.launch(headless=True, chromium_sandbox=True, **self.pw_kwargs)
-        self._page = _browser.new_page()
+        self._pw = sync_playwright().start()
+        self._browser = self._pw.chromium.launch(chromium_sandbox=True, **self.pw_kwargs)
+        self._page = self._browser.new_page()
 
     @property
     def page(self) -> SyncPage:
@@ -113,22 +106,26 @@ class SyncPlaywrightTool(Tool):
         axtree = self._page.accessibility.snapshot()
         return flatten_axtree(axtree)
 
-    def step(self, action: Action) -> dict:
+    def step(self, action: Action) -> Observation:
         fn = self._actions[action.name]
         try:
             action_result = fn(**action.arguments)
         except Exception as e:
             action_result = f"Error executing action {action.name}: {e}"
-            logger.error(action_result)
+            logger.exception(action_result)
+        if action_result is None:
+            action_result = "Success"
         html = self.page_html()
         screenshot = self.page_screenshot()
         axtree = self.page_axtree()
-        return {
-            "action_result": action_result,
-            "html": html,
-            "axtree_txt": axtree,
-            "screenshot": screenshot,
-        }
+        return Observation(
+            contents={
+                "action_result": Content(data=str(action_result)),
+                "html": Content(data=html),
+                "axtree_txt": Content(data=axtree),
+                "screenshot": Content(data=screenshot, type="image/png"),
+            }
+        )
 
     @property
     def actions(self) -> list[ActionSchema]:
@@ -136,22 +133,15 @@ class SyncPlaywrightTool(Tool):
 
     def close(self):
         self._page.close()
+        self._browser.close()
+        self._pw.stop()
 
 
-_apw = None  # Global Playwright instance for AsyncPlaywright
-_abrowser = None  # Global Browser instance for AsyncPlaywright
-
-
-class AsyncPlaywright(Tool):
+class AsyncPlaywrightTool(Tool):
     """Fully asynchronous Playwright tool using playwright.async_api."""
-
-    has_sync_pw_page: bool = False
-    _actions: dict[str, Callable]
-    _page: AsyncPage
 
     def __init__(self, **kwargs) -> None:
         super().__init__()
-        self.has_sync_pw_page = False
         self._actions = {
             "browser_press_key": self.browser_press_key,
             "browser_type": self.browser_type,
@@ -160,16 +150,17 @@ class AsyncPlaywright(Tool):
             "browser_hover": self.browser_hover,
             "browser_select_option": self.browser_select_option,
             "browser_mouse_click_xy": self.browser_mouse_click_xy,
+            "browser_wait": self.browser_wait,
         }
         self.pw_kwargs = kwargs
+        self._apw = None
+        self._abrowser = None
+        self._page: AsyncPage = None  # type: ignore
 
     async def initialize(self):
-        global _apw, _abrowser
-        if _apw is None:
-            _apw = await async_playwright().start()
-        if _abrowser is None:
-            _abrowser = await _apw.chromium.launch(headless=False, chromium_sandbox=True, **self.pw_kwargs)
-        self._page = await _abrowser.new_page()
+        self._apw = await async_playwright().start()
+        self._abrowser = await self._apw.chromium.launch(chromium_sandbox=True, **self.pw_kwargs)
+        self._page = await self._abrowser.new_page()
 
     async def browser_press_key(self, key: str):
         """Press a key on the keyboard."""
@@ -205,6 +196,10 @@ class AsyncPlaywright(Tool):
         """Click at a given x, y coordinate using the mouse."""
         await self._page.mouse.click(x, y, delay=100)
 
+    async def browser_wait(self, seconds: int):
+        """Wait for a given number of seconds, up to 10 seconds."""
+        await asyncio.sleep(min(seconds, 10))
+
     async def evaluate_js(self, js: str):
         js_result = await self._page.evaluate(js)
         logger.info(f"JS result: {js_result}")
@@ -224,22 +219,26 @@ class AsyncPlaywright(Tool):
         axtree = await self._page.accessibility.snapshot()
         return flatten_axtree(axtree)
 
-    async def step(self, action: Action) -> dict:
+    async def step(self, action: Action) -> Observation:
         fn = self._actions[action.name]
         try:
             action_result = await fn(**action.arguments)
         except Exception as e:
             action_result = f"Error executing action {action.name}: {e}"
-            logger.error(action_result)
+            logger.exception(action_result)
+        if action_result is None:
+            action_result = "Success"
         html = await self.page_html()
         screenshot = await self.page_screenshot()
         axtree = await self.page_axtree()
-        return {
-            "action_result": action_result,
-            "html": html,
-            "axtree_txt": axtree,
-            "screenshot": screenshot,
-        }
+        return Observation(
+            contents={
+                "action_result": Content(data=str(action_result)),
+                "html": Content(data=html),
+                "axtree_txt": Content(data=axtree),
+                "screenshot": Content(data=screenshot, type="image/png"),
+            }
+        )
 
     @property
     def actions(self) -> list[ActionSchema]:
@@ -247,6 +246,8 @@ class AsyncPlaywright(Tool):
 
     async def close(self):
         await self._page.close()
+        await self._abrowser.close()  # type: ignore
+        await self._apw.stop()  # type: ignore
 
 
 def flatten_axtree(axtree_dict: dict | None) -> str:

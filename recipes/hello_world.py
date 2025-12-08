@@ -10,14 +10,15 @@ def main():
     env_config = BrowserEnvConfig(headless=True, timeout=30000)
     agent_config = ReactAgentConfig(use_html=True, use_screenshot=True)
     benchmark = MiniWobBenchmark(remove_human_display=True, episode_max_time=1000000)
-    study = Experiment(
+    exp = Experiment(
         name="hello_world_study",
+        output_dir="./hello_world_1",
         llm=llm,
         env_config=env_config,
         agent_config=agent_config,
         benchmark=benchmark,
     )
-    study.run_sequential()
+    exp.run_sequential(save_results=True)
 
 
 if __name__ == "__main__":
