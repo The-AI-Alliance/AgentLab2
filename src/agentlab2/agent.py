@@ -2,8 +2,7 @@
 
 from pydantic import BaseModel
 
-from agentlab2.core import Observation
-from agentlab2.core import AgentOutput
+from agentlab2.core import AgentOutput, Observation
 
 
 class AgentConfig(BaseModel):

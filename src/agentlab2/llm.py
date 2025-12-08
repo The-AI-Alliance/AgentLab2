@@ -1,6 +1,5 @@
 """LLM interaction abstractions, LiteLLM based."""
 
-import json
 import pprint
 from functools import partial
 from typing import Any, Callable, Dict, List, Literal, Optional
@@ -9,7 +8,7 @@ from litellm import Message, completion
 from litellm.utils import token_counter
 from pydantic import BaseModel, Field
 
-from agentlab2.core import Action, ActionSchema, AgentOutput, Observation
+from agentlab2.core import Action, ActionSchema, Observation
 from agentlab2.utils import image_to_png_base64_url
 
 
@@ -26,16 +25,27 @@ class LLMMessage(BaseModel):
 class Prompt(BaseModel):
     """Represents the input prompt to chat completion api of LLM."""
 
-    messages: List[LLMMessage]
+    messages: List[LLMMessage | Message]
     tools: List[ActionSchema] = Field(default_factory=list)
 
-    def message_dicts(self) -> List[Dict[str, Any]]:
+    def message_dicts(self) -> List[Dict[str, Any] | Message]:
         """Convert messages to a list of dictionaries."""
-        return [message.model_dump() for message in self.messages]
+        return [message.model_dump() if isinstance(message, LLMMessage) else message for message in self.messages]
 
     def tool_dicts(self) -> List[Dict[str, Any]]:
         """Convert tools to a list of dictionaries."""
-        return [tool.schema for tool in self.tools]
+        return [self.schema(tool) for tool in self.tools]
+
+    def schema(self, tool: ActionSchema) -> Dict[str, Any]:
+        """Produce dict that could be passed as tool schema into LLM api."""
+        return {
+            "type": "function",
+            "function": {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            },
+        }
 
     def __str__(self) -> str:
         """Debug view of the prompt."""
@@ -52,9 +62,11 @@ class LLM(BaseModel):
     max_total_tokens: int = 128000
     max_new_tokens: int = 8192
     reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
+    tool_choice: Literal["auto", "none", "all"] = "auto"
+    parallel_tool_calls: bool = False
     num_retries: int = 3
 
-    def __call__(self, prompt: Prompt) -> AgentOutput:
+    def __call__(self, prompt: Prompt) -> Message:
         response = completion(
             model=self.model_name,
             temperature=self.temperature,
@@ -62,59 +74,12 @@ class LLM(BaseModel):
             max_completion_tokens=self.max_new_tokens,
             reasoning_effort=self.reasoning_effort,
             num_retries=self.num_retries,
-            tool_choice="auto",
-            parallel_tool_calls=False,
+            tool_choice=self.tool_choice,
+            parallel_tool_calls=self.parallel_tool_calls,
             tools=prompt.tool_dicts(),
             messages=prompt.message_dicts(),
         )
-        return self.response_to_agent_output(response)
-
-    def response_to_agent_output(self, response: Any) -> AgentOutput:
-        """Create LLMOutput from a LiteLLM response object."""
-        # Extract the message from the response
-        message = response.choices[0].message
-
-        # Extract contents
-        text = message.content or ""
-        actions = self._actions_from_message(message)
-        thoughts = self._thoughts_from_message(message)
-
-        # Extract metadata from usage if available
-        metadata = {}
-        if hasattr(response, "usage") and response.usage:
-            metadata["usage"] = {
-                "prompt_tokens": getattr(response.usage, "prompt_tokens", None),
-                "completion_tokens": getattr(response.usage, "completion_tokens", None),
-                "total_tokens": getattr(response.usage, "total_tokens", None),
-            }
-
-        return AgentOutput(text=text, actions=actions, thoughts=thoughts, metadata=metadata)
-
-    def _actions_from_message(self, message: Message) -> list[Action]:
-        actions = []
-        if hasattr(message, "tool_calls") and message.tool_calls:
-            for tc in message.tool_calls:
-                arguments = tc.function.arguments
-                if isinstance(arguments, str):
-                    try:
-                        arguments = json.loads(arguments)
-                    except json.JSONDecodeError:
-                        raise ValueError(f"Invalid JSON arguments in tool call: {arguments}")
-                if tc.function.name is None:
-                    raise ValueError("Tool call must have a function name.")
-                actions.append(Action(id=tc.id, name=tc.function.name, arguments=arguments))
-        return actions
-
-    def _thoughts_from_message(cls, message: Message) -> list[str]:
-        """Extract the agent's thoughts from the LLM message."""
-        thoughts = []
-        if reasoning := message.get("reasoning_content"):
-            thoughts.append(reasoning)
-        if blocks := message.get("thinking_blocks"):
-            for block in blocks:
-                if thinking := getattr(block, "content", None) or getattr(block, "thinking", None):
-                    thoughts.append(thinking)
-        return thoughts
+        return response.choices[0].message  # type: ignore
 
     @property
     def counter(self) -> Callable[..., int]:

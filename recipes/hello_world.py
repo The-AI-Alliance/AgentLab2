@@ -8,22 +8,19 @@ from agentlab2.llm import LLM
 
 
 def main():
+    miniwob_dir = os.path.expanduser("~/miniwob-plusplus")
     llm = LLM(model_name="azure/gpt-5-mini", temperature=1.0)
     env_config = BrowserEnvConfig(headless=True, timeout=30000)
-    agent_config = ReactAgentConfig(use_html=True, use_screenshot=True)
-    benchmark = MiniWobBenchmark(dataset_dir=os.path.expanduser("~/miniwob-plusplus"))
-    benchmark.prepare()  # Start the MiniWob server
+    agent_config = ReactAgentConfig(llm=llm, use_html=True, use_screenshot=True)
+    benchmark = MiniWobBenchmark(dataset_dir=miniwob_dir)
     exp = Experiment(
         name="hello_world_study",
         output_dir="./hello_world_1",
-        llm=llm,
         env_config=env_config,
         agent_config=agent_config,
         benchmark=benchmark,
     )
-    # exp.run_sequential(save_results=True)
-    runs = exp.get_runs()
-    runs[0].run()
+    exp.run_sequential(save_results=True)
 
 
 if __name__ == "__main__":

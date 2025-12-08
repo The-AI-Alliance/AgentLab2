@@ -1,7 +1,8 @@
 import uuid
-from typing import Any, Callable, Dict, List, Literal, Optional, Self
+from typing import Any, Callable, Dict, List, Optional, Self
 
 import litellm.utils
+from litellm import Message
 from pydantic import BaseModel, Field
 
 
@@ -17,7 +18,6 @@ class ActionSchema(BaseModel):
         parameters (dict): A dictionary containing the parameters of the function.
     """
 
-    type: Literal["function"] = "function"
     name: str
     description: str
     parameters: dict
@@ -27,11 +27,6 @@ class ActionSchema(BaseModel):
         """Create tool object from python function."""
         schema = litellm.utils.function_to_dict(func)
         return cls(**schema)
-
-    @property
-    def schema(self) -> Dict[str, Any]:
-        """Produce dict that could be passed as tool schema into LLM api."""
-        return self.model_dump()
 
 
 class Action(BaseModel):
@@ -65,22 +60,15 @@ class Observation(BaseModel):
     reward_info: dict = Field(default_factory=dict)
 
 
-class AgentOutput(BaseModel):
-    """AgentOutput represents the output from LLM."""
-
-    text: str
-    actions: List[Action] = Field(default_factory=list)
-    thoughts: List[str] = Field(default_factory=list)
-    tokens: List[int] = Field(default_factory=list)
-    logprobs: List[float] = Field(default_factory=list)
-    metadata: dict = Field(default_factory=dict)
+AgentOutput = Message
 
 
 class TraceStep(BaseModel):
     """A single step in the trace, consisting of an action or an observation."""
 
     observation: Optional[Observation] = None
-    llm_output: Optional[AgentOutput] = None
+    agent_output: Optional[AgentOutput] = None
+    reward_info: dict = Field(default_factory=dict)
 
 
 class Trace(BaseModel):

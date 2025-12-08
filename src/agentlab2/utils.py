@@ -12,7 +12,7 @@ def prune_html(html):
     # remove html comments
     html = re.sub(r"<!--(.*?)-->", "", html, flags=re.MULTILINE)
 
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(html, "html.parser")
     for tag in reversed(soup.find_all()):
         # remove body and html tags (not their content)
         if tag.name in ("html", "body"):
