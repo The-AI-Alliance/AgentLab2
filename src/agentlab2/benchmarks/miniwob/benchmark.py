@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+from random import shuffle
 from typing import Any, TextIO
 
 from agentlab2.benchmark import Benchmark
@@ -23,6 +24,7 @@ class MiniWobBenchmark(Benchmark):
     base_url: str = "http://localhost:8000/miniwob"
     remove_human_display: bool = True
     episode_max_time: int = 1000000
+    shuffle: bool = True
 
     # Runtime state (not serialized)
     _server_process: subprocess.Popen | None = None
@@ -44,6 +46,8 @@ class MiniWobBenchmark(Benchmark):
             )
             for task in ALL_MINIWOB_TASKS
         ]
+        if self.shuffle:
+            shuffle(self.tasks)
 
     def setup(self):
         html_path = os.path.join(self.dataset_dir, "miniwob", "html")
