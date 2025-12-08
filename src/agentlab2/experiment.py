@@ -1,6 +1,7 @@
 """Single run abstraction."""
 
 import logging
+import os
 
 import ray
 from pydantic import BaseModel
@@ -30,14 +31,24 @@ class AgentRun(BaseModel):
             Trace containing the full history of the run.
         """
         env = self.env_config.make()
-        env.reset()
+        try:
+            env.reset()
+            trace = self._run_with_env(env)
+        except Exception as e:
+            logger.exception(f"Error during agent run: {e}")
+            raise e
+        finally:
+            env.close()
+        return trace
+
+    def _run_with_env(self, env):
         agent = self.agent_config.make(llm=self.llm, actions=env.actions)
         agent.reset()
         observation, task_info = self.task.setup(env)
 
         trace = Trace(
             steps=[TraceStep(observation=observation)],
-            metadata={"task_info": task_info},
+            metadata={"task_id": self.task.id, "task_info": task_info},
         )
 
         while not self.task.finished() and not agent.finished():
@@ -59,6 +70,7 @@ class AgentRun(BaseModel):
 
 class Experiment(BaseModel):
     name: str
+    output_dir: str
     agent_config: AgentConfig
     env_config: EnvironmentConfig
     benchmark: Benchmark
@@ -77,18 +89,34 @@ class Experiment(BaseModel):
         logger.info(f"Prepared {len(runs)} runs for experiment '{self.name}'")
         return runs
 
-    def run_ray(self, n_cpus: int = 4) -> list[Trace]:
+    def run_ray(self, n_cpus: int = 4, save_results: bool = True) -> list[Trace]:
         @ray.remote
         def run_single(agent_run: AgentRun) -> Trace:
             return agent_run.run()
 
-        ray.init(num_cpus=n_cpus)
+        if not ray.is_initialized():
+            ray.init(num_cpus=n_cpus)
         runs = self.get_runs()
         futures = [run_single.remote(run) for run in runs]
-        results = ray.get(futures)
-        return results
+        traces = ray.get(futures)
+        if save_results:
+            self.save_traces(traces)
+        return traces
 
-    def run_sequential(self) -> list[Trace]:
+    def run_sequential(self, save_results: bool = True) -> list[Trace]:
         runs = self.get_runs()
-        results = [run.run() for run in runs]
-        return results
+        traces = [run.run() for run in runs]
+        if save_results:
+            self.save_traces(traces)
+        return traces
+
+    def save_traces(self, traces: list[Trace]) -> None:
+        os.makedirs(self.output_dir, exist_ok=True)
+        traces_dir = os.path.join(self.output_dir, "traces")
+        os.makedirs(traces_dir, exist_ok=True)
+        for i, trace in enumerate(traces):
+            n = trace.metadata.get("task_id", i)
+            trace_path = os.path.join(traces_dir, f"trace_{n}.json")
+            with open(trace_path, "w") as f:
+                f.write(trace.model_dump_json(indent=2))
+        logger.info(f"Saved {len(traces)} traces to {traces_dir}")

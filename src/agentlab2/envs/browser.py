@@ -21,8 +21,11 @@ class BrowserEnv(Environment):
     def __init__(self, config: BrowserEnvConfig):
         super().__init__()
         self.config = config
-        self.browser_tool = SyncPlaywrightTool(**self.config.pw_kwargs)
-        self.browser_tool.initialize()
+        self.browser_tool = SyncPlaywrightTool(
+            headless=self.config.headless,
+            timeout=self.config.timeout,
+            **self.config.pw_kwargs,
+        )
 
     @property
     def actions(self):

@@ -1,7 +1,6 @@
 from typing import Any, ClassVar
 
 from agentlab2.benchmark import Task
-from agentlab2.benchmarks.miniwob.benchmark import logger
 from agentlab2.envs.browser import BrowserEnv
 from agentlab2.utils import prune_html
 
@@ -76,7 +75,6 @@ class MiniWobTask(Task):
 
     def _get_setup_js(self) -> str:
         if self.remove_human_display:
-            logger.info("Remove human display")
             js = r"""
 let __display_ids = ['reward-display', 'click-canvas', 'sync-task-cover'];
 let __display_divs = {};

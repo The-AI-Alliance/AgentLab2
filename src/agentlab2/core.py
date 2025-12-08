@@ -1,6 +1,7 @@
 import uuid
 from typing import Any, Callable, Dict, List, Literal, Self
 
+import litellm.utils
 from pydantic import BaseModel, Field
 
 from agentlab2.llm import LLMMessage, LLMOutput
@@ -27,7 +28,7 @@ class ActionSchema(BaseModel):
     @classmethod
     def from_function(cls, func: Callable) -> Self:
         """Create tool object from python function."""
-        schema = {}
+        schema = litellm.utils.function_to_dict(func)
         return cls(**schema)
 
     @property
@@ -54,7 +55,7 @@ class Action(BaseModel):
 class Content(BaseModel):
     """Represents a piece of content in an observation."""
 
-    type: str  # e.g., "text/plain", "image/png"
+    type: str = "text/plain"  # e.g., "text/plain", "image/png"
     name: str = ""  # optional name of the content
     data: Any  # The actual content data
 
