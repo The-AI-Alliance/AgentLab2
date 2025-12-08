@@ -4,7 +4,6 @@ from PIL import Image
 
 from agentlab2 import Tool
 
-
 logger = logging.getLogger(__name__)
 
 

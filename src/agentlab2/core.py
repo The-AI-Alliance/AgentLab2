@@ -1,9 +1,10 @@
+import uuid
 from typing import Any, Callable, Dict, List, Literal, Self
 
 from pydantic import BaseModel, Field
 
-from agentlab2 import LLMOutput
-from agentlab2.llm import LLMMessage
+from agentlab2.llm import LLMMessage, LLMOutput
+from agentlab2.utils import image_to_png_base64_url
 
 
 class ActionSchema(BaseModel):
@@ -45,66 +46,48 @@ class Action(BaseModel):
         arguments (Any): The arguments to be passed to the function.
     """
 
-    id: str
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     name: str
-    arguments: Dict[str, Any]
+    arguments: Dict[str, Any] = Field(default_factory=dict)
 
 
 class Content(BaseModel):
     """Represents a piece of content in an observation."""
 
     type: str  # e.g., "text/plain", "image/png"
+    name: str = ""  # optional name of the content
     data: Any  # The actual content data
 
 
 class Observation(BaseModel):
     """Represents an observation from the environment."""
 
-    tool_call_id: str | None = (
-        None  # first observation may not be linked to any tool call
-    )
-    contents: List[Content]
+    tool_call_id: str | None = None  # first observation may not be linked to any tool call
+    contents: dict[str, Content]
     metadata: dict = Field(default_factory=dict)
     reward_info: dict = Field(default_factory=dict)
 
-    def to_messages(self) -> List["LLMMessage"]:
+    def to_messages(self) -> List[LLMMessage]:
         """Convert observation to a list of messages suitable for sending to LLM."""
 
         messages = []
-        for content in self.contents:
-            if content.type == "text/plain":
-                messages.append(
-                    LLMMessage(
-                        role="tool",
-                        content=str(content.data),
-                        tool_call_id=self.tool_call_id,
-                    )
-                )
+        for content in self.contents.values():
+            if not self.tool_call_id:
+                message = LLMMessage(role="user", content=str(content.data))
             elif content.type in ["image/png", "image/jpeg"]:
-                messages.append(
-                    LLMMessage(
-                        role="tool",
-                        content=[
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": content.type,
-                                    "data": content.data,
-                                },
-                            }
-                        ],
-                        tool_call_id=self.tool_call_id,
-                    )
+                img_dict = {"type": "image_url", "image_url": {"url": image_to_png_base64_url(content.data)}}
+                message = LLMMessage(
+                    role="user",
+                    content=[img_dict],
+                    tool_call_id=self.tool_call_id,
                 )
             else:
-                messages.append(
-                    LLMMessage(
-                        role="tool",
-                        content=str(content.data),
-                        tool_call_id=self.tool_call_id,
-                    )
+                message = LLMMessage(
+                    role="tool",
+                    content=str(content.data),
+                    tool_call_id=self.tool_call_id,
                 )
+            messages.append(message)
         return messages
 
 

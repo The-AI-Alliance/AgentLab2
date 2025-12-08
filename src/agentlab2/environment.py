@@ -1,16 +1,14 @@
 """Environment, Benchmark and Task abstractions."""
 
-from typing import List, Tuple
+from typing import List
 
 from pydantic import BaseModel
 
-from agentlab2.core import Action, ActionSchema, Observation, Trace
+from agentlab2.core import Action, ActionSchema, Observation
 
 
-class Tool(BaseModel):
+class Tool:
     """Base class for objects that can react on some actions"""
-
-    metadata: dict = {}
 
     def reset(self) -> None:
         """Reset the environment to its initial state."""
@@ -30,10 +28,15 @@ class Tool(BaseModel):
         pass
 
 
-class Environment(BaseModel):
-    """Base class for environments that agents interact with."""
+class EnvironmentConfig(BaseModel):
+    """Configuration for Environment."""
 
-    metadata: dict = {}
+    def make(self) -> "Environment":
+        return Environment()
+
+
+class Environment:
+    """Base class for environments that agents interact with."""
 
     def reset(self) -> None:
         """Reset the environment to its initial state."""
@@ -50,63 +53,4 @@ class Environment(BaseModel):
 
     def close(self) -> None:
         """Clean up environment resources."""
-        pass
-
-
-class Task(BaseModel):
-    """Represents a task that an agent must complete in an environment."""
-
-    id: str
-    evaluate_per_step: bool = False
-
-    def setup(self, environment: Environment) -> Tuple[List[Observation], dict]:
-        """
-        Set up the task in the given environment.
-
-        Returns:
-            Tuple of (list of initial observations, dict with additional task info)
-        """
-        return [], {}
-
-    def teardown(self, environment: Environment) -> None:
-        """Clean up after task completion."""
-        pass
-
-    def validate(self, environment: Environment, trace: "Trace") -> dict:
-        """Validate the whole trace and state of the env at the end of the run."""
-        return {}
-
-    def validate_step(
-        self,
-        environment: Environment,
-        actions: List[Action],
-        observation: Observation,
-    ) -> None:
-        """
-        If evaluate_per_step=True this will be called to produce reward for each step.
-        Updates observation.reward_info in-place.
-        """
-        pass
-
-    def filter_actions(self, actions: List[ActionSchema]) -> List[ActionSchema]:
-        """Allows the task to whitelist subset of all the actions provided by the environment."""
-        return actions
-
-    def finished(self) -> bool:
-        """Check if the task is finished."""
-        return False
-
-
-class Benchmark(BaseModel):
-    """Represents a benchmark consisting of multiple tasks and an environment."""
-
-    name: str
-    tasks: List[Task]
-    environment: Environment
-
-    def initialize(self) -> None:
-        """
-        Loads data for tasks from the storage, prepares the environment,
-        creates list of AgentRun objects to run.
-        """
         pass

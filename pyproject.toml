@@ -13,6 +13,9 @@ dependencies = [
     "litellm~=1.80.8",
     "playwright~=1.49",
     "Pillow~=12.0",
+    "beautifulsoup4~=4.14",
+    "numpy~=2.3.5",
+    "ray[default]>=2.52.1",
 ]
 
 [build-system]

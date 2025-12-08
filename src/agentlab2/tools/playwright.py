@@ -1,15 +1,15 @@
 import logging
 import time
 from io import BytesIO
-from typing import Any, Callable
+from typing import Callable
 
 from PIL import Image
-from agentlab2 import ActionSchema, Tool, Action
 from playwright.async_api import Page as AsyncPage
 from playwright.async_api import async_playwright
 from playwright.sync_api import Page as SyncPage
 from playwright.sync_api import sync_playwright
 
+from agentlab2 import Action, ActionSchema, Tool
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +21,9 @@ _browser = None  # Global Browser instance for SyncPlaywright
 class SyncPlaywrightTool(Tool):
     """Fully synchronous Playwright tool using playwright.sync_api."""
 
-    has_pw_page: bool = True
-    _actions: dict[str, Callable]
-    _page: SyncPage
-
-    def model_post_init(self, __context: Any):
+    def __init__(self, **kwargs) -> None:
+        super().__init__()
+        self.has_sync_pw_page = True
         self._actions = {
             "browser_press_key": self.browser_press_key,
             "browser_type": self.browser_type,
@@ -35,14 +33,14 @@ class SyncPlaywrightTool(Tool):
             "browser_select_option": self.browser_select_option,
             "browser_mouse_click_xy": self.browser_mouse_click_xy,
         }
+        self.pw_kwargs = kwargs
 
     def initialize(self):
         global _pw, _browser
         if _pw is None:
             _pw = sync_playwright().start()
         if _browser is None:
-            _browser = _pw.chromium.launch(headless=True, chromium_sandbox=True)
-
+            _browser = _pw.chromium.launch(headless=True, chromium_sandbox=True, **self.pw_kwargs)
         self._page = _browser.new_page()
 
     @property
@@ -132,6 +130,7 @@ class SyncPlaywrightTool(Tool):
             "screenshot": screenshot,
         }
 
+    @property
     def actions(self) -> list[ActionSchema]:
         return [ActionSchema.from_function(fn) for fn in self._actions.values()]
 
@@ -146,11 +145,13 @@ _abrowser = None  # Global Browser instance for AsyncPlaywright
 class AsyncPlaywright(Tool):
     """Fully asynchronous Playwright tool using playwright.async_api."""
 
-    has_pw_page: bool = False
+    has_sync_pw_page: bool = False
     _actions: dict[str, Callable]
     _page: AsyncPage
 
-    def model_post_init(self, __context: Any):
+    def __init__(self, **kwargs) -> None:
+        super().__init__()
+        self.has_sync_pw_page = False
         self._actions = {
             "browser_press_key": self.browser_press_key,
             "browser_type": self.browser_type,
@@ -160,15 +161,14 @@ class AsyncPlaywright(Tool):
             "browser_select_option": self.browser_select_option,
             "browser_mouse_click_xy": self.browser_mouse_click_xy,
         }
+        self.pw_kwargs = kwargs
 
     async def initialize(self):
         global _apw, _abrowser
         if _apw is None:
             _apw = await async_playwright().start()
         if _abrowser is None:
-            _abrowser = await _apw.chromium.launch(
-                headless=False, chromium_sandbox=True
-            )
+            _abrowser = await _apw.chromium.launch(headless=False, chromium_sandbox=True, **self.pw_kwargs)
         self._page = await _abrowser.new_page()
 
     async def browser_press_key(self, key: str):
@@ -241,6 +241,7 @@ class AsyncPlaywright(Tool):
             "screenshot": screenshot,
         }
 
+    @property
     def actions(self) -> list[ActionSchema]:
         return [ActionSchema.from_function(fn) for fn in self._actions.values()]
 
