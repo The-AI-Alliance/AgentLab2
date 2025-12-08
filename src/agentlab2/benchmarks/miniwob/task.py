@@ -70,7 +70,7 @@ class MiniWobTask(Task):
         if teardown_js:
             self._env.evaluate_js(teardown_js)
 
-    def validate_step(self, action: Action, obs: Observation) -> dict:
+    def validate_step(self, *args, **kwargs) -> dict:
         """
         Validate the task, either per step or at the end.
 
@@ -78,13 +78,16 @@ class MiniWobTask(Task):
             reward: float, the reward obtained.
             info: dict, custom information from the validation.
         """
-        validate_js = self._get_step_validate_js() if self.validate_per_step else self._get_task_validate_js()
+        validate_js = self._get_step_validate_js()
         validate_result = self._env.evaluate_js(validate_js)
         reward, info = self._parse_validation_result(validate_result)
         return {"reward": reward, **info}
 
-    def validate(self, trace: Any) -> dict:
-        return {}
+    def validate(self, *args, **kwargs) -> dict:
+        validate_js = self._get_task_validate_js()
+        validate_result = self._env.evaluate_js(validate_js)
+        reward, info = self._parse_validation_result(validate_result)
+        return {"reward": reward, **info}
 
     def _get_setup_js(self) -> str:
         if self.remove_human_display:

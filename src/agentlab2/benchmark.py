@@ -8,7 +8,7 @@ class Task(BaseModel):
     """Represents a task that an agent must complete in an environment."""
 
     id: str
-    evaluate_per_step: bool = False
+    validate_per_step: bool = False
 
     def setup(self, environment: Environment) -> tuple[Observation, dict]:
         """
