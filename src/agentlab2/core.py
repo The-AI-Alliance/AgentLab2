@@ -22,7 +22,7 @@ class ActionSchema(BaseModel):
 
     name: str
     description: str
-    parameters: dict
+    parameters: dict = Field(default_factory=dict)
 
     @classmethod
     def from_function(cls, func: Callable) -> Self:

@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import random
@@ -9,7 +10,6 @@ from random import shuffle
 from typing import Any, TextIO
 
 from agentlab2.benchmark import Benchmark
-from agentlab2.benchmarks.miniwob.all_tasks import ALL_MINIWOB_TASKS
 from agentlab2.benchmarks.miniwob.task import MiniWobTask
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ class MiniWobBenchmark(Benchmark):
         "task_cls": MiniWobTask.__name__,
     }
     dataset_dir: str = "./data/miniwob-plusplus"
-    base_url: str = "http://localhost:8000/miniwob"
+    port: int = 8000
     remove_human_display: bool = True
     episode_max_time: int = 1000000
     shuffle: bool = True
@@ -39,18 +39,29 @@ class MiniWobBenchmark(Benchmark):
         super().model_post_init(context)
         self.tasks = [
             MiniWobTask(
-                id=task.subdomain,
-                desc=task.desc,
-                subdomain=task.subdomain,
+                id=task["subdomain"],
+                desc=task["desc"],
+                subdomain=task["subdomain"],
                 base_url=self.base_url,
                 remove_human_display=self.remove_human_display,
                 episode_max_time=self.episode_max_time,
             )
-            for task in ALL_MINIWOB_TASKS
+            for task in self.load_task_infos()
         ]
         if self.shuffle:
             random.seed(self.shuffle_seed)
             shuffle(self.tasks)
+
+    def load_task_infos(self) -> list[dict]:
+        _module_dir = os.path.dirname(os.path.abspath(__file__))
+        _tasks_file = os.path.join(_module_dir, "miniwob_tasks.json")
+        with open(_tasks_file) as f:
+            task_infos = json.load(f)
+        return task_infos
+
+    @property
+    def base_url(self) -> str:
+        return f"http://localhost:{self.port}/miniwob"
 
     def setup(self):
         html_path = os.path.join(self.dataset_dir, "miniwob", "html")
@@ -58,7 +69,7 @@ class MiniWobBenchmark(Benchmark):
         self._stdout_file = open(os.path.join(tmp_dir, "miniwob_server_stdout.log"), "w")
         self._stderr_file = open(os.path.join(tmp_dir, "miniwob_server_stderr.log"), "w")
         self._server_process = subprocess.Popen(
-            ["python", "-m", "http.server", "8000"],
+            ["python", "-m", "http.server", str(self.port)],
             cwd=html_path,
             stdout=self._stdout_file,
             stderr=self._stderr_file,
