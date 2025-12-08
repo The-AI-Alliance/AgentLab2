@@ -5,13 +5,12 @@ import pprint
 from functools import partial
 from typing import Any, Callable, Dict, List, Literal, Optional
 
-from PIL import Image
 from litellm import Message, completion
 from litellm.utils import token_counter
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from agentlab2.core import Action, ActionSchema, Observation
-from agentlab2.utils import image_to_png_base64_url
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +55,7 @@ class Prompt(BaseModel):
 
     def __str__(self) -> str:
         """Debug view of the prompt."""
-        messages = "\n".join([f">>{m}"[:400] for m in self.messages])
+        messages = "\n".join([f"[{i}]{m}" for i, m in enumerate(self.messages)])
         tools = pprint.pformat(self.tools, width=120)
         return f"Tools:\n{tools}\nMessages[{len(self.messages)}]:\n{messages}"
 

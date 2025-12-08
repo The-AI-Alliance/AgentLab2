@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 import subprocess
 import tempfile
 import time
@@ -25,6 +26,7 @@ class MiniWobBenchmark(Benchmark):
     remove_human_display: bool = True
     episode_max_time: int = 1000000
     shuffle: bool = True
+    shuffle_seed: int = 42
 
     # Runtime state (not serialized)
     _server_process: subprocess.Popen | None = None
@@ -47,6 +49,7 @@ class MiniWobBenchmark(Benchmark):
             for task in ALL_MINIWOB_TASKS
         ]
         if self.shuffle:
+            random.seed(self.shuffle_seed)
             shuffle(self.tasks)
 
     def setup(self):
