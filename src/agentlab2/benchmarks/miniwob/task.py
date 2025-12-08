@@ -1,8 +1,12 @@
+import logging
 from typing import Any, ClassVar
 
 from agentlab2.benchmark import Task
+from agentlab2.core import Action, Content, Observation
 from agentlab2.envs.browser import BrowserEnv
 from agentlab2.utils import prune_html
+
+logger = logging.getLogger(__name__)
 
 
 class MiniWobTask(Task):
@@ -31,7 +35,7 @@ class MiniWobTask(Task):
             self.base_url = self.base_url[:-1]
         self.url = f"{self.base_url}/{self.subdomain}.html"
 
-    def setup(self, env: BrowserEnv) -> tuple[str, dict]:
+    def setup(self, env: BrowserEnv) -> tuple[Observation, dict]:
         """
         Set up everything needed to execute the task.
 
@@ -42,12 +46,15 @@ class MiniWobTask(Task):
             goal: str, goal of the task.
             info: dict, custom information from the task.
         """
+        logger.info(f"Setting up MiniWob task {self.id} at {self.url}")
         env.goto(self.url)
         setup_js = self._get_setup_js()
         setup_result = env.evaluate_js(setup_js)
         goal, info = self._parse_setup_result(setup_result)
         self._env = env
-        return goal, info
+        obs = env.step([Action(name="noop")])
+        obs.contents["goal"] = Content(data=goal)
+        return obs, info
 
     def teardown(self) -> None:
         """

@@ -62,3 +62,10 @@ class Benchmark(BaseModel):
 
     metadata: dict = Field(default_factory=dict)
     tasks: list[Task] = Field(default_factory=list)
+
+    def prepare(self):
+        """
+        Perform common steps necessary to prepare the environment for all tasks,
+        like running web server, launching containers, etc.
+        """
+        raise NotImplementedError

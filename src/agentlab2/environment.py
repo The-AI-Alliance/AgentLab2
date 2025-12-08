@@ -19,9 +19,9 @@ class Tool:
         """Returns list of actions supported by that environment."""
         return []
 
-    def step(self, action: Action) -> Observation:
-        """Execute a single action and return the observation."""
-        raise NotImplementedError("Subclasses must implement step()")
+    def execute_action(self, action: Action) -> str:
+        """Execute a single action and return the result."""
+        raise NotImplementedError
 
     def close(self) -> None:
         """Clean up environment resources."""

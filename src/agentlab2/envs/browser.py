@@ -34,9 +34,15 @@ class BrowserEnv(Environment):
     def step(self, actions):
         if not actions:
             raise ValueError("No actions provided for BrowserEnv step.")
-        action = actions[0]
-        observation = self.browser_tool.step(action)
-        return observation
+        action_results: list[str] = []
+        for action in actions:
+            result = self.browser_tool.execute_action(action)
+            action_results.append(result)
+        if len(action_results) == 1:
+            action_result = action_results[0]
+        else:
+            action_result = "; ".join(f"{a.name}: {r}" for a, r in zip(actions, action_results))
+        return self.browser_tool.page_obs(action_result)
 
     def goto(self, url: str):
         self.browser_tool.goto(url)

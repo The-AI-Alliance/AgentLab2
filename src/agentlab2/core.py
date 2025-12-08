@@ -1,11 +1,8 @@
 import uuid
-from typing import Any, Callable, Dict, List, Literal, Self
+from typing import Any, Callable, Dict, List, Literal, Optional, Self
 
 import litellm.utils
 from pydantic import BaseModel, Field
-
-from agentlab2.llm import LLMMessage, LLMOutput
-from agentlab2.utils import image_to_png_base64_url
 
 
 class ActionSchema(BaseModel):
@@ -56,7 +53,6 @@ class Content(BaseModel):
     """Represents a piece of content in an observation."""
 
     type: str = "text/plain"  # e.g., "text/plain", "image/png"
-    name: str = ""  # optional name of the content
     data: Any  # The actual content data
 
 
@@ -68,35 +64,23 @@ class Observation(BaseModel):
     metadata: dict = Field(default_factory=dict)
     reward_info: dict = Field(default_factory=dict)
 
-    def to_messages(self) -> List[LLMMessage]:
-        """Convert observation to a list of messages suitable for sending to LLM."""
 
-        messages = []
-        for content in self.contents.values():
-            if not self.tool_call_id:
-                message = LLMMessage(role="user", content=str(content.data))
-            elif content.type in ["image/png", "image/jpeg"]:
-                img_dict = {"type": "image_url", "image_url": {"url": image_to_png_base64_url(content.data)}}
-                message = LLMMessage(
-                    role="user",
-                    content=[img_dict],
-                    tool_call_id=self.tool_call_id,
-                )
-            else:
-                message = LLMMessage(
-                    role="tool",
-                    content=str(content.data),
-                    tool_call_id=self.tool_call_id,
-                )
-            messages.append(message)
-        return messages
+class AgentOutput(BaseModel):
+    """AgentOutput represents the output from LLM."""
+
+    text: str
+    actions: List[Action] = Field(default_factory=list)
+    thoughts: List[str] = Field(default_factory=list)
+    tokens: List[int] = Field(default_factory=list)
+    logprobs: List[float] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
 
 
 class TraceStep(BaseModel):
     """A single step in the trace, consisting of an action or an observation."""
 
-    observation: Observation | None = None
-    llm_output: LLMOutput | None = None
+    observation: Optional[Observation] = None
+    llm_output: Optional[AgentOutput] = None
 
 
 class Trace(BaseModel):
