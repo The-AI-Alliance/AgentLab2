@@ -49,6 +49,7 @@ class Experiment(BaseModel):
                 self.save_traces(traces)
             return traces
         finally:
+            ray.shutdown()
             self.benchmark.close()
 
     def run_sequential(self, save_results: bool = True, debug_limit: int | None = None) -> list[Trace]:

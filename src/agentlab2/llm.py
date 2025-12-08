@@ -57,8 +57,8 @@ class LLM(BaseModel):
 
     model_name: str
     temperature: float = 1.0
-    max_total_tokens: int = 128000
-    max_new_tokens: int = 8192
+    max_tokens: int = 128000
+    max_completion_tokens: int = 8192
     reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
     tool_choice: Literal["auto", "none", "required"] = "auto"
     parallel_tool_calls: bool = False
@@ -68,8 +68,8 @@ class LLM(BaseModel):
         response = completion(
             model=self.model_name,
             temperature=self.temperature,
-            max_tokens=self.max_total_tokens,
-            max_completion_tokens=self.max_new_tokens,
+            max_tokens=self.max_tokens,
+            max_completion_tokens=self.max_completion_tokens,
             reasoning_effort=self.reasoning_effort,
             max_retries=self.max_retries,
             tool_choice=self.tool_choice,

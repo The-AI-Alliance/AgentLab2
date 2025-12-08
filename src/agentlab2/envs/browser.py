@@ -14,11 +14,6 @@ class BrowserEnvConfig(EnvironmentConfig):
         return BrowserEnv(self)
 
 
-def final_step():
-    """Stop the task execution."""
-    pass
-
-
 class BrowserEnv(Environment):
     """Environment that uses just a single tool, playwright browser, to interact with web pages."""
 
@@ -36,7 +31,8 @@ class BrowserEnv(Environment):
 
     @property
     def actions(self):
-        return self.browser_tool.actions + [ActionSchema.from_function(final_step)]
+        final_step_action = ActionSchema(name="final_step", description="Stop the task execution.")
+        return self.browser_tool.actions + [final_step_action]
 
     def step(self, action: Action):
         if action.name == "final_step":

@@ -18,6 +18,7 @@ class AgentRun(BaseModel):
     agent_config: AgentConfig
     env_config: EnvironmentConfig
     task: Task
+    max_steps: int = 1000  # system-wide upper limit on steps
 
     def run(self) -> Trace:
         """
@@ -48,7 +49,7 @@ class AgentRun(BaseModel):
             metadata={"task_id": self.task.id, "task_info": task_info},
         )
         steps = 0
-        while not self.task.finished(steps) and not agent.finished() and not env.finished():
+        while not self.task.finished(steps) and not agent.finished() and not env.finished() and steps < self.max_steps:
             agent_output = agent.step(obs)
             steps += 1
             logger.info(colored(f"Step {steps} Agent output: {agent_output.model_dump_json(indent=2)}", "magenta"))
