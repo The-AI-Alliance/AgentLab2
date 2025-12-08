@@ -39,20 +39,31 @@ class Experiment(BaseModel):
 
         if not ray.is_initialized():
             ray.init(num_cpus=n_cpus)
-        runs = self.create_runs()
-        futures = [run_single.remote(run) for run in runs]
-        traces = ray.get(futures)
-        if save_results:
-            self.save_traces(traces)
-        return traces
 
-    def run_sequential(self, save_results: bool = True) -> list[Trace]:
-        self.benchmark.prepare()  # initialize tasks
-        runs = self.create_runs()
-        traces = [run.run() for run in runs]
-        if save_results:
-            self.save_traces(traces)
-        return traces
+        self.benchmark.setup()
+        try:
+            runs = self.create_runs()
+            futures = [run_single.remote(run) for run in runs]
+            traces = ray.get(futures)
+            if save_results:
+                self.save_traces(traces)
+            return traces
+        finally:
+            self.benchmark.close()
+
+    def run_sequential(self, save_results: bool = True, debug_limit: int | None = None) -> list[Trace]:
+        self.benchmark.setup()
+        try:
+            runs = self.create_runs()
+            if debug_limit is not None:
+                logger.info(f"Running only first {debug_limit} runs")
+                runs = runs[:debug_limit]
+            traces = [run.run() for run in runs]
+            if save_results:
+                self.save_traces(traces)
+            return traces
+        finally:
+            self.benchmark.close()
 
     def save_traces(self, traces: list[Trace]) -> None:
         os.makedirs(self.output_dir, exist_ok=True)

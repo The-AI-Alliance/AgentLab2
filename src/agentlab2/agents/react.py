@@ -88,9 +88,9 @@ class ReactAgent(Agent):
         ]
         prompt = Prompt(messages=messages, tools=self.actions)
         try:
-            logger.info(f"Prompt: {prompt}")
+            logger.debug(f"Prompt: {prompt}")
             output = self.llm(prompt)
-            logger.info(f"LLM Response: {output}")
+            logger.debug(f"LLM Response: {output}")
         except Exception as e:
             logger.exception(f"Error getting LLM response: {e}. Prompt: {prompt}")
             raise e

@@ -40,32 +40,33 @@ class AgentRun(BaseModel):
         agent = self.agent_config.make(actions=env.actions)
         agent.reset()
         obs, task_info = self.task.setup(env)
-        logger.info(f"Initial observation: {obs}")
+        logger.info(f"\033[94mInitial observation: {obs.model_dump_json(indent=2)}\033[0m")  # blue color
         logger.info(f"Task info: {task_info}")
         trace = Trace(
             steps=[TraceStep(observation=obs)],
             metadata={"task_id": self.task.id, "task_info": task_info},
         )
         steps = 0
-        while not self.task.finished() and not agent.finished():
+        while not self.task.finished(steps) and not agent.finished():
             agent_output = agent.step(obs)
             steps += 1
-            logger.info(f"Step {steps} Agent output: {agent_output}")
+            logger.info(
+                f"\033[95mStep {steps} Agent output: {agent_output.model_dump_json(indent=2)}\033[0m"
+            )  # magenta color
             trace.steps.append(TraceStep(agent_output=agent_output))
             actions = self._actions_from_output(agent_output)
             # TODO: support parallel actions if the environment allows it
             for action in actions:
                 obs = env.step(action)
                 obs = self.task.obs_postprocess(obs)
-                logger.info(f"Step {steps} Observation: {obs}")
+                logger.info(f"\033[94mStep {steps} Observation: {obs.model_dump_json(indent=2)}\033[0m")  # blue color
                 if self.task.evaluate_per_step:
-                    reward_info = self.task.validate_step(actions, obs)
+                    reward_info = self.task.validate_step(action, obs)
                 else:
                     reward_info = {}
                 trace.steps.append(TraceStep(observation=obs, reward_info=reward_info))
-
         trace.reward_info = self.task.validate(trace)
-        self.task.teardown(env)
+        self.task.teardown()
         return trace
 
     def _actions_from_output(self, agent_output: AgentOutput) -> list[Action]:

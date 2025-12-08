@@ -28,7 +28,7 @@ def main():
         agent_config=agent_config,
         benchmark=benchmark,
     )
-    exp.run_sequential(save_results=True)
+    exp.run_sequential(save_results=True, debug_limit=1)
 
 
 if __name__ == "__main__":

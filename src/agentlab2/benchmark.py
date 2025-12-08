@@ -19,7 +19,7 @@ class Task(BaseModel):
         """
         raise NotImplementedError
 
-    def teardown(self, environment: Environment) -> None:
+    def teardown(self) -> None:
         """Optional clean up after task completion."""
         pass
 
@@ -27,11 +27,7 @@ class Task(BaseModel):
         """Validate the whole trace and state of the env at the end of the run."""
         raise NotImplementedError
 
-    def validate_step(
-        self,
-        actions: list[Action],
-        observation: Observation,
-    ) -> dict:
+    def validate_step(self, action: Action, observation: Observation) -> dict:
         """
         If evaluate_per_step=True this will be called to produce reward for each step.
         Updates observation.reward_info in-place.
@@ -51,7 +47,7 @@ class Task(BaseModel):
     def obs_postprocess(self, obs: Observation) -> Observation:
         return obs
 
-    def finished(self) -> bool:
+    def finished(self, steps: int) -> bool:
         """Check if the task is finished."""
         return False
 
@@ -62,9 +58,16 @@ class Benchmark(BaseModel):
     metadata: dict = Field(default_factory=dict)
     tasks: list[Task] = Field(default_factory=list)
 
-    def prepare(self):
+    def setup(self):
         """
         Perform common steps necessary to prepare the environment for all tasks,
         like running web server, launching containers, etc.
         """
-        raise NotImplementedError
+        pass
+
+    def close(self):
+        """
+        Clean up resources after all tasks are done.
+        Called automatically by Experiment
+        """
+        pass
