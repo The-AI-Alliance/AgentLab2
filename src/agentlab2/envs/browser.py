@@ -1,3 +1,4 @@
+from agentlab2.core import Action
 from agentlab2.environment import Environment, EnvironmentConfig
 from agentlab2.tools.playwright import SyncPlaywrightTool
 
@@ -31,18 +32,9 @@ class BrowserEnv(Environment):
     def actions(self):
         return self.browser_tool.actions
 
-    def step(self, actions):
-        if not actions:
-            raise ValueError("No actions provided for BrowserEnv step.")
-        action_results: list[str] = []
-        for action in actions:
-            result = self.browser_tool.execute_action(action)
-            action_results.append(result)
-        if len(action_results) == 1:
-            action_result = action_results[0]
-        else:
-            action_result = "; ".join(f"{a.name}: {r}" for a, r in zip(actions, action_results))
-        return self.browser_tool.page_obs(action_result)
+    def step(self, action: Action):
+        action_result = self.browser_tool.execute_action(action)
+        return self.browser_tool.page_obs(action.id, action_result)
 
     def goto(self, url: str):
         self.browser_tool.goto(url)
