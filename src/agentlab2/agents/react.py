@@ -1,7 +1,7 @@
 import logging
 
 from agentlab2.agent import Agent, AgentConfig
-from agentlab2.core import Action, ActionSchema, AgentOutput, Observation
+from agentlab2.core import ActionSchema, AgentOutput, Observation
 from agentlab2.llm import LLM, LLMMessage, Prompt, obs_to_messages
 
 logger = logging.getLogger(__name__)
@@ -88,15 +88,15 @@ class ReactAgent(Agent):
         ]
         prompt = Prompt(messages=messages, tools=self.actions)
         try:
-            logger.info(f"Prompt:\n{prompt}")
-            response = self.llm(prompt)
-            logger.info(f"LLM Response:\n{response}")
+            logger.info(f"Prompt: {prompt}")
+            output = self.llm(prompt)
+            logger.info(f"LLM Response: {output}")
         except Exception as e:
             logger.exception(f"Error getting LLM response: {e}. Prompt: {prompt}")
             raise e
 
-        self.history.append(response)
-        return response
+        self.history.append(output)
+        return output
 
     def max_actions_reached(self) -> bool:
         prev_actions = [msg for msg in self.history if isinstance(msg, AgentOutput) and msg.tool_calls]
@@ -125,12 +125,12 @@ class ReactAgent(Agent):
         ]
         prompt = Prompt(messages=messages)
         try:
-            response = self.llm(prompt)
+            llm_message = self.llm(prompt)
         except Exception as e:
             logger.exception(f"Error compacting history: {e}")
             raise
 
-        summary = response.text
+        summary = llm_message.content
         logger.info(f"Compacted {midpoint} messages into summary:\n{summary}")
         # Rebuild history: system + summary + remaining messages
         summary_message = LLMMessage(role="assistant", content=f"## Previous Interactions summary:\n{summary}")

@@ -1,5 +1,6 @@
 """LLM interaction abstractions, LiteLLM based."""
 
+import logging
 import pprint
 from functools import partial
 from typing import Any, Callable, Dict, List, Literal, Optional
@@ -10,6 +11,8 @@ from pydantic import BaseModel, Field
 
 from agentlab2.core import Action, ActionSchema, Observation
 from agentlab2.utils import image_to_png_base64_url
+
+logger = logging.getLogger(__name__)
 
 
 class LLMMessage(BaseModel):
@@ -30,7 +33,10 @@ class Prompt(BaseModel):
 
     def message_dicts(self) -> List[Dict[str, Any] | Message]:
         """Convert messages to a list of dictionaries."""
-        return [message.model_dump() if isinstance(message, LLMMessage) else message for message in self.messages]
+        return [
+            message.model_dump(exclude_none=True) if isinstance(message, LLMMessage) else message
+            for message in self.messages
+        ]
 
     def tool_dicts(self) -> List[Dict[str, Any]]:
         """Convert tools to a list of dictionaries."""
@@ -49,9 +55,9 @@ class Prompt(BaseModel):
 
     def __str__(self) -> str:
         """Debug view of the prompt."""
-        messages = pprint.pformat([str(m)[:500] for m in self.messages], width=120)
+        messages = pprint.pformat([str(m)[:300] for m in self.messages], width=120)
         tools = pprint.pformat(self.tools, width=120)
-        return f"Tools:\n{tools}\n\nMessages:\n{messages}"
+        return f"Tools:\n{tools}\nMessages[{len(self.messages)}]:\n{messages}"
 
 
 class LLM(BaseModel):
@@ -64,7 +70,7 @@ class LLM(BaseModel):
     reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
     tool_choice: Literal["auto", "none", "all"] = "auto"
     parallel_tool_calls: bool = False
-    num_retries: int = 3
+    max_retries: int = 3
 
     def __call__(self, prompt: Prompt) -> Message:
         response = completion(
@@ -73,7 +79,7 @@ class LLM(BaseModel):
             max_tokens=self.max_total_tokens,
             max_completion_tokens=self.max_new_tokens,
             reasoning_effort=self.reasoning_effort,
-            num_retries=self.num_retries,
+            max_retries=self.max_retries,
             tool_choice=self.tool_choice,
             parallel_tool_calls=self.parallel_tool_calls,
             tools=prompt.tool_dicts(),
@@ -91,21 +97,23 @@ def obs_to_messages(obs: Observation) -> List[LLMMessage]:
     """Convert observation to a list of messages suitable for sending to LLM."""
 
     messages = []
-    for content in obs.contents.values():
-        if not obs.tool_call_id:
-            message = LLMMessage(role="user", content=str(content.data))
-        elif content.type.startswith("image/"):
-            img_dict = {"type": "image_url", "image_url": {"url": image_to_png_base64_url(content.data)}}
-            message = LLMMessage(
-                role="user",
-                content=[img_dict],
-                tool_call_id=obs.tool_call_id,
-            )
-        else:
-            message = LLMMessage(
-                role="tool",
-                content=str(content.data),
-                tool_call_id=obs.tool_call_id,
-            )
+    images = {k: v for k, v in obs.contents.items() if v.type.startswith("image/")}
+    non_images = {k: v for k, v in obs.contents.items() if k not in images}
+    for name, content in non_images.items():
+        message = LLMMessage(
+            role="tool" if obs.tool_call_id else "user",
+            content=f"##{name}\n{content.data}",
+            tool_call_id=obs.tool_call_id,
+        )
+        messages.append(message)
+    for name, content in images.items():
+        message = LLMMessage(
+            role="user",
+            content=[
+                {"type": "text", "text": name},
+                {"type": "image_url", "image_url": {"url": image_to_png_base64_url(content.data)}},
+            ],
+            tool_call_id=obs.tool_call_id,
+        )
         messages.append(message)
     return messages

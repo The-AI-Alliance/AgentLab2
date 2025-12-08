@@ -1,6 +1,6 @@
 """Environment, Benchmark and Task abstractions."""
 
-from typing import List
+from typing import Any, List
 
 from pydantic import BaseModel
 
@@ -19,7 +19,7 @@ class Tool:
         """Returns list of actions supported by that environment."""
         return []
 
-    def execute_action(self, action: Action) -> str:
+    def execute_action(self, action: Action) -> Any:
         """Execute a single action and return the result."""
         raise NotImplementedError
 
@@ -47,7 +47,7 @@ class Environment:
         """Returns list of actions supported by that environment."""
         return []
 
-    def step(self, actions: list[Action]) -> Observation:
+    def step(self, action: Action) -> Observation:
         """Execute a single action and return the observation."""
         raise NotImplementedError("Subclasses must implement step()")
 

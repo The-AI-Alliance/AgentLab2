@@ -2,6 +2,7 @@ import asyncio
 import logging
 import time
 from io import BytesIO
+from typing import Any
 
 from PIL import Image
 from playwright.async_api import Page as AsyncPage
@@ -113,7 +114,7 @@ class SyncPlaywrightTool(Tool):
         axtree = self._page.accessibility.snapshot()
         return flatten_axtree(axtree)
 
-    def page_obs(self, action_result: str | None) -> Observation:
+    def page_obs(self, tool_call_id: str, action_result: str | None) -> Observation:
         html = self.page_html()
         screenshot = self.page_screenshot()
         axtree = self.page_axtree()
@@ -122,21 +123,20 @@ class SyncPlaywrightTool(Tool):
                 "html": Content(data=html),
                 "axtree_txt": Content(data=axtree),
                 "screenshot": Content(data=screenshot, type="image/png"),
-            }
+            },
+            tool_call_id=tool_call_id,
         )
         if action_result is not None:
             obs.contents["action_result"] = Content(data=action_result)
         return obs
 
-    def execute_action(self, action: Action) -> str:
+    def execute_action(self, action: Action) -> Any:
         fn = self._actions[action.name]
         try:
             action_result = fn(**action.arguments)
         except Exception as e:
             action_result = f"Error executing action {action.name}: {e}"
             logger.exception(action_result)
-        if action_result is None:
-            action_result = "Success"
         return action_result
 
     @property
@@ -247,26 +247,14 @@ class AsyncPlaywrightTool(Tool):
         axtree = await self._page.accessibility.snapshot()
         return flatten_axtree(axtree)
 
-    async def execute_action(self, action: Action) -> Observation:
+    async def execute_action(self, action: Action) -> Any:
         fn = self._actions[action.name]
         try:
             action_result = await fn(**action.arguments)
         except Exception as e:
             action_result = f"Error executing action {action.name}: {e}"
             logger.exception(action_result)
-        if action_result is None:
-            action_result = "Success"
-        html = await self.page_html()
-        screenshot = await self.page_screenshot()
-        axtree = await self.page_axtree()
-        return Observation(
-            contents={
-                "action_result": Content(data=str(action_result)),
-                "html": Content(data=html),
-                "axtree_txt": Content(data=axtree),
-                "screenshot": Content(data=screenshot, type="image/png"),
-            }
-        )
+        return action_result
 
     @property
     def actions(self) -> list[ActionSchema]:

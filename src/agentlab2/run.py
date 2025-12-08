@@ -52,12 +52,13 @@ class AgentRun(BaseModel):
             steps += 1
             logger.info(f"Step {steps} Agent output: {agent_output}")
             trace.steps.append(TraceStep(agent_output=agent_output))
-            if actions := self._actions_from_output(agent_output):
-                obs = env.step(actions)
+            actions = self._actions_from_output(agent_output)
+            # TODO: support parallel actions if the environment allows it
+            for action in actions:
+                obs = env.step(action)
                 obs = self.task.obs_postprocess(obs)
                 logger.info(f"Step {steps} Observation: {obs}")
                 if self.task.evaluate_per_step:
-                    # validator will update obs.reward_info in-place
                     reward_info = self.task.validate_step(actions, obs)
                 else:
                     reward_info = {}

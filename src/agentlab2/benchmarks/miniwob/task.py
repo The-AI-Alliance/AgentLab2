@@ -52,8 +52,9 @@ class MiniWobTask(Task):
         setup_result = env.evaluate_js(setup_js)
         goal, info = self._parse_setup_result(setup_result)
         self._env = env
-        obs = env.step([Action(name="noop")])
+        obs = env.step(Action(name="noop"))
         obs.contents["goal"] = Content(data=goal)
+        obs.tool_call_id = None
         obs = self.obs_postprocess(obs)
         return obs, info
 

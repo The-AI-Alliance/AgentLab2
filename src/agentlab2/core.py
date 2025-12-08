@@ -39,7 +39,7 @@ class Action(BaseModel):
         arguments (Any): The arguments to be passed to the function.
     """
 
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    id: str | None = None
     name: str
     arguments: Dict[str, Any] = Field(default_factory=dict)
 
@@ -56,8 +56,6 @@ class Observation(BaseModel):
 
     tool_call_id: str | None = None  # first observation may not be linked to any tool call
     contents: dict[str, Content]
-    metadata: dict = Field(default_factory=dict)
-    reward_info: dict = Field(default_factory=dict)
 
 
 AgentOutput = Message
