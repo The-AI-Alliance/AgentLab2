@@ -57,7 +57,7 @@ class ReactAgent(Agent):
         self.llm = config.llm
         self.tools: list[dict] = [tool.schema() for tool in tools]
         if config.llm_can_finish:
-            pass
+            self.tools.append(ToolSchema(name="final_step", description="Stop the task execution.").schema())
 
         self.history: list[dict | Message] = []
         self._finished: bool = False

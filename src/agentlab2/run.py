@@ -25,10 +25,10 @@ class AgentRun(BaseModel):
         Returns:
             Trace containing the full history of the run.
         """
-        env = self.env_config.make()
-        agent = self.agent_config.make(actions=env.actions)
+        env = self.env_config.make(self.task)
+        agent = self.agent_config.make(actions=env.actions())
         try:
-            env_output = env.setup(self.task)
+            env_output = env.setup()
             logger.info(colored(f"Initial env output: {env_output}", "blue"))
             trajectory = Trajectory(steps=[env_output], metadata={"task_id": self.task.id})
             steps = 0
