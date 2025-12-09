@@ -14,9 +14,9 @@ class BrowserEnvConfig(EnvironmentConfig):
     prune_html: bool = True
     pw_kwargs: dict = {}
 
-    def make(self, task: Task) -> "BrowserEnv":
+    def make(self) -> "BrowserEnv":
         """Create a BrowserEnv instance from the configuration for specified task."""
-        return BrowserEnv(self, task)
+        return BrowserEnv(self)
 
 
 class BrowserEnv(Environment):
@@ -24,8 +24,8 @@ class BrowserEnv(Environment):
 
     metadata: dict = {"tools": ["SyncPlaywrightTool"]}
 
-    def __init__(self, config: BrowserEnvConfig, task: Task):
-        super().__init__(task)
+    def __init__(self, config: BrowserEnvConfig):
+        super().__init__()
         self.config = config
         self.browser_tool = SyncPlaywrightTool(
             headless=self.config.headless,
@@ -42,7 +42,8 @@ class BrowserEnv(Environment):
         final_step_action = ToolSchema(name="final_step", description="Stop the task execution.")
         return self.browser_tool.actions + [final_step_action]
 
-    def setup(self) -> EnvironmentOutput:
+    def setup(self, task: Task) -> EnvironmentOutput:
+        self.task = task
         self.browser_tool.reset()
         goal, info = self.task.setup(self)
         obs = self.browser_tool.page_obs()
@@ -51,6 +52,7 @@ class BrowserEnv(Environment):
         return EnvironmentOutput(observation=obs, info=info)
 
     def step(self, action: Action) -> EnvironmentOutput:
+        assert self.task is not None, "Environment step called before setup."
         action_result = self.browser_tool.execute_action(action)
         obs = self.browser_tool.page_obs(action.id, action_result)
         done = self.task.finished()
@@ -69,4 +71,6 @@ class BrowserEnv(Environment):
         return self.browser_tool.evaluate_js(script)
 
     def close(self):
+        if self.task is not None:
+            self.task.teardown()
         self.browser_tool.close()
