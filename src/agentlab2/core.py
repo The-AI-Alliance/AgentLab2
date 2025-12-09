@@ -119,7 +119,15 @@ class Trajectory(BaseModel):
 
     steps: List[EnvironmentOutput | AgentOutput] = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)
-    reward_info: dict = Field(default_factory=dict)
 
     def append(self, item: EnvironmentOutput | AgentOutput) -> None:
         self.steps.append(item)
+
+    def last_env_step(self) -> EnvironmentOutput:
+        for step in reversed(self.steps):
+            if isinstance(step, EnvironmentOutput):
+                return step
+        raise ValueError("No EnvironmentOutput found in the trajectory.")
+
+    def final_reward(self) -> float | None:
+        return self.last_env_step().reward

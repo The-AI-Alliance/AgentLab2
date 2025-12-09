@@ -2,14 +2,14 @@ from abc import ABC, abstractmethod
 
 from pydantic import BaseModel, Field
 
-from agentlab2.environment import Task
+from agentlab2.environment import EnvironmentConfig, Task
 
 
 class Benchmark(BaseModel, ABC):
     """Represents a benchmark consisting of multiple tasks and an environment."""
 
     metadata: dict = Field(default_factory=dict)
-    tasks: list[Task] = Field(default_factory=list)
+    env_config: EnvironmentConfig
 
     @abstractmethod
     def setup(self):
@@ -25,4 +25,9 @@ class Benchmark(BaseModel, ABC):
         Clean up resources after all tasks are done.
         Called automatically by Experiment
         """
+        pass
+
+    @abstractmethod
+    def tasks(self) -> list[Task]:
+        """Return the list of tasks in this benchmark."""
         pass
