@@ -30,7 +30,7 @@ class ToolSchema(BaseModel):
         schema = litellm.utils.function_to_dict(func)
         return cls(**schema)
 
-    def schema(self) -> dict[str, Any]:
+    def to_tool_schema(self) -> dict[str, Any]:
         """Produce dict that could be passed as tool schema into LLM api."""
         return {
             "type": "function",
