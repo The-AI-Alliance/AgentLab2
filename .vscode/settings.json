@@ -8,5 +8,8 @@
     "notebook.defaultFormatter": "charliermarsh.ruff",
     "python.analysis.languageServerMode": "full",
     "python.analysis.typeCheckingMode": "standard", 
-    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+    "python.analysis.extraPaths": [
+      "./src"
+    ],
 }
