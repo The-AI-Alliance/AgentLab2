@@ -1,4 +1,4 @@
-from agentlab2.core import Action, Content, EnvironmentOutput, ToolSchema
+from agentlab2.core import Action, Content, EnvironmentOutput
 from agentlab2.environment import Environment, EnvironmentConfig, Task
 from agentlab2.tools.playwright import SyncPlaywrightTool
 
@@ -14,9 +14,9 @@ class BrowserEnvConfig(EnvironmentConfig):
     prune_html: bool = True
     pw_kwargs: dict = {}
 
-    def make(self) -> "BrowserEnv":
+    def make(self, task: Task) -> "BrowserEnv":
         """Create a BrowserEnv instance from the configuration for specified task."""
-        return BrowserEnv(self)
+        return BrowserEnv(self, task)
 
 
 class BrowserEnv(Environment):
@@ -24,8 +24,8 @@ class BrowserEnv(Environment):
 
     metadata: dict = {"tools": ["SyncPlaywrightTool"]}
 
-    def __init__(self, config: BrowserEnvConfig):
-        super().__init__()
+    def __init__(self, config: BrowserEnvConfig, task: Task):
+        self.task = task
         self.config = config
         self.browser_tool = SyncPlaywrightTool(
             headless=self.config.headless,
@@ -37,13 +37,10 @@ class BrowserEnv(Environment):
             **self.config.pw_kwargs,
         )
 
-    @property
     def actions(self):
-        final_step_action = ToolSchema(name="final_step", description="Stop the task execution.")
-        return self.browser_tool.actions + [final_step_action]
+        return self.task.filter_actions(self.browser_tool.actions)
 
-    def setup(self, task: Task) -> EnvironmentOutput:
-        self.task = task
+    def setup(self) -> EnvironmentOutput:
         self.browser_tool.reset()
         goal, info = self.task.setup(self)
         obs = self.browser_tool.page_obs()
@@ -52,7 +49,6 @@ class BrowserEnv(Environment):
         return EnvironmentOutput(observation=obs, info=info)
 
     def step(self, action: Action) -> EnvironmentOutput:
-        assert self.task is not None, "Environment step called before setup."
         action_result = self.browser_tool.execute_action(action)
         obs = self.browser_tool.page_obs(action.id, action_result)
         done = self.task.finished()
@@ -71,6 +67,5 @@ class BrowserEnv(Environment):
         return self.browser_tool.evaluate_js(script)
 
     def close(self):
-        if self.task is not None:
-            self.task.teardown()
+        self.task.teardown()
         self.browser_tool.close()

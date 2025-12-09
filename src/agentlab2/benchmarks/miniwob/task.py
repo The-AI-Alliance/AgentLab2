@@ -3,7 +3,7 @@ from typing import Any, ClassVar
 
 from PIL import Image
 
-from agentlab2.core import Content, Observation
+from agentlab2.core import Content, Observation, ToolSchema
 from agentlab2.environment import Task
 from agentlab2.envs.browser import BrowserEnv
 
@@ -190,6 +190,11 @@ return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GL
             if isinstance(screenshot.data, Image.Image):
                 obs.contents["screenshot"] = Content(data=screenshot.data.crop((0, 0, 332, 214)))
         return obs
+
+    def filter_actions(self, actions: list[ToolSchema]) -> list[ToolSchema]:
+        filtered = [a for a in actions if a.name in self.actions_whitelist]
+        logger.info(f"Chosen {len(filtered)} out of {len(actions)} actions for MiniWob task.")
+        return filtered
 
     def finished(self) -> bool:
         _, info = self.validate()

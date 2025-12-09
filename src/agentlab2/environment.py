@@ -33,23 +33,22 @@ class EnvironmentConfig(BaseModel, ABC):
     """Configuration for Environment."""
 
     @abstractmethod
-    def make(self) -> "Environment":
+    def make(self, task: "Task") -> "Environment":
         pass
 
 
 class Environment(ABC):
     """Base class for environments that agents interact with."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, task: "Task", *args, **kwargs) -> None:
         super().__init__()
-        self.task: Task | None = None
+        self.task: Task = task
 
     @abstractmethod
-    def setup(self, task: "Task") -> EnvironmentOutput:
+    def setup(self) -> EnvironmentOutput:
         """Set up the environment before starting a task."""
-        self.task = task
+        pass
 
-    @property
     def actions(self) -> List[ToolSchema]:
         """Returns list of actions supported by that environment."""
         return []
@@ -89,9 +88,10 @@ class Task[E: Environment](BaseModel, ABC):
         """Validate the whole trace and state of the env at the end of the run."""
         pass
 
+    @abstractmethod
     def filter_actions(self, actions: list[ToolSchema]) -> list[ToolSchema]:
         """Allows the task to whitelist subset of all the actions provided by the environment."""
-        return actions
+        pass
 
     def cheat(self):
         """
