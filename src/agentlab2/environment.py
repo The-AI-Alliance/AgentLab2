@@ -33,21 +33,21 @@ class EnvironmentConfig(BaseModel, ABC):
     """Configuration for Environment."""
 
     @abstractmethod
-    def make(self, task: "Task") -> "Environment":
+    def make(self) -> "Environment":
         pass
 
 
 class Environment(ABC):
     """Base class for environments that agents interact with."""
 
-    def __init__(self, task: "Task", *args, **kwargs) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         super().__init__()
-        self.task = task
+        self.task: Task | None = None
 
     @abstractmethod
-    def setup(self) -> EnvironmentOutput:
+    def setup(self, task: "Task") -> EnvironmentOutput:
         """Set up the environment before starting a task."""
-        pass
+        self.task = task
 
     @property
     def actions(self) -> List[ToolSchema]:
