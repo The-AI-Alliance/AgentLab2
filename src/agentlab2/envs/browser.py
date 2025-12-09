@@ -46,7 +46,7 @@ class BrowserEnv(Environment):
         obs = self.browser_tool.page_obs()
         obs.contents["goal"] = Content(data=goal)
         obs = self.task.obs_postprocess(obs)
-        return EnvironmentOutput(observation=obs, info=info)
+        return EnvironmentOutput(obs=obs, info=info)
 
     def step(self, action: Action) -> EnvironmentOutput:
         action_result = self.browser_tool.execute_action(action)
@@ -58,7 +58,7 @@ class BrowserEnv(Environment):
             reward, info = self.task.validate(obs, action)
         else:
             reward, info = 0.0, {}
-        return EnvironmentOutput(observation=obs, reward=reward, info=info, done=done)
+        return EnvironmentOutput(obs=obs, reward=reward, info=info, done=done)
 
     def goto(self, url: str):
         self.browser_tool.goto(url)
