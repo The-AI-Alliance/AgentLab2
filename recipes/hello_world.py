@@ -16,7 +16,7 @@ logging.basicConfig(
 def main():
     miniwob_dir = os.path.expanduser("~/miniwob-plusplus")
     llm = LLM(model_name="azure/gpt-5-mini", temperature=1.0)
-    env_config = BrowserEnvConfig(headless=True, timeout=20000, use_html=True, use_screenshot=True)
+    env_config = BrowserEnvConfig(headless=True, timeout=30000, use_html=True, use_screenshot=True)
     agent_config = ReactAgentConfig(llm=llm)
     benchmark = MiniWobBenchmark(dataset_dir=miniwob_dir)
     exp = Experiment(
