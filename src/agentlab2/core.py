@@ -23,6 +23,7 @@ class ToolSchema(BaseModel):
     name: str
     description: str
     parameters: dict = Field(default_factory=dict)
+    # examples: str | None = None # Maybe to-add   
 
     @classmethod
     def from_function(cls, func: Callable) -> Self:
@@ -102,7 +103,7 @@ class Observation(BaseModel):
 class EnvironmentOutput(BaseModel):
     """Represents the result of an environment step."""
 
-    observation: Observation
+    obs: Observation
     reward: float = 0.0
     done: bool = False
     info: dict = Field(default_factory=dict)

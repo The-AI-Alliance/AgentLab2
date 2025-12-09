@@ -20,7 +20,7 @@ class Agent(ABC):
         self.config = config
 
     @abstractmethod
-    def step(self, observation: Observation) -> AgentOutput:
+    def step(self, obs: Observation) -> AgentOutput:
         """
         Take a step given an observation.
 
@@ -32,3 +32,5 @@ class Agent(ABC):
     def finished(self) -> bool:
         """Optional check if the agent has finished its task."""
         return False
+
+    ## TODO: Add a good __repr__
