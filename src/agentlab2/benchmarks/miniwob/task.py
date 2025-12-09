@@ -3,15 +3,14 @@ from typing import Any, ClassVar
 
 from PIL import Image
 
-from agentlab2.benchmark import Task
-from agentlab2.core import Action, Content, Observation
+from agentlab2.core import Content, Observation
+from agentlab2.environment import Task
 from agentlab2.envs.browser import BrowserEnv
-from agentlab2.utils import prune_html
 
 logger = logging.getLogger(__name__)
 
 
-class MiniWobTask(Task):
+class MiniWobTask(Task[BrowserEnv]):
     dataset: str = "miniwob"
     desc: str
     subdomain: str
@@ -39,7 +38,7 @@ class MiniWobTask(Task):
     def url(self) -> str:
         return f"{self.base_url}/{self.subdomain}.html"
 
-    def setup(self, env: BrowserEnv) -> tuple[Observation, dict]:
+    def setup(self, env: BrowserEnv) -> tuple[str, dict]:
         """
         Set up everything needed to execute the task.
 
@@ -56,10 +55,7 @@ class MiniWobTask(Task):
         setup_result = env.evaluate_js(setup_js)
         goal, info = self._parse_setup_result(setup_result)
         self._env = env
-        obs = env.step(Action(name="noop"))
-        obs.contents["goal"] = Content(data=goal)
-        obs = self.obs_postprocess(obs)
-        return obs, info
+        return goal, info
 
     def teardown(self) -> None:
         """
@@ -72,7 +68,7 @@ class MiniWobTask(Task):
         if teardown_js:
             self._env.evaluate_js(teardown_js)
 
-    def validate_step(self, *args, **kwargs) -> dict:
+    def validate(self, *args, **kwargs) -> tuple[float, dict]:
         """
         Validate the task, either per step or at the end.
 
@@ -83,13 +79,7 @@ class MiniWobTask(Task):
         validate_js = self._get_step_validate_js()
         validate_result = self._env.evaluate_js(validate_js)
         reward, info = self._parse_validation_result(validate_result)
-        return {"reward": reward, **info}
-
-    def validate(self, *args, **kwargs) -> dict:
-        validate_js = self._get_task_validate_js()
-        validate_result = self._env.evaluate_js(validate_js)
-        reward, info = self._parse_validation_result(validate_result)
-        return {"reward": reward, **info}
+        return reward, info
 
     def _get_setup_js(self) -> str:
         if self.remove_human_display:
@@ -177,11 +167,6 @@ return core.getUtterance();
 return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GLOBAL, WOB_EPISODE_ID, WOB_TASK_READY];
 }"""
 
-    def _get_task_validate_js(self) -> str:
-        return """() => {
-return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GLOBAL, WOB_EPISODE_ID, WOB_TASK_READY];
-}"""
-
     def _parse_validation_result(self, validation_result: str | dict | list) -> tuple[float, dict]:
         if isinstance(validation_result, list):
             chunks = validation_result
@@ -200,13 +185,12 @@ return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GL
         }
 
     def obs_postprocess(self, obs: Observation) -> Observation:
-        if html := obs.contents.pop("html", None):
-            obs.contents["pruned_html"] = Content(data=prune_html(html.data))
         if screenshot := obs.contents.get("screenshot", None):
             # crop to 332x214 because this is the viewport size for MiniWob
             if isinstance(screenshot.data, Image.Image):
                 obs.contents["screenshot"] = Content(data=screenshot.data.crop((0, 0, 332, 214)))
         return obs
 
-    def finished(self, steps: int) -> bool:
-        return steps >= self.max_turns
+    def finished(self) -> bool:
+        _, info = self.validate()
+        return info.get("done", False)

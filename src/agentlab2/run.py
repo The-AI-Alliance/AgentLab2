@@ -1,13 +1,11 @@
-import json
 import logging
 
 from pydantic import BaseModel
 from termcolor import colored
 
 from agentlab2.agent import AgentConfig
-from agentlab2.benchmark import Task
-from agentlab2.core import Action, AgentOutput, Trace, TraceStep
-from agentlab2.environment import EnvironmentConfig
+from agentlab2.core import Trajectory
+from agentlab2.environment import EnvironmentConfig, Task
 
 logger = logging.getLogger(__name__)
 
@@ -20,66 +18,34 @@ class AgentRun(BaseModel):
     task: Task
     max_steps: int = 1000  # system-wide upper limit on steps
 
-    def run(self) -> Trace:
+    def run(self) -> Trajectory:
         """
         Main loop to run the agent on a single specific task.
 
         Returns:
             Trace containing the full history of the run.
         """
-        env = self.env_config.make()
+        env = self.env_config.make(self.task)
+        agent = self.agent_config.make(actions=env.actions)
         try:
-            env.reset()
-            trace = self._run_with_env(env)
+            env_output = env.setup()
+            logger.info(colored(f"Initial env output: {env_output.model_dump_json(indent=2)}", "blue"))
+            trajectory = Trajectory(steps=[env_output], metadata={"task_id": self.task.id})
+            steps = 0
+            while not agent.finished() and not env_output.done and steps < self.max_steps:
+                agent_output = agent.step(env_output.observation)
+                steps += 1
+                logger.info(colored(f"Step {steps} Agent output: {agent_output.model_dump_json(indent=2)}", "magenta"))
+                trajectory.append(agent_output)
+                for action in agent_output.actions:
+                    env_output = env.step(action)
+                    logger.info(colored(f"Step {steps} Env output: {env_output.model_dump_json(indent=2)}", "blue"))
+                    trajectory.append(env_output)
+            trajectory.reward_info = self.task.validate(trajectory)
+            self.task.teardown()
         except Exception as e:
             logger.exception(f"Error during agent run: {e}")
             raise e
         finally:
             env.close()
-        return trace
-
-    def _run_with_env(self, env):
-        agent = self.agent_config.make(actions=env.actions)
-        agent.reset()
-        obs, task_info = self.task.setup(env)
-        logger.info(colored(f"Initial observation: {obs.model_dump_json(indent=2)}", "blue"))
-        logger.info(f"Task info: {task_info}")
-        trace = Trace(
-            steps=[TraceStep(observation=obs)],
-            metadata={"task_id": self.task.id, "task_info": task_info},
-        )
-        steps = 0
-        while not self.task.finished(steps) and not agent.finished() and not env.finished() and steps < self.max_steps:
-            agent_output = agent.step(obs)
-            steps += 1
-            logger.info(colored(f"Step {steps} Agent output: {agent_output.model_dump_json(indent=2)}", "magenta"))
-            trace.steps.append(TraceStep(agent_output=agent_output))
-            actions = self._actions_from_output(agent_output)
-            # TODO: support parallel actions if the environment allows it
-            for action in actions:
-                obs = env.step(action)
-                obs = self.task.obs_postprocess(obs)
-                logger.info(colored(f"Step {steps} Observation: {obs.model_dump_json(indent=2)}", "blue"))
-                if self.task.validate_per_step:
-                    reward_info = self.task.validate_step(action, obs)
-                else:
-                    reward_info = {}
-                trace.steps.append(TraceStep(observation=obs, reward_info=reward_info))
-        trace.reward_info = self.task.validate(trace)
-        self.task.teardown()
-        return trace
-
-    def _actions_from_output(self, agent_output: AgentOutput) -> list[Action]:
-        actions = []
-        if hasattr(agent_output, "tool_calls") and agent_output.tool_calls:
-            for tc in agent_output.tool_calls:
-                arguments = tc.function.arguments
-                if isinstance(arguments, str):
-                    try:
-                        arguments = json.loads(arguments)
-                    except json.JSONDecodeError:
-                        raise ValueError(f"Invalid JSON arguments in tool call: {arguments}")
-                if tc.function.name is None:
-                    raise ValueError("Tool call must have a function name.")
-                actions.append(Action(id=tc.id, name=tc.function.name, arguments=arguments))
-        return actions
+        return trajectory

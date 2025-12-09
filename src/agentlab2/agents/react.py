@@ -1,9 +1,11 @@
+import json
 import logging
 
+from litellm import Message
 from termcolor import colored
 
 from agentlab2.agent import Agent, AgentConfig
-from agentlab2.core import ActionSchema, AgentOutput, Observation
+from agentlab2.core import Action, AgentOutput, Observation, ToolSchema
 from agentlab2.llm import LLM, Prompt, obs_to_messages
 
 logger = logging.getLogger(__name__)
@@ -11,9 +13,7 @@ logger = logging.getLogger(__name__)
 
 class ReactAgentConfig(AgentConfig):
     llm: LLM
-    use_html: bool = True
-    use_axtree: bool = False
-    use_screenshot: bool = True
+    llm_can_finish: bool = True
     max_actions: int = 10
     max_obs_chars: int = 100000  # truncate long observations to M chars
     max_history_tokens: int = 120000  # compact history if it exceeds N tokens
@@ -40,8 +40,8 @@ Focus on:
 - Current progress toward the goal
 Provide a concise summary that preserves all information needed to continue the task."""
 
-    def make(self, actions: list[ActionSchema]) -> "ReactAgent":
-        return ReactAgent(config=self, actions=actions)
+    def make(self, actions: list[ToolSchema]) -> "ReactAgent":
+        return ReactAgent(config=self, tools=actions)
 
 
 class ReactAgent(Agent):
@@ -52,35 +52,17 @@ class ReactAgent(Agent):
         "output_content_types": ["application/json"],
     }
 
-    def __init__(self, config: ReactAgentConfig, actions: list[ActionSchema]):
+    def __init__(self, config: ReactAgentConfig, tools: list[ToolSchema]):
         self.config = config
         self.llm = config.llm
-        self.tools: list[dict] = [action.schema() for action in actions]
-        self.history: list[dict | AgentOutput] = []
+        self.tools: list[dict] = [tool.schema() for tool in tools]
+        if config.llm_can_finish:
+            pass
 
-    def reset(self) -> None:
-        self.history = []
-
-    def obs_preprocess(self, obs: Observation) -> Observation:
-        """
-        Filter observation contents based on agent config.
-        """
-        obs = obs.model_copy(deep=True)
-        if not self.config.use_html:
-            obs.contents.pop("pruned_html", None)
-            obs.contents.pop("html", None)
-        if not self.config.use_axtree:
-            obs.contents.pop("axtree_txt", None)
-        if not self.config.use_screenshot:
-            obs.contents.pop("screenshot", None)
-        return obs
+        self.history: list[dict | Message] = []
+        self._finished: bool = False
 
     def step(self, obs: Observation) -> AgentOutput:
-        if self.max_actions_reached():
-            logger.warning("Max actions reached, stopping agent.")
-            return AgentOutput(content="Max actions reached, stopping agent.")
-
-        obs = self.obs_preprocess(obs)
         self.history += obs_to_messages(obs)
         self.maybe_compact_history()
         messages = [
@@ -91,18 +73,41 @@ class ReactAgent(Agent):
         prompt = Prompt(messages=messages, tools=self.tools)
         try:
             logger.debug(f"Prompt: {prompt}")
-            output = self.llm(prompt)
-            logger.debug(f"LLM Response: {output}")
+            llm_output = self.llm(prompt)
+            logger.debug(f"LLM Response: {llm_output}")
         except Exception as e:
             logger.exception(colored(f"Error getting LLM response: {e}. Prompt: {prompt}", "red"))
             raise e
+        self.history.append(llm_output)
+        return AgentOutput(
+            actions=self._actions_from_output(llm_output),
+            llm_output=llm_output,
+        )
 
-        self.history.append(output)
-        return output
+    def _actions_from_output(self, llm_output: Message) -> list[Action]:
+        actions = []
+        if hasattr(llm_output, "tool_calls") and llm_output.tool_calls:
+            for tc in llm_output.tool_calls:
+                arguments = tc.function.arguments
+                if isinstance(arguments, str):
+                    try:
+                        arguments = json.loads(arguments)
+                    except json.JSONDecodeError:
+                        raise ValueError(f"Invalid JSON arguments in tool call: {arguments}")
+                if tc.function.name is None:
+                    raise ValueError("Tool call must have a function name.")
+                if self.config.llm_can_finish and tc.function.name == "final_step":
+                    self._finished = True  # early stop and return empty actions
+                    return []
+                actions.append(Action(id=tc.id, name=tc.function.name, arguments=arguments))
+        return actions
 
     def max_actions_reached(self) -> bool:
-        prev_actions = [msg for msg in self.history if isinstance(msg, AgentOutput) and msg.tool_calls]
+        prev_actions = [msg for msg in self.history if isinstance(msg, Message) and msg.tool_calls]
         return len(prev_actions) >= self.config.max_actions
+
+    def finished(self) -> bool:
+        return self._finished or self.max_actions_reached()
 
     def maybe_compact_history(self):
         tokens = self.llm.counter(messages=self.history)

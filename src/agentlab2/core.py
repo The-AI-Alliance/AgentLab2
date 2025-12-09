@@ -1,6 +1,6 @@
 import base64
 import io
-from typing import Any, Callable, Dict, List, Optional, Self
+from typing import Any, Callable, Dict, List, Self
 
 import litellm.utils
 from litellm import Message
@@ -8,7 +8,7 @@ from PIL import Image
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 
-class ActionSchema(BaseModel):
+class ToolSchema(BaseModel):
     """
     Represents a function specification with a type, name, description and arguments.
     Compatible with OAI, Anthropic and VLLM definitions.
@@ -57,6 +57,11 @@ class Action(BaseModel):
     arguments: Dict[str, Any] = Field(default_factory=dict)
 
 
+class AgentOutput(BaseModel):
+    actions: list[Action] = Field(default_factory=list)
+    llm_output: Message | None = None
+
+
 image_prefix = "data:image/png;base64,"
 
 
@@ -94,18 +99,16 @@ class Observation(BaseModel):
     contents: dict[str, Content]
 
 
-AgentOutput = Message
+class EnvironmentOutput(BaseModel):
+    """Represents the result of an environment step."""
+
+    observation: Observation
+    reward: float = 0.0
+    done: bool = False
+    info: dict = Field(default_factory=dict)
 
 
-class TraceStep(BaseModel):
-    """A single step in the trace, consisting of an action or an observation."""
-
-    observation: Optional[Observation] = None
-    agent_output: Optional[AgentOutput] = None
-    reward_info: dict = Field(default_factory=dict)
-
-
-class Trace(BaseModel):
+class Trajectory(BaseModel):
     """
     Stores history of the previous interaction.
 
@@ -113,6 +116,9 @@ class Trace(BaseModel):
     reward_info represents episode level reward data.
     """
 
-    steps: List[TraceStep] = Field(default_factory=list)
+    steps: List[EnvironmentOutput | AgentOutput] = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)
     reward_info: dict = Field(default_factory=dict)
+
+    def append(self, item: EnvironmentOutput | AgentOutput) -> None:
+        self.steps.append(item)

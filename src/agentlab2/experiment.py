@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from agentlab2.agent import AgentConfig
 from agentlab2.benchmark import Benchmark
-from agentlab2.core import Trace
+from agentlab2.core import Trajectory
 from agentlab2.environment import EnvironmentConfig
 from agentlab2.run import AgentRun
 
@@ -32,9 +32,9 @@ class Experiment(BaseModel):
         logger.info(f"Prepared {len(runs)} runs for experiment '{self.name}'")
         return runs
 
-    def run_ray(self, n_cpus: int = 4, save_results: bool = True) -> list[Trace]:
+    def run_ray(self, n_cpus: int = 4, save_results: bool = True) -> list[Trajectory]:
         @ray.remote
-        def run_single(agent_run: AgentRun) -> Trace:
+        def run_single(agent_run: AgentRun) -> Trajectory:
             return agent_run.run()
 
         if not ray.is_initialized():
@@ -52,7 +52,7 @@ class Experiment(BaseModel):
             ray.shutdown()
             self.benchmark.close()
 
-    def run_sequential(self, save_results: bool = True, debug_limit: int | None = None) -> list[Trace]:
+    def run_sequential(self, save_results: bool = True, debug_limit: int | None = None) -> list[Trajectory]:
         self.benchmark.setup()
         try:
             runs = self.create_runs()
@@ -66,7 +66,7 @@ class Experiment(BaseModel):
         finally:
             self.benchmark.close()
 
-    def save_traces(self, traces: list[Trace]) -> None:
+    def save_traces(self, traces: list[Trajectory]) -> None:
         os.makedirs(self.output_dir, exist_ok=True)
         traces_dir = os.path.join(self.output_dir, "traces")
         os.makedirs(traces_dir, exist_ok=True)

@@ -1,25 +1,25 @@
 """Agent abstraction."""
 
+from abc import ABC, abstractmethod
+
 from pydantic import BaseModel
 
 from agentlab2.core import AgentOutput, Observation
 
 
-class AgentConfig(BaseModel):
+class AgentConfig(BaseModel, ABC):
     """Configuration for creating an Agent."""
 
+    @abstractmethod
     def make(self, **kwargs) -> "Agent":
-        return Agent(self, **kwargs)
+        pass
 
 
-class Agent:
+class Agent(ABC):
     def __init__(self, config: AgentConfig):
         self.config = config
 
-    def reset(self) -> None:
-        """Reset the agent state."""
-        pass
-
+    @abstractmethod
     def step(self, observation: Observation) -> AgentOutput:
         """
         Take a step given an observation.
@@ -30,5 +30,5 @@ class Agent:
         raise NotImplementedError("Subclasses must implement step()")
 
     def finished(self) -> bool:
-        """Check if the agent has finished its task."""
+        """Optional check if the agent has finished its task."""
         return False
