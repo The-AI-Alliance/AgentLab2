@@ -20,6 +20,7 @@ dependencies = [
     "tenacity~=8.5.0",
     "python-dotenv~=1.2.0",
     "termcolor~=3.2",
+    "miniwob>=1.0",
 ]
 
 [build-system]

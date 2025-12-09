@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+from importlib.resources import files
 from random import shuffle
 from typing import Any, TextIO
 
@@ -21,7 +22,7 @@ class MiniWobBenchmark(Benchmark):
         "description": "MiniWob benchmark for web-based tasks",
         "task_cls": MiniWobTask.__name__,
     }
-    dataset_dir: str = "./data/miniwob-plusplus"
+    html_path: str = files("miniwob").joinpath("html").as_posix()  # type: ignore
     port: int = 8000
     remove_human_display: bool = True
     episode_max_time: int = 1000000
@@ -64,13 +65,12 @@ class MiniWobBenchmark(Benchmark):
         return f"http://localhost:{self.port}/miniwob"
 
     def setup(self):
-        html_path = os.path.join(self.dataset_dir, "miniwob", "html")
         tmp_dir = tempfile.gettempdir()
         self._stdout_file = open(os.path.join(tmp_dir, "miniwob_server_stdout.log"), "w")
         self._stderr_file = open(os.path.join(tmp_dir, "miniwob_server_stderr.log"), "w")
         self._server_process = subprocess.Popen(
             ["python", "-m", "http.server", str(self.port)],
-            cwd=html_path,
+            cwd=self.html_path,
             stdout=self._stdout_file,
             stderr=self._stderr_file,
         )
