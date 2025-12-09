@@ -5,7 +5,7 @@ from typing import Any, List
 
 from pydantic import BaseModel
 
-from agentlab2.core import Action, EnvironmentOutput, Observation, ToolSchema, Trajectory
+from agentlab2.core import Action, EnvironmentOutput, Observation, ToolSchema
 
 
 class Tool:
