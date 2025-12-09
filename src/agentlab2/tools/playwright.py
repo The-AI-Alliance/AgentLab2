@@ -10,8 +10,9 @@ from playwright.async_api import async_playwright
 from playwright.sync_api import Page as SyncPage
 from playwright.sync_api import sync_playwright
 
-from agentlab2.core import Action, ActionSchema, Content, Observation
+from agentlab2.core import Action, Content, Observation, ToolSchema
 from agentlab2.environment import Tool
+from agentlab2.utils import prune_html
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,15 @@ logger = logging.getLogger(__name__)
 class SyncPlaywrightTool(Tool):
     """Fully synchronous Playwright tool using playwright.sync_api."""
 
-    def __init__(self, max_wait: int = 60, **kwargs) -> None:
+    def __init__(
+        self,
+        max_wait: int = 60,
+        use_html: bool = True,
+        use_axtree: bool = False,
+        use_screenshot: bool = True,
+        prune_html: bool = True,
+        **kwargs,
+    ) -> None:
         super().__init__()
         self.max_wait = max_wait
         self._actions = {
@@ -36,6 +45,9 @@ class SyncPlaywrightTool(Tool):
             "noop": self.noop,
         }
         self.pw_kwargs = kwargs
+        self.use_html = use_html
+        self.use_axtree = use_axtree
+        self.use_screenshot = use_screenshot
         self._pw = sync_playwright().start()
         self._browser = self._pw.chromium.launch(chromium_sandbox=True, **self.pw_kwargs)
         self._page = self._browser.new_page()
@@ -114,18 +126,20 @@ class SyncPlaywrightTool(Tool):
         axtree = self._page.accessibility.snapshot()
         return flatten_axtree(axtree)
 
-    def page_obs(self, tool_call_id: str | None, action_result: str | None) -> Observation:
-        html = self.page_html()
-        screenshot = self.page_screenshot()
-        axtree = self.page_axtree()
-        obs = Observation(
-            contents={
-                "html": Content(data=html),
-                "axtree_txt": Content(data=axtree),
-                "screenshot": Content(data=screenshot),
-            },
-            tool_call_id=tool_call_id,
-        )
+    def page_obs(self, tool_call_id: str | None = None, action_result: str | None = None) -> Observation:
+        obs = Observation(contents={}, tool_call_id=tool_call_id)
+        if self.use_html:
+            html = self.page_html()
+            if prune_html:
+                obs.contents["pruned_html"] = Content(data=prune_html(html))
+            else:
+                obs.contents["html"] = Content(data=html)
+        if self.use_axtree:
+            axtree = self.page_axtree()
+            obs.contents["axtree_txt"] = Content(data=axtree)
+        if self.use_screenshot:
+            screenshot = self.page_screenshot()
+            obs.contents["screenshot"] = Content(data=screenshot)
         if action_result is not None:
             obs.contents["action_result"] = Content(data=action_result)
         return obs
@@ -144,8 +158,8 @@ class SyncPlaywrightTool(Tool):
         return action_result
 
     @property
-    def actions(self) -> list[ActionSchema]:
-        return [ActionSchema.from_function(fn) for fn in self._actions.values()]
+    def actions(self) -> list[ToolSchema]:
+        return [ToolSchema.from_function(fn) for fn in self._actions.values()]
 
     def close(self):
         self._page.close()
@@ -261,8 +275,8 @@ class AsyncPlaywrightTool(Tool):
         return action_result
 
     @property
-    def actions(self) -> list[ActionSchema]:
-        return [ActionSchema.from_function(fn) for fn in self._actions.values()]
+    def actions(self) -> list[ToolSchema]:
+        return [ToolSchema.from_function(fn) for fn in self._actions.values()]
 
     async def close(self):
         await self._page.close()

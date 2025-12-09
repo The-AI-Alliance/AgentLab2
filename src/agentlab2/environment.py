@@ -1,10 +1,11 @@
 """Environment, Benchmark and Task abstractions."""
 
+from abc import ABC, abstractmethod
 from typing import Any, List
 
 from pydantic import BaseModel
 
-from agentlab2.core import Action, ActionSchema, Observation
+from agentlab2.core import Action, EnvironmentOutput, Observation, ToolSchema, Trajectory
 
 
 class Tool:
@@ -15,7 +16,7 @@ class Tool:
         pass
 
     @property
-    def actions(self) -> List[ActionSchema]:
+    def actions(self) -> List[ToolSchema]:
         """Returns list of actions supported by that environment."""
         return []
 
@@ -28,33 +29,80 @@ class Tool:
         pass
 
 
-class EnvironmentConfig(BaseModel):
+class EnvironmentConfig(BaseModel, ABC):
     """Configuration for Environment."""
 
-    def make(self) -> "Environment":
-        return Environment()
+    @abstractmethod
+    def make(self, task: "Task") -> "Environment":
+        pass
 
 
-class Environment:
+class Environment(ABC):
     """Base class for environments that agents interact with."""
 
-    def reset(self) -> None:
-        """Reset the environment to its initial state."""
+    def __init__(self, task: "Task", *args, **kwargs) -> None:
+        super().__init__()
+        self.task = task
+
+    @abstractmethod
+    def setup(self) -> EnvironmentOutput:
+        """Set up the environment before starting a task."""
         pass
 
     @property
-    def actions(self) -> List[ActionSchema]:
+    def actions(self) -> List[ToolSchema]:
         """Returns list of actions supported by that environment."""
         return []
 
-    def step(self, action: Action) -> Observation:
+    @abstractmethod
+    def step(self, action: Action) -> EnvironmentOutput:
         """Execute a single action and return the observation."""
-        raise NotImplementedError("Subclasses must implement step()")
-
-    def finished(self) -> bool:
-        """Check if the environment has reached a terminal state."""
-        raise NotImplementedError
+        pass
 
     def close(self) -> None:
-        """Clean up environment resources."""
+        """Optional clean up environment resources."""
         pass
+
+
+class Task[E: Environment](BaseModel, ABC):
+    """Represents a task that an agent must complete in an environment."""
+
+    id: str
+    validate_per_step: bool = False
+
+    @abstractmethod
+    def setup(self, environment: E) -> tuple[str, dict]:
+        """
+        Set up the task in the given environment.
+
+        Returns:
+            Tuple of (list of initial observations, dict with additional task info)
+        """
+        pass
+
+    def teardown(self) -> None:
+        """Optional clean up after task completion."""
+        pass
+
+    @abstractmethod
+    def validate(self, obs: Observation, action: Action) -> tuple[float, dict]:
+        """Validate the whole trace and state of the env at the end of the run."""
+        pass
+
+    def filter_actions(self, actions: list[ToolSchema]) -> list[ToolSchema]:
+        """Allows the task to whitelist subset of all the actions provided by the environment."""
+        return actions
+
+    def cheat(self):
+        """
+        Solve the task using a pre-defined solution (optional).
+        """
+        raise NotImplementedError
+
+    def obs_postprocess(self, obs: Observation) -> Observation:
+        """Optional post-processing of observation before returning it to the agent."""
+        return obs
+
+    def finished(self) -> bool:
+        """Check if the task is finished."""
+        return False
