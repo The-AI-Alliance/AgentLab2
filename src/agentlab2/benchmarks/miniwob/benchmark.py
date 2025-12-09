@@ -8,7 +8,7 @@ import time
 import urllib.request
 from importlib.resources import files
 from random import shuffle
-from typing import Any, TextIO
+from typing import TextIO
 
 from agentlab2.benchmark import Benchmark
 from agentlab2.benchmarks.miniwob.task import MiniWobTask
@@ -17,11 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 class MiniWobBenchmark(Benchmark):
-    metadata: dict = {
-        "name": "miniwob",
-        "description": "MiniWob benchmark for web-based tasks",
-        "task_cls": MiniWobTask.__name__,
-    }
     html_path: str = files("miniwob").joinpath("html").as_posix()  # type: ignore
     port: int = 8000
     remove_human_display: bool = True
@@ -35,23 +30,6 @@ class MiniWobBenchmark(Benchmark):
     _stderr_file: TextIO | None = None
 
     model_config = {"arbitrary_types_allowed": True}
-
-    def model_post_init(self, context: Any) -> None:
-        super().model_post_init(context)
-        self.tasks = [
-            MiniWobTask(
-                id=task["subdomain"],
-                desc=task["desc"],
-                subdomain=task["subdomain"],
-                base_url=self.base_url,
-                remove_human_display=self.remove_human_display,
-                episode_max_time=self.episode_max_time,
-            )
-            for task in self.load_task_infos()
-        ]
-        if self.shuffle:
-            random.seed(self.shuffle_seed)
-            shuffle(self.tasks)
 
     def load_task_infos(self) -> list[dict]:
         _module_dir = os.path.dirname(os.path.abspath(__file__))
@@ -82,6 +60,23 @@ class MiniWobBenchmark(Benchmark):
         except Exception as e:
             self.close()
             raise RuntimeError(f"MiniWob server failed to respond: {e}")
+
+    def tasks(self) -> list[MiniWobTask]:
+        tasks = [
+            MiniWobTask(
+                id=task["subdomain"],
+                desc=task["desc"],
+                subdomain=task["subdomain"],
+                base_url=self.base_url,
+                remove_human_display=self.remove_human_display,
+                episode_max_time=self.episode_max_time,
+            )
+            for task in self.load_task_infos()
+        ]
+        if self.shuffle:
+            random.seed(self.shuffle_seed)
+            shuffle(tasks)
+        return tasks
 
     def close(self):
         """Shutdown the MiniWob server and close file handles."""

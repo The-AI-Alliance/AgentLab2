@@ -7,7 +7,6 @@ from pydantic import BaseModel
 from agentlab2.agent import AgentConfig
 from agentlab2.benchmark import Benchmark
 from agentlab2.core import Trajectory
-from agentlab2.environment import EnvironmentConfig
 from agentlab2.run import AgentRun
 
 logger = logging.getLogger(__name__)
@@ -17,20 +16,22 @@ class Experiment(BaseModel):
     name: str
     output_dir: str
     agent_config: AgentConfig
-    env_config: EnvironmentConfig
     benchmark: Benchmark
 
     def create_runs(self):
         runs = [
-            AgentRun(
-                agent_config=self.agent_config,
-                env_config=self.env_config,
-                task=task,
-            )
-            for task in self.benchmark.tasks
+            AgentRun(agent_config=self.agent_config, task=task, env_config=self.benchmark.env_config)
+            for task in self.benchmark.tasks()
         ]
         logger.info(f"Prepared {len(runs)} runs for experiment '{self.name}'")
         return runs
+
+    def save_config(self) -> None:
+        os.makedirs(self.output_dir, exist_ok=True)
+        config_path = os.path.join(self.output_dir, "experiment_config.json")
+        with open(config_path, "w") as f:
+            f.write(self.model_dump_json(indent=2))
+        logger.info(f"Saved experiment config to {config_path}")
 
     def run_ray(self, n_cpus: int = 4, save_results: bool = True) -> list[Trajectory]:
         @ray.remote
@@ -38,16 +39,23 @@ class Experiment(BaseModel):
             return agent_run.run()
 
         if not ray.is_initialized():
-            ray.init(num_cpus=n_cpus)
+            ray_context = ray.init(
+                num_cpus=n_cpus,
+                dashboard_host="0.0.0.0",
+                include_dashboard=True,
+                log_to_driver=True,
+            )
+            logger.info(f"Ray initialized, dashboard at {ray_context.dashboard_url}")
 
         self.benchmark.setup()
         try:
-            runs = self.create_runs()
+            runs = self.create_runs()[:10]
             futures = [run_single.remote(run) for run in runs]
-            traces = ray.get(futures)
+            trajectories = ray.get(futures)
             if save_results:
-                self.save_traces(traces)
-            return traces
+                self.save_traces(trajectories)
+            self.print_stats(trajectories)
+            return trajectories
         finally:
             ray.shutdown()
             self.benchmark.close()
@@ -59,12 +67,32 @@ class Experiment(BaseModel):
             if debug_limit is not None:
                 logger.info(f"Running only first {debug_limit} runs")
                 runs = runs[:debug_limit]
-            traces = [run.run() for run in runs]
+            trajectories = [run.run() for run in runs]
             if save_results:
-                self.save_traces(traces)
-            return traces
+                self.save_traces(trajectories)
+            self.print_stats(trajectories)
+            return trajectories
         finally:
             self.benchmark.close()
+
+    def print_stats(self, trajectories: list[Trajectory]) -> None:
+        if not trajectories:
+            logger.info("No traces to compute stats")
+            return
+
+        total_steps = sum(len(trace.steps) for trace in trajectories)
+        avg_steps = total_steps / len(trajectories)
+
+        rewards = []
+        for trace in trajectories:
+            rewards.append(trace.final_reward())
+
+        accuracy = sum(rewards) / len(rewards) if rewards else 0.0
+
+        logger.info(f"Experiment '{self.name}' stats:")
+        logger.info(f"  Total traces: {len(trajectories)}")
+        logger.info(f"  Avg steps per trace: {avg_steps:.2f}")
+        logger.info(f"  Accuracy (avg final reward): {accuracy:.4f}")
 
     def save_traces(self, traces: list[Trajectory]) -> None:
         os.makedirs(self.output_dir, exist_ok=True)

@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 
 class MiniWobTask(Task[BrowserEnv]):
-    dataset: str = "miniwob"
     desc: str
     subdomain: str
     base_url: str
