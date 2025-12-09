@@ -1,5 +1,4 @@
 import logging
-import os
 
 from agentlab2.agents.react import ReactAgentConfig
 from agentlab2.benchmarks.miniwob.benchmark import MiniWobBenchmark
@@ -14,11 +13,10 @@ logging.basicConfig(
 
 
 def main():
-    miniwob_dir = os.path.expanduser("~/miniwob-plusplus")
     llm = LLM(model_name="azure/gpt-5-mini", temperature=1.0)
     env_config = BrowserEnvConfig(headless=True, timeout=30000, use_html=True, use_screenshot=True)
     agent_config = ReactAgentConfig(llm=llm)
-    benchmark = MiniWobBenchmark(dataset_dir=miniwob_dir)
+    benchmark = MiniWobBenchmark()
     exp = Experiment(
         name="hello_world_study",
         output_dir="./hello_world_1",
