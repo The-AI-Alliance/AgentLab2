@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Sequence
 
 from pydantic import BaseModel, Field
 
@@ -28,6 +29,6 @@ class Benchmark(BaseModel, ABC):
         pass
 
     @abstractmethod
-    def tasks(self) -> list[Task]:
+    def tasks(self) -> Sequence[Task]:
         """Return the list of tasks in this benchmark."""
         pass
