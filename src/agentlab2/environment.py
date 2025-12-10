@@ -84,7 +84,7 @@ class Task[E: Environment](BaseModel, ABC):
         pass
 
     @abstractmethod
-    def validate(self, obs: Observation, action: Action) -> tuple[float, dict]:
+    def validate_task(self, obs: Observation, action: Action) -> tuple[float, dict]:
         """Validate the whole trajectory and state of the env at the end of the run."""
         pass
 

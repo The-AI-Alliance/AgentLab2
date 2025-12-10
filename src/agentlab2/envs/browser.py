@@ -53,9 +53,9 @@ class BrowserEnv(Environment):
         obs = self.browser_tool.page_obs(action.id, action_result)
         done = self.task.finished()
         if self.task.validate_per_step:
-            reward, info = self.task.validate(obs, action)
+            reward, info = self.task.validate_task(obs, action)
         elif done:
-            reward, info = self.task.validate(obs, action)
+            reward, info = self.task.validate_task(obs, action)
         else:
             reward, info = 0.0, {}
         return EnvironmentOutput(obs=obs, reward=reward, info=info, done=done)
