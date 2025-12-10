@@ -1,9 +1,12 @@
-.PHONY: help install format lint
+.PHONY: help install format lint hello
 
 help:
 	@echo "make install    - Install dependencies in editable mode"
 	@echo "make format     - Format code"
 	@echo "make lint       - Lint and auto-fix"
+
+hello:
+	uv run recipes/hello_world.py
 
 install:
 	uv sync

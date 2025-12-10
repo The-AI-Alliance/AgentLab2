@@ -1,4 +1,6 @@
 import logging
+import os
+import time
 
 from agentlab2.agents.react import ReactAgentConfig
 from agentlab2.benchmarks.miniwob.benchmark import MiniWobBenchmark
@@ -11,20 +13,23 @@ logging.basicConfig(
     format="[%(levelname)s] %(asctime)s - %(name)s:%(lineno)d %(funcName)s() - %(message)s",
 )
 
+debug = True
+
 
 def main():
+    current_datetime = time.strftime("%Y%m%d_%H%M%S")
+    output_dir = os.path.expanduser(f"~/agentlab_results/al2/miniwob_{current_datetime}")
+
     llm = LLM(model_name="azure/gpt-5-mini", temperature=1.0)
     env_config = BrowserEnvConfig(headless=True, timeout=30000, use_html=True, use_screenshot=True)
     agent_config = ReactAgentConfig(llm=llm)
-    benchmark = MiniWobBenchmark()
-    exp = Experiment(
-        name="hello_world_study",
-        output_dir="./hello_world_1",
-        env_config=env_config,
-        agent_config=agent_config,
-        benchmark=benchmark,
-    )
-    exp.run_sequential(save_results=True, debug_limit=1)
+    benchmark = MiniWobBenchmark(env_config=env_config)
+    exp = Experiment(name="miniwob", output_dir=output_dir, agent_config=agent_config, benchmark=benchmark)
+
+    if debug:
+        exp.run_sequential(save_results=True, debug_limit=2)
+    else:
+        exp.run_ray(n_cpus=4, save_results=True)
 
 
 if __name__ == "__main__":
