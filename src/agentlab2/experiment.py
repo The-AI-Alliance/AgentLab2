@@ -30,10 +30,12 @@ class Experiment(BaseModel):
         os.makedirs(self.output_dir, exist_ok=True)
         config_path = os.path.join(self.output_dir, "experiment_config.json")
         with open(config_path, "w") as f:
-            f.write(self.model_dump_json(indent=2))
+            f.write(self.model_dump_json(indent=2, serialize_as_any=True))
         logger.info(f"Saved experiment config to {config_path}")
 
     def run_ray(self, n_cpus: int = 4, save_results: bool = True) -> list[Trajectory]:
+        self.save_config()
+
         @ray.remote
         def run_single(agent_run: AgentRun) -> Trajectory:
             return agent_run.run()
@@ -44,6 +46,7 @@ class Experiment(BaseModel):
                 dashboard_host="0.0.0.0",
                 include_dashboard=True,
                 log_to_driver=True,
+                runtime_env={"working_dir": None},
             )
             logger.info(f"Ray initialized, dashboard at {ray_context.dashboard_url}")
 
@@ -53,7 +56,7 @@ class Experiment(BaseModel):
             futures = [run_single.remote(run) for run in runs]
             trajectories = ray.get(futures)
             if save_results:
-                self.save_traces(trajectories)
+                self.save_trajectories(trajectories)
             self.print_stats(trajectories)
             return trajectories
         finally:
@@ -61,6 +64,7 @@ class Experiment(BaseModel):
             self.benchmark.close()
 
     def run_sequential(self, save_results: bool = True, debug_limit: int | None = None) -> list[Trajectory]:
+        self.save_config()
         self.benchmark.setup()
         try:
             runs = self.create_runs()
@@ -69,7 +73,7 @@ class Experiment(BaseModel):
                 runs = runs[:debug_limit]
             trajectories = [run.run() for run in runs]
             if save_results:
-                self.save_traces(trajectories)
+                self.save_trajectories(trajectories)
             self.print_stats(trajectories)
             return trajectories
         finally:
@@ -94,7 +98,7 @@ class Experiment(BaseModel):
         logger.info(f"  Avg steps per trace: {avg_steps:.2f}")
         logger.info(f"  Accuracy (avg final reward): {accuracy:.4f}")
 
-    def save_traces(self, traces: list[Trajectory]) -> None:
+    def save_trajectories(self, traces: list[Trajectory]) -> None:
         os.makedirs(self.output_dir, exist_ok=True)
         traces_dir = os.path.join(self.output_dir, "traces")
         os.makedirs(traces_dir, exist_ok=True)
