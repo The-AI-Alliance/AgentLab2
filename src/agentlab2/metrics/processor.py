@@ -6,6 +6,7 @@ from opentelemetry.sdk.trace import ReadableSpan
 from agentlab2.metrics.models import SpanRecord
 from agentlab2.metrics.store import JsonlSpanWriter
 
+
 AL2_TYPE = "al2.type"
 AL2_NAME = "al2.name"
 AL2_EXPERIMENT = "al2.experiment"
@@ -39,9 +40,11 @@ def _zip_dir(dir_path: Path) -> Path:
 class TraceProcessor:
     """Exports episode spans to experiment/episode/step_{N}.json hierarchy."""
 
+
     def __init__(self, run_dir: str) -> None:
         self._run_dir = Path(run_dir)
         self._store = JsonlSpanWriter(run_dir)
+
 
     def export_episode(self, episode_span: ReadableSpan) -> Path:
         """Export and zip a single episode when it completes."""
