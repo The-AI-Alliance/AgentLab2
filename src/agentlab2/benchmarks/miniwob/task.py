@@ -67,7 +67,7 @@ class MiniWobTask(Task[BrowserEnv]):
         if teardown_js:
             self._env.evaluate_js(teardown_js)
 
-    def validate(self, *args, **kwargs) -> tuple[float, dict]:
+    def validate_task(self, *args, **kwargs) -> tuple[float, dict]:
         """
         Validate the task, either per step or at the end.
 
@@ -196,5 +196,5 @@ return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GL
         return filtered
 
     def finished(self) -> bool:
-        _, info = self.validate()
+        _, info = self.validate_task()
         return info.get("done", False)
