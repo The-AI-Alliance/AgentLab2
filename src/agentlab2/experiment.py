@@ -20,8 +20,15 @@ class Experiment(BaseModel):
 
     def create_runs(self):
         runs = [
-            AgentRun(agent_config=self.agent_config, task=task, env_config=self.benchmark.env_config)
-            for task in self.benchmark.tasks()
+            AgentRun(
+                id=i,
+                exp_name=self.name,
+                output_dir=self.output_dir,
+                agent_config=self.agent_config,
+                task=task,
+                env_config=self.benchmark.env_config,
+            )
+            for i, task in enumerate(self.benchmark.tasks())
         ]
         logger.info(f"Prepared {len(runs)} runs for experiment '{self.name}'")
         return runs
@@ -55,8 +62,6 @@ class Experiment(BaseModel):
             runs = self.create_runs()[:10]
             futures = [run_single.remote(run) for run in runs]
             trajectories = ray.get(futures)
-            if save_results:
-                self.save_trajectories(trajectories)
             self.print_stats(trajectories)
             return trajectories
         finally:
@@ -72,8 +77,6 @@ class Experiment(BaseModel):
                 logger.info(f"Running only first {debug_limit} runs")
                 runs = runs[:debug_limit]
             trajectories = [run.run() for run in runs]
-            if save_results:
-                self.save_trajectories(trajectories)
             self.print_stats(trajectories)
             return trajectories
         finally:
@@ -97,14 +100,3 @@ class Experiment(BaseModel):
         logger.info(f"  Total trajectories: {len(trajectories)}")
         logger.info(f"  Avg steps per trajectory: {avg_steps:.2f}")
         logger.info(f"  Accuracy (avg. final reward): {accuracy:.4f}")
-
-    def save_trajectories(self, trajectories: list[Trajectory]) -> None:
-        os.makedirs(self.output_dir, exist_ok=True)
-        save_dir = os.path.join(self.output_dir, "trajectories")
-        os.makedirs(save_dir, exist_ok=True)
-        for i, traj in enumerate(trajectories):
-            n = traj.metadata.get("task_id", i)
-            traj_path = os.path.join(save_dir, f"traj_{n}.json")
-            with open(traj_path, "w") as f:
-                f.write(traj.model_dump_json(indent=2))
-        logger.info(f"Saved {len(trajectories)} trajectories to {save_dir}")
