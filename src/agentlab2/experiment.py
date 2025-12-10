@@ -81,30 +81,30 @@ class Experiment(BaseModel):
 
     def print_stats(self, trajectories: list[Trajectory]) -> None:
         if not trajectories:
-            logger.info("No traces to compute stats")
+            logger.info("No trajectories to compute stats")
             return
 
-        total_steps = sum(len(trace.steps) for trace in trajectories)
+        total_steps = sum(len(trajectory.steps) for trajectory in trajectories)
         avg_steps = total_steps / len(trajectories)
 
         rewards = []
-        for trace in trajectories:
-            rewards.append(trace.final_reward())
+        for traj in trajectories:
+            rewards.append(traj.final_reward())
 
         accuracy = sum(rewards) / len(rewards) if rewards else 0.0
 
         logger.info(f"Experiment '{self.name}' stats:")
-        logger.info(f"  Total traces: {len(trajectories)}")
-        logger.info(f"  Avg steps per trace: {avg_steps:.2f}")
-        logger.info(f"  Accuracy (avg final reward): {accuracy:.4f}")
+        logger.info(f"  Total trajectories: {len(trajectories)}")
+        logger.info(f"  Avg steps per trajectory: {avg_steps:.2f}")
+        logger.info(f"  Accuracy (avg. final reward): {accuracy:.4f}")
 
-    def save_trajectories(self, traces: list[Trajectory]) -> None:
+    def save_trajectories(self, trajectories: list[Trajectory]) -> None:
         os.makedirs(self.output_dir, exist_ok=True)
-        traces_dir = os.path.join(self.output_dir, "traces")
-        os.makedirs(traces_dir, exist_ok=True)
-        for i, trace in enumerate(traces):
-            n = trace.metadata.get("task_id", i)
-            trace_path = os.path.join(traces_dir, f"trace_{n}.json")
-            with open(trace_path, "w") as f:
-                f.write(trace.model_dump_json(indent=2))
-        logger.info(f"Saved {len(traces)} traces to {traces_dir}")
+        save_dir = os.path.join(self.output_dir, "trajectories")
+        os.makedirs(save_dir, exist_ok=True)
+        for i, traj in enumerate(trajectories):
+            n = traj.metadata.get("task_id", i)
+            traj_path = os.path.join(save_dir, f"traj_{n}.json")
+            with open(traj_path, "w") as f:
+                f.write(traj.model_dump_json(indent=2))
+        logger.info(f"Saved {len(trajectories)} trajectories to {save_dir}")

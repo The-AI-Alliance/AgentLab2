@@ -23,7 +23,7 @@ class AgentRun(BaseModel):
         Main loop to run the agent on a single specific task.
 
         Returns:
-            Trace containing the full history of the run.
+            Trajectory containing the full history of the run.
         """
         env = self.env_config.make(self.task)
         agent = self.agent_config.make(actions=env.actions())

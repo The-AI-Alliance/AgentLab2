@@ -23,7 +23,7 @@ class ToolSchema(BaseModel):
     name: str
     description: str
     parameters: dict = Field(default_factory=dict)
-    # examples: str | None = None # Maybe to-add   
+    # examples: str | None = None # Maybe to-add
 
     @classmethod
     def from_function(cls, func: Callable) -> Self:
@@ -31,7 +31,7 @@ class ToolSchema(BaseModel):
         schema = litellm.utils.function_to_dict(func)
         return cls(**schema)
 
-    def to_tool_schema(self) -> dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         """Produce dict that could be passed as tool schema into LLM api."""
         return {
             "type": "function",
