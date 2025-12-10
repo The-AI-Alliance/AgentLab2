@@ -37,7 +37,7 @@ class MiniWobTask(Task[BrowserEnv]):
     def url(self) -> str:
         return f"{self.base_url}/{self.subdomain}.html"
 
-    def setup(self, env: BrowserEnv) -> tuple[str, dict]:
+    def setup(self, env: BrowserEnv) -> tuple[str, dict]:  # This needs
         """
         Set up everything needed to execute the task.
 

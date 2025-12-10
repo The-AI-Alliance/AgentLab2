@@ -70,7 +70,7 @@ class Task[E: Environment](BaseModel, ABC):
     validate_per_step: bool = False
 
     @abstractmethod
-    def setup(self, environment: E) -> tuple[str, dict]:
+    def setup(self, env: E) -> tuple[str, dict]:
         """
         Set up the task in the given environment.
 
