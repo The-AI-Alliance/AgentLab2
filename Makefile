@@ -6,7 +6,7 @@ help:
 	@echo "make lint       - Lint and auto-fix"
 
 hello:
-	uv run recipes/hello_world.py
+	uv run recipes/hello_miniwob.py
 
 install:
 	uv sync
