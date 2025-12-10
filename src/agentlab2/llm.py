@@ -61,7 +61,7 @@ class LLM(BaseModel):
     temperature: float = 1.0
     max_tokens: int = 128000
     max_completion_tokens: int = 8192
-    reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
+    reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = None
     tool_choice: Literal["auto", "none", "required"] = "auto"
     parallel_tool_calls: bool = False
     num_retries: int = 5
@@ -81,6 +81,9 @@ class LLM(BaseModel):
             tools=prompt.tools,
             messages=prompt.messages,
         )
+        if self.reasoning_effort:
+            kwargs["reasoning_effort"] = self.reasoning_effort
+        response = completion(**kwargs)
         return response.choices[0].message  # type: ignore
 
     @property

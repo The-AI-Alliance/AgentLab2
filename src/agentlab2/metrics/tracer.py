@@ -1,4 +1,6 @@
+import uuid
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any, Iterator
 
 from opentelemetry import trace
@@ -15,12 +17,16 @@ class AgentTracer:
     def __init__(
         self,
         service_name: str,
-        run_dir: str,
+        output_dir: str,
         otlp_endpoint: str | None = None,
     ) -> None:
+        self.run_id = str(uuid.uuid4())
+        self.output_dir = Path(output_dir) / "metrics" / self.run_id
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
         resource = Resource.create({SERVICE_NAME: service_name})
         self._provider = TracerProvider(resource=resource)
-        self._provider.add_span_processor(BatchSpanProcessor(DiskSpanExporter(run_dir)))
+        self._provider.add_span_processor(BatchSpanProcessor(DiskSpanExporter(str(self.output_dir))))
 
         if otlp_endpoint:
             self._provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint)))
