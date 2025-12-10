@@ -18,13 +18,15 @@ def obs_to_messages(obs: Observation) -> List[dict]:
     messages = []
     images = {k: v for k, v in obs.contents.items() if isinstance(v.data, Image.Image)}
     non_images = {k: v for k, v in obs.contents.items() if k not in images}
+    tool_call_id = obs.tool_call_id
     for name, content in non_images.items():
         message = dict(
-            role="tool" if obs.tool_call_id else "user",
+            role="tool" if tool_call_id else "user",
             content=f"##{name}\n{content.data}",
         )
-        if obs.tool_call_id:
-            message["tool_call_id"] = obs.tool_call_id
+        if tool_call_id:
+            message["tool_call_id"] = tool_call_id
+            tool_call_id = None  # only first message gets the tool_call_id
         messages.append(message)
     for name, content in images.items():
         image_base64 = content.model_dump()["data"]
