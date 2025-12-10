@@ -13,7 +13,7 @@ logging.basicConfig(
     format="[%(levelname)s] %(asctime)s - %(name)s:%(lineno)d %(funcName)s() - %(message)s",
 )
 
-debug = True
+debug = False
 
 
 def main():
