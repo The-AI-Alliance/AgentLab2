@@ -4,7 +4,7 @@ import pprint
 from functools import partial
 from typing import Callable, List, Literal
 
-from litellm import Message, completion
+from litellm import Message, completion_with_retries
 from litellm.utils import token_counter
 from PIL import Image
 from pydantic import BaseModel, Field
@@ -64,16 +64,18 @@ class LLM(BaseModel):
     reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
     tool_choice: Literal["auto", "none", "required"] = "auto"
     parallel_tool_calls: bool = False
-    max_retries: int = 3
+    num_retries: int = 5
+    retry_strategy: Literal["exponential_backoff_retry", "constant_retry"] = "exponential_backoff_retry"
 
     def __call__(self, prompt: Prompt) -> Message:
-        response = completion(
+        response = completion_with_retries(
             model=self.model_name,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             max_completion_tokens=self.max_completion_tokens,
             reasoning_effort=self.reasoning_effort,
-            max_retries=self.max_retries,
+            num_retries=self.num_retries,
+            retry_strategy=self.retry_strategy,
             tool_choice=self.tool_choice,
             parallel_tool_calls=self.parallel_tool_calls,
             tools=prompt.tools,
