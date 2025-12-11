@@ -81,9 +81,6 @@ class LLM(BaseModel):
             tools=prompt.tools,
             messages=prompt.messages,
         )
-        if self.reasoning_effort:
-            kwargs["reasoning_effort"] = self.reasoning_effort
-        response = completion(**kwargs)
         return response.choices[0].message  # type: ignore
 
     @property

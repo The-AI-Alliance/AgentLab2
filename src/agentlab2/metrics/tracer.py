@@ -14,11 +14,24 @@ from agentlab2.metrics.processor import AL2_EXPERIMENT, AL2_NAME, AL2_TYPE, TYPE
 
 
 class AgentTracer:
+    """
+    OTEL-native tracer for AgentLab2 experiments.
+
+    Args:
+        service_name: Name of the service/experiment for OTEL resource.
+        output_dir: Directory to write trace files.
+        otlp_endpoint: Optional OTLP endpoint for remote trace collection.
+        set_global: If True (default), sets this as the global OTEL TracerProvider.
+            This allows auto-instrumented libraries (LiteLLM, httpx, etc.) to emit
+            spans into the same trace. Set to False for testing or multi-tracer scenarios.
+    """
+
     def __init__(
         self,
         service_name: str,
         output_dir: str,
         otlp_endpoint: str | None = None,
+        set_global: bool = True,
     ) -> None:
         self.run_id = str(uuid.uuid4())
         self.output_dir = Path(output_dir) / "metrics" / self.run_id
@@ -31,8 +44,13 @@ class AgentTracer:
         if otlp_endpoint:
             self._provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter(endpoint=otlp_endpoint)))
 
-        trace.set_tracer_provider(self._provider)
-        self._tracer = trace.get_tracer(__name__)
+        if set_global:
+            # Set as global provider so OTEL-instrumented libraries (LiteLLM, httpx, etc.)
+            # emit spans into this trace
+            trace.set_tracer_provider(self._provider)
+
+        # Always use our provider directly (works with or without global)
+        self._tracer = self._provider.get_tracer(__name__)
         self._current_experiment: str | None = None
 
     @contextmanager
