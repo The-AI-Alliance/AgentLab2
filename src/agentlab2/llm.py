@@ -61,7 +61,7 @@ class LLM(BaseModel):
     temperature: float = 1.0
     max_tokens: int = 128000
     max_completion_tokens: int = 8192
-    reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = None
+    reasoning_effort: Literal["minimal", "low", "medium", "high"] = "low"
     tool_choice: Literal["auto", "none", "required"] = "auto"
     parallel_tool_calls: bool = False
     num_retries: int = 5
