@@ -21,11 +21,17 @@ dependencies = [
     "python-dotenv~=1.2.0",
     "termcolor~=3.2",
     "miniwob>=1.0",
+    "opentelemetry-api>=1.20",
+    "opentelemetry-sdk>=1.20",
+    "opentelemetry-exporter-otlp-proto-http>=1.20",
 ]
 
 [build-system]
 requires = ["uv_build>=0.8.22,<0.9.0"]
 build-backend = "uv_build"
+
+[tool.uv_build]
+package-dir = "src"
 
 [tool.ruff]
 fix = true
@@ -40,6 +46,10 @@ line-ending = "auto"
 
 [tool.ruff.lint]
 extend-select = ["I"] # sort imports
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
 
 [dependency-groups]
 dev = [
