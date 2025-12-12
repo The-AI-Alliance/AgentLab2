@@ -1,0 +1,627 @@
+[
+  {
+    "desc": "Click on the numbers in ascending order.",
+    "subdomain": "ascending-numbers",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Find the line that bisects an angle evenly in two.",
+    "subdomain": "bisect-angle",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Search for flight results.",
+    "subdomain": "book-flight",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[book-flight] Removed animation.",
+    "subdomain": "book-flight-nodelay",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Buy a ticket that matches the requested criteria.",
+    "subdomain": "buy-ticket",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Learn to operate a date picker tool.",
+    "subdomain": "choose-date",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[choose-date] December only.",
+    "subdomain": "choose-date-easy",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[choose-date] December or November only.",
+    "subdomain": "choose-date-medium",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[choose-date] Removed animation.",
+    "subdomain": "choose-date-nodelay",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Choose an item from a drop down list.",
+    "subdomain": "choose-list",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Find the center of a circle.",
+    "subdomain": "circle-center",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click on a specific button in a generated form.",
+    "subdomain": "click-button",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click on buttons in a certain order.",
+    "subdomain": "click-button-sequence",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click desired checkboxes.",
+    "subdomain": "click-checkboxes",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[click-checkboxes] Click at least 5 out of up to 12 checkboxes.",
+    "subdomain": "click-checkboxes-large",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[click-checkboxes] Paraphrased entries.",
+    "subdomain": "click-checkboxes-soft",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[click-checkboxes] Train and test on different number of targets.",
+    "subdomain": "click-checkboxes-transfer",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click a collapsible element to expand it.",
+    "subdomain": "click-collapsible",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Find and click on a specified link, from collapsible elements.",
+    "subdomain": "click-collapsible-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[click-collapsible-2] Removed animation.",
+    "subdomain": "click-collapsible-2-nodelay",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[click-collapsible] Removed animation.",
+    "subdomain": "click-collapsible-nodelay",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click the specified color.",
+    "subdomain": "click-color",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click the button to close the dialog box.",
+    "subdomain": "click-dialog",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click a specific button in a dialog box.",
+    "subdomain": "click-dialog-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click on a specified link in text.",
+    "subdomain": "click-link",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click menu items.",
+    "subdomain": "click-menu",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Find a specific item from a menu.",
+    "subdomain": "click-menu-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click option boxes.",
+    "subdomain": "click-option",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click items on a pie menu.",
+    "subdomain": "click-pie",
+    "nondeterministic": true
+  },
+  {
+    "desc": "[click-pie] Removed animation.",
+    "subdomain": "click-pie-nodelay",
+    "nondeterministic": true
+  },
+  {
+    "desc": "Click multiple items from a scroll list.",
+    "subdomain": "click-scroll-list",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click the shades that match a specified color.",
+    "subdomain": "click-shades",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click on a specific shape.",
+    "subdomain": "click-shape",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click on a tab element.",
+    "subdomain": "click-tab",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click a link inside a specific tab element.",
+    "subdomain": "click-tab-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[click-tab-2] One 1 tab.",
+    "subdomain": "click-tab-2-easy",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[click-tab-2] Varying number of tabs from 2 to 6.",
+    "subdomain": "click-tab-2-hard",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[click-tab-2] Choose between a link or \u2018no match\u2019.",
+    "subdomain": "click-tab-2-medium",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click on a single button.",
+    "subdomain": "click-test",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click on one of two buttons.",
+    "subdomain": "click-test-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[click-test] Different buttons during train and test.",
+    "subdomain": "click-test-transfer",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click on a specific widget in a generated form.",
+    "subdomain": "click-widget",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Copy text and paste it into an input.",
+    "subdomain": "copy-paste",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Copy text from a specific textarea and paste it into an input.",
+    "subdomain": "copy-paste-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Count number of shapes.",
+    "subdomain": "count-shape",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Count the number of sides on a shape.",
+    "subdomain": "count-sides",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Create an event on a daily calendar.",
+    "subdomain": "daily-calendar",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Drag the smaller box into the larger box.",
+    "subdomain": "drag-box",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Drag an item in a specified direction.",
+    "subdomain": "drag-circle",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Drag a 3D cube to show a specific face.",
+    "subdomain": "drag-cube",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Drag items in a list, in a specified direction",
+    "subdomain": "drag-items",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Drag items in a 2D grid around.",
+    "subdomain": "drag-items-grid",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Drag shapes into a box.",
+    "subdomain": "drag-shapes",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Drag shapes into boxes, categorized by type.",
+    "subdomain": "drag-shapes-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Drag a randomly generated shape in a specified direction.",
+    "subdomain": "drag-single-shape",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Drag numbers into sorted ascending order.",
+    "subdomain": "drag-sort-numbers",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Draw a circle around a marked point.",
+    "subdomain": "draw-circle",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Draw a line through a marked point.",
+    "subdomain": "draw-line",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Navigate through an email inbox and perform some actions.",
+    "subdomain": "email-inbox",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[email-inbox] No scrolling + 1 subtask.",
+    "subdomain": "email-inbox-delete",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[email-inbox] No scrolling + 1 subtask.",
+    "subdomain": "email-inbox-forward",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[email-inbox-forward] varied instruction texts (30 templates).",
+    "subdomain": "email-inbox-forward-nl",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[email-inbox-forward] varied instruction texts (100 templates).",
+    "subdomain": "email-inbox-forward-nl-turk",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[email-inbox] No scrolling + 1 subtask.",
+    "subdomain": "email-inbox-important",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[email-inbox] varied instruction texts (100 templates for each subtask).",
+    "subdomain": "email-inbox-nl-turk",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[email-inbox] No scrolling.",
+    "subdomain": "email-inbox-noscroll",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[email-inbox] No scrolling + 1 subtask.",
+    "subdomain": "email-inbox-reply",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[email-inbox] No scrolling + 2 subtasks.",
+    "subdomain": "email-inbox-star-reply",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Use the date input to pick the correct date.",
+    "subdomain": "enter-date",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Enter the password into the form.",
+    "subdomain": "enter-password",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Enter given text to a textfield.",
+    "subdomain": "enter-text",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Convert given text to upper or lower case.",
+    "subdomain": "enter-text-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Enter dynamically generated text to a textfield.",
+    "subdomain": "enter-text-dynamic",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Enter the specified time into the input.",
+    "subdomain": "enter-time",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Find the card with the greatest number.",
+    "subdomain": "find-greatest",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Find the shortest mid-point of two points.",
+    "subdomain": "find-midpoint",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Find nth word in a block of text.",
+    "subdomain": "find-word",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Focus into a text input.",
+    "subdomain": "focus-text",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Focus on a specific text input.",
+    "subdomain": "focus-text-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Perform a series of instructions on a form.",
+    "subdomain": "form-sequence",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Perform a series of instructions on a form.",
+    "subdomain": "form-sequence-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Perform a series of instructions on a form.",
+    "subdomain": "form-sequence-3",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Generate a random number that meets certain criteria.",
+    "subdomain": "generate-number",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Find the Cartesian coordinates on a grid.",
+    "subdomain": "grid-coordinate",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Guess the number.",
+    "subdomain": "guess-number",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Highlight all the text.",
+    "subdomain": "highlight-text",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Highlight the specified paragraph.",
+    "subdomain": "highlight-text-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Find and click on the hot area.",
+    "subdomain": "hot-cold",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Identify a randomly generated shape.",
+    "subdomain": "identify-shape",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Enter user login details into the form.",
+    "subdomain": "login-user",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[login-user] Random popup.",
+    "subdomain": "login-user-popup",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Fill in forms of varying layouts.",
+    "subdomain": "multi-layouts",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Fill in forms with shuffled field orderings.",
+    "subdomain": "multi-orderings",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Navigate a file tree to find a specified file or folder.",
+    "subdomain": "navigate-tree",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Draw a given number using checkboxes.",
+    "subdomain": "number-checkboxes",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Mark each number as odd or even.",
+    "subdomain": "odd-or-even",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Order food items from a menu.",
+    "subdomain": "order-food",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Find a contact in a phone book.",
+    "subdomain": "phone-book",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Read information out from a table.",
+    "subdomain": "read-table",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Read multiple pieces of information out from a table.",
+    "subdomain": "read-table-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Resize a textarea in a given direction.",
+    "subdomain": "resize-textarea",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Given two points, add a third point to create a right angle.",
+    "subdomain": "right-angle",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Scroll through a text area element and enter last word into text area.",
+    "subdomain": "scroll-text",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Scroll through a text area in a given direction.",
+    "subdomain": "scroll-text-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Search through a bunch of results to find a specified link.",
+    "subdomain": "search-engine",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Sign a user agreement.",
+    "subdomain": "sign-agreement",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Solve for X.",
+    "subdomain": "simple-algebra",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Perform some arithmetic math operations.",
+    "subdomain": "simple-arithmetic",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Interact with a social media feed.",
+    "subdomain": "social-media",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[social-media] Do some action on all matching entries.",
+    "subdomain": "social-media-all",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[social-media] Do some action on some matching entries.",
+    "subdomain": "social-media-some",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Buy from the stock market below a specified price.",
+    "subdomain": "stock-market",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Use the terminal to delete a file.",
+    "subdomain": "terminal",
+    "nondeterministic": true
+  },
+  {
+    "desc": "Modify a text's style in a text-editor.",
+    "subdomain": "text-editor",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Enter slightly transformed text into a text box.",
+    "subdomain": "text-transform",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Win a game of tic-tac-toe.",
+    "subdomain": "tic-tac-toe",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Click on the button with the correct Unicode text.",
+    "subdomain": "unicode-test",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Use autocomplete element efficiently.",
+    "subdomain": "use-autocomplete",
+    "nondeterministic": false
+  },
+  {
+    "desc": "[use-autocomplete] Removed delay.",
+    "subdomain": "use-autocomplete-nodelay",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Use a color wheel.",
+    "subdomain": "use-colorwheel",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Use a color wheel given specific random color.",
+    "subdomain": "use-colorwheel-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Use a slider to select a particular value.",
+    "subdomain": "use-slider",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Use sliders to create a given combination.",
+    "subdomain": "use-slider-2",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Use a spinner to select given number.",
+    "subdomain": "use-spinner",
+    "nondeterministic": false
+  },
+  {
+    "desc": "Count the total number of blocks.",
+    "subdomain": "visual-addition",
+    "nondeterministic": true
+  }
+]
