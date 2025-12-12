@@ -9,14 +9,13 @@ from opentelemetry.sdk.trace.export import SpanExporter, SpanExportResult
 from agentlab2.metrics.processor import AL2_TYPE, TYPE_EPISODE, TraceProcessor
 from agentlab2.metrics.store import JsonlSpanWriter
 
-
 logger = logging.getLogger(__name__)
 
 MAX_PENDING_EXPORTS = 10
 
 
 class DiskSpanExporter(SpanExporter):
-    def __init__(self, run_dir: str) -> None:
+    def __init__(self, run_dir: Path) -> None:
         self._store = JsonlSpanWriter(run_dir)
         self._processor = TraceProcessor(run_dir)
         self._executor = ThreadPoolExecutor(max_workers=1)

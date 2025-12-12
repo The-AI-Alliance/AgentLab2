@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from agentlab2.agent import AgentConfig
 from agentlab2.benchmark import Benchmark
 from agentlab2.core import Trajectory
+from agentlab2.metrics.tracer import get_trace_env_vars
 from agentlab2.run import AgentRun
 
 logger = logging.getLogger(__name__)
@@ -40,7 +41,11 @@ class Experiment(BaseModel):
             f.write(self.model_dump_json(indent=2, serialize_as_any=True))
         logger.info(f"Saved experiment config to {config_path}")
 
-    def run_ray(self, n_cpus: int = 4, save_results: bool = True) -> list[Trajectory]:
+    def run_ray(
+        self,
+        n_cpus: int = 4,
+        save_results: bool = True,
+    ) -> list[Trajectory]:
         self.save_config()
 
         @ray.remote
@@ -48,12 +53,16 @@ class Experiment(BaseModel):
             return agent_run.run()
 
         if not ray.is_initialized():
+            runtime_env = {
+                "working_dir": None,
+                "env_vars": get_trace_env_vars(),
+            }
             ray_context = ray.init(
                 num_cpus=n_cpus,
                 dashboard_host="0.0.0.0",
                 include_dashboard=True,
                 log_to_driver=True,
-                runtime_env={"working_dir": None},
+                runtime_env=runtime_env,
             )
             logger.info(f"Ray initialized, dashboard at {ray_context.dashboard_url}")
 

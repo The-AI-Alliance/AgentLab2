@@ -4,12 +4,13 @@ Demonstrates AgentTracer usage without requiring the full agent framework.
 Shows benchmark/episode/step hierarchy and automatic episode export.
 """
 
+import uuid
+
 from agentlab2.metrics.tracer import AgentTracer
 
 
 def main() -> None:
-    tracer = AgentTracer(service_name="demo-agent", output_dir="./demo_output")
-    print(f"Run ID: {tracer.run_id}")
+    tracer = AgentTracer(service_name="demo-agent", output_dir=f"./demo_output/metrics/{uuid.uuid4()}")
     print(f"Output: {tracer.output_dir}")
 
     with tracer.benchmark("demo_experiment"):

@@ -1,18 +1,17 @@
-import os
 import threading
+from pathlib import Path
 
 from opentelemetry.sdk.trace import ReadableSpan
 
 from agentlab2.metrics.models import SpanRecord
 
-
 TRACES_JSONL = "traces.jsonl"
 
 
 class JsonlSpanWriter:
-    def __init__(self, run_dir: str) -> None:
-        os.makedirs(run_dir, exist_ok=True)
-        self._path = os.path.join(run_dir, TRACES_JSONL)
+    def __init__(self, run_dir: Path) -> None:
+        self._path = run_dir / TRACES_JSONL
+        self._path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
 
 
@@ -34,15 +33,15 @@ class JsonlSpanWriter:
 
     def write(self, record: SpanRecord) -> None:
         with self._lock:
-            with open(self._path, "a") as f:
+            with self._path.open("a") as f:
                 f.write(record.model_dump_json() + "\n")
 
 
     def scan_all(self) -> list[SpanRecord]:
         with self._lock:
-            if not os.path.exists(self._path):
+            if not self._path.exists():
                 return []
-            with open(self._path) as f:
+            with self._path.open() as f:
                 return [SpanRecord.model_validate_json(line) for line in f if line.strip()]
 
 

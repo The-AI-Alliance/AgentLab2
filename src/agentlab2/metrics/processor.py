@@ -6,7 +6,6 @@ from opentelemetry.sdk.trace import ReadableSpan
 from agentlab2.metrics.models import SpanRecord
 from agentlab2.metrics.store import JsonlSpanWriter
 
-
 AL2_TYPE = "al2.type"
 AL2_NAME = "al2.name"
 AL2_EXPERIMENT = "al2.experiment"
@@ -41,8 +40,8 @@ class TraceProcessor:
     """Exports episode spans to experiment/episode/step_{N}.json hierarchy."""
 
 
-    def __init__(self, run_dir: str) -> None:
-        self._run_dir = Path(run_dir)
+    def __init__(self, run_dir: Path) -> None:
+        self._run_dir = run_dir
         self._store = JsonlSpanWriter(run_dir)
 
 

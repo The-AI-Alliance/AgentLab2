@@ -49,7 +49,8 @@ class SyncPlaywrightTool(Tool):
         self.use_axtree = use_axtree
         self.use_screenshot = use_screenshot
         self._pw = sync_playwright().start()
-        self._browser = self._pw.chromium.launch(chromium_sandbox=True, **self.pw_kwargs)
+        chromium_sandbox = self.pw_kwargs.pop("chromium_sandbox", True)
+        self._browser = self._pw.chromium.launch(chromium_sandbox=chromium_sandbox, **self.pw_kwargs)
         self._page = self._browser.new_page()
 
     @property
