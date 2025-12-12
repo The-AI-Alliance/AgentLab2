@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 
@@ -6,6 +7,11 @@ from agentlab2.benchmarks.miniwob.benchmark import MiniWobBenchmark
 from agentlab2.envs.browser import BrowserEnvConfig
 from agentlab2.experiment import Experiment
 from agentlab2.llm import LLM
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(levelname)s] %(asctime)s - %(name)s:%(lineno)d %(funcName)s() - %(message)s",
+)
 
 debug = False
 
