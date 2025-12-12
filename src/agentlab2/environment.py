@@ -5,7 +5,7 @@ from typing import Any, List
 
 from pydantic import BaseModel
 
-from agentlab2.core import Action, EnvironmentOutput, Observation, ToolSchema
+from agentlab2.core import Action, Content, EnvironmentOutput, Observation, ToolSchema
 
 STOP_ACTION = ToolSchema(name="final_step", description="Stop the task execution.")
 
@@ -77,7 +77,7 @@ class Task[E: Environment](BaseModel, ABC):
         Set up the task in the given environment.
 
         Returns:
-            Tuple of (list of initial observations, dict with additional task info)
+            Tuple of (goal string, dict with additional task info)
         """
         pass
 
@@ -86,7 +86,7 @@ class Task[E: Environment](BaseModel, ABC):
         pass
 
     @abstractmethod
-    def validate_task(self, env: E, obs: Observation, action: Action) -> tuple[float, dict]:
+    def validate_task(self, env: E, obs: Observation) -> tuple[float, dict]:
         """Validate the whole trajectory and state of the env at the end of the run."""
         pass
 
@@ -108,3 +108,62 @@ class Task[E: Environment](BaseModel, ABC):
     def finished(self, env: E) -> bool:
         """Check if the task is finished."""
         return False
+
+
+class ToolboxEnv(Environment):
+    """Environment that uses a collection of tools for interaction."""
+
+    def __init__(self, task: Task, tools: list[Tool]):
+        self.task = task
+        self.tools = tools
+        self._action_name_to_tool = {action.name: tool for tool in tools for action in tool.actions}
+
+    def actions(self) -> list[ToolSchema]:
+        actions_union = [action for tool in self.tools for action in tool.actions]
+        return self.task.filter_actions(actions_union)
+
+    def setup(self) -> EnvironmentOutput:
+        for tool in self.tools:
+            tool.reset()
+        goal, info = self.task.setup(self)
+        return EnvironmentOutput(obs=Observation.from_text(goal), info=info)
+
+    def step(self, action: Action | list[Action]) -> EnvironmentOutput:
+        actions = [action] if isinstance(action, Action) else action
+        done = False
+        reward = 0.0
+        info = {}
+        tool_results = []
+        for action in actions:
+            if self.is_stop_action(action):
+                obs = Observation.from_text("Task finished by agent.")
+                done = True
+                break
+            if action.name not in self._action_name_to_tool:
+                raise ValueError(f"Action '{action.name}' is not supported by any tool in this environment.")
+            tool = self._action_name_to_tool[action.name]
+            tool_result = tool.execute_action(action)
+            tool_results.append(tool_result)
+        obs = self.merge_tool_results(tool_results)
+        done = done or self.task.finished(self)
+        if self.task.validate_per_step or done:
+            reward, info = self.task.validate_task(self, obs)
+
+        return EnvironmentOutput(obs=obs, reward=reward, info=info, done=done)
+
+    def merge_tool_results(self, tool_results: list[Any]) -> Observation:
+        merged_contents = []
+        for result in tool_results:
+            if isinstance(result, Observation):
+                merged_contents += result.contents
+            else:
+                merged_contents.append(Content(data=result))
+        return Observation(contents=merged_contents)
+
+    def is_stop_action(self, action: Action) -> bool:
+        return action.name == STOP_ACTION.name
+
+    def close(self):
+        self.task.teardown(self)
+        for tool in self.tools:
+            tool.close()
