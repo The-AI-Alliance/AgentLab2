@@ -7,7 +7,7 @@ from termcolor import colored
 from agentlab2.agent import Agent, AgentConfig
 from agentlab2.core import Action, AgentOutput, Observation, ToolSchema
 from agentlab2.environment import STOP_ACTION
-from agentlab2.llm import LLM, Prompt, obs_to_messages
+from agentlab2.llm import LLM, Prompt
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class ReactAgent(Agent):
         self.history: list[dict | Message] = []
 
     def step(self, obs: Observation) -> AgentOutput:
-        self.history += obs_to_messages(obs)
+        self.history += obs.to_llm_messages()
         self.maybe_compact_history()
         messages = [
             dict(role="system", content=self.config.system_prompt),

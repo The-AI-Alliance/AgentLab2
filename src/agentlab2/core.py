@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 from typing import Any, Callable, Dict, List, Self
 
 import litellm.utils
@@ -63,41 +64,77 @@ class AgentOutput(BaseModel):
     llm_output: Message | None = None
 
 
-image_prefix = "data:image/png;base64,"
+_image_prefix = "data:image/png;base64,"
 
 
 class Content(BaseModel):
     """Represents a piece of content in an observation."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
-    data: str | Image.Image  # The actual content data
+    tool_call_id: str | None = None  # content could be result of a tool call
+    name: str | None = None  # optional name of the content
+    data: str | dict | list | BaseModel | Image.Image  # The actual content data
 
     @field_serializer("data")
-    def serialize_image(self, data: str | Image.Image) -> str:
+    def serialize_data(self, data: str | Image.Image) -> str:
         if isinstance(data, str):
             return data
+        image_str = self.as_base64_image_str(data)
+        return image_str
+
+    def as_base64_image_str(self, data):
         byte_arr = io.BytesIO()
         data.save(byte_arr, format="PNG")
         encoded_image = base64.b64encode(byte_arr.getvalue()).decode("utf-8")
-        return f"{image_prefix}{encoded_image}"
+        return f"{_image_prefix}{encoded_image}"
 
     @field_validator("data", mode="before")
     @classmethod
-    def deserialize_image(cls, v: str):
-        if isinstance(v, str) and v.startswith(image_prefix):
-            v = v[len(image_prefix) :]
+    def deserialize_data(cls, v: str):
+        if isinstance(v, str) and v.startswith(_image_prefix):
+            v = v[len(_image_prefix) :]
             # Decode base64 string to bytes
             decoded_image = base64.b64decode(v)
             # Open bytes as PIL Image
             return Image.open(io.BytesIO(decoded_image))
         return v  # Return original value if not a string (e.g., already an Image object)
 
+    def to_message(self) -> dict:
+        """Convert content to a message dict for LLM input."""
+        if isinstance(self.data, Image.Image):
+            image_base64 = self.as_base64_image_str(self.data)
+            msg_content = [{"type": "image_url", "image_url": {"url": image_base64}}]
+            if self.name:
+                msg_content.insert(0, {"type": "text", "text": self.name})
+        elif isinstance(self.data, BaseModel):
+            msg_content = self.data.model_dump_json(serialize_as_any=True)
+        elif isinstance(self.data, (dict, list)):
+            msg_content = json.dumps(self.data)
+            if self.name:
+                msg_content = f"##{self.name}\n{msg_content}"
+        else:
+            msg_content = str(self.data)
+            if self.name:
+                msg_content = f"##{self.name}\n{msg_content}"
+        role = "tool" if self.tool_call_id else "user"
+        message = dict(role=role, content=msg_content)
+        if self.tool_call_id:
+            message["tool_call_id"] = self.tool_call_id
+        return message
+
 
 class Observation(BaseModel):
     """Represents an observation from the environment."""
 
-    tool_call_id: str | None = None  # first observation may not be linked to any tool call
-    contents: dict[str, Content]
+    contents: list[Content] = Field(default_factory=list)
+
+    @classmethod
+    def from_text(cls, text: str) -> Self:
+        return cls(contents=[Content(data=text)])
+
+    def to_llm_messages(self) -> list[dict]:
+        """Convert observation to a list of messages suitable for sending to LLM."""
+        return [content.to_message() for content in self.contents]
 
 
 class EnvironmentOutput(BaseModel):

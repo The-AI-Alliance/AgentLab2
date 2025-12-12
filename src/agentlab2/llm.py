@@ -6,39 +6,7 @@ from typing import Callable, List, Literal
 
 from litellm import Message, completion_with_retries
 from litellm.utils import token_counter
-from PIL import Image
 from pydantic import BaseModel, Field
-
-from agentlab2.core import Observation
-
-
-def obs_to_messages(obs: Observation) -> List[dict]:
-    """Convert observation to a list of messages suitable for sending to LLM."""
-
-    messages = []
-    images = {k: v for k, v in obs.contents.items() if isinstance(v.data, Image.Image)}
-    non_images = {k: v for k, v in obs.contents.items() if k not in images}
-    tool_call_id = obs.tool_call_id
-    for name, content in non_images.items():
-        message = dict(
-            role="tool" if tool_call_id else "user",
-            content=f"##{name}\n{content.data}",
-        )
-        if tool_call_id:
-            message["tool_call_id"] = tool_call_id
-            tool_call_id = None  # only first message gets the tool_call_id
-        messages.append(message)
-    for name, content in images.items():
-        image_base64 = content.model_dump()["data"]
-        message = dict(
-            role="user",
-            content=[
-                {"type": "text", "text": name},
-                {"type": "image_url", "image_url": {"url": image_base64}},
-            ],
-        )
-        messages.append(message)
-    return messages
 
 
 class Prompt(BaseModel):
