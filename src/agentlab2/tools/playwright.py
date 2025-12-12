@@ -48,6 +48,7 @@ class SyncPlaywrightTool(Tool):
         self.use_html = use_html
         self.use_axtree = use_axtree
         self.use_screenshot = use_screenshot
+        self.prune_html = prune_html
         self._pw = sync_playwright().start()
         self._browser = self._pw.chromium.launch(chromium_sandbox=True, **self.pw_kwargs)
         self._page = self._browser.new_page()
@@ -130,7 +131,7 @@ class SyncPlaywrightTool(Tool):
         obs = Observation(contents={}, tool_call_id=tool_call_id)
         if self.use_html:
             html = self.page_html()
-            if prune_html:
+            if self.prune_html:
                 obs.contents["pruned_html"] = Content(data=prune_html(html))
             else:
                 obs.contents["html"] = Content(data=html)
