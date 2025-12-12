@@ -54,8 +54,8 @@ class Environment(ABC):
         return []
 
     @abstractmethod
-    def step(self, action: Action) -> EnvironmentOutput:
-        """Execute a single action and return the observation."""
+    def step(self, action: Action | list[Action]) -> EnvironmentOutput:
+        """Execute a single or multiple actions and return the observation."""
         pass
 
     def close(self) -> None:
@@ -79,12 +79,12 @@ class Task[E: Environment](BaseModel, ABC):
         """
         pass
 
-    def teardown(self) -> None:
+    def teardown(self, env: E) -> None:
         """Optional clean up after task completion."""
         pass
 
     @abstractmethod
-    def validate_task(self, obs: Observation, action: Action) -> tuple[float, dict]:
+    def validate_task(self, env: E, obs: Observation, action: Action) -> tuple[float, dict]:
         """Validate the whole trajectory and state of the env at the end of the run."""
         pass
 
@@ -103,6 +103,6 @@ class Task[E: Environment](BaseModel, ABC):
         """Optional post-processing of observation before returning it to the agent."""
         return obs
 
-    def finished(self) -> bool:
+    def finished(self, env: E) -> bool:
         """Check if the task is finished."""
         return False

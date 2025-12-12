@@ -48,14 +48,17 @@ class BrowserEnv(Environment):
         obs = self.task.obs_postprocess(obs)
         return EnvironmentOutput(obs=obs, info=info)
 
-    def step(self, action: Action) -> EnvironmentOutput:
+    def step(self, action: Action | list[Action]) -> EnvironmentOutput:
+        if isinstance(action, list):
+            assert len(action) == 1, f"BrowserEnv only supports single Action per step, got {len(action)}: {action}"
+            action = action[0]
         action_result = self.browser_tool.execute_action(action)
         obs = self.browser_tool.page_obs(action.id, action_result)
-        done = self.task.finished()
+        done = self.task.finished(self)
         if self.task.validate_per_step:
-            reward, info = self.task.validate_task(obs, action)
+            reward, info = self.task.validate_task(self, obs, action)
         elif done:
-            reward, info = self.task.validate_task(obs, action)
+            reward, info = self.task.validate_task(self, obs, action)
         else:
             reward, info = 0.0, {}
         return EnvironmentOutput(obs=obs, reward=reward, info=info, done=done)
@@ -67,5 +70,5 @@ class BrowserEnv(Environment):
         return self.browser_tool.evaluate_js(script)
 
     def close(self):
-        self.task.teardown()
+        self.task.teardown(self)
         self.browser_tool.close()

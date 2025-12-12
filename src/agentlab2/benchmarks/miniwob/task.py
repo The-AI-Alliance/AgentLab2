@@ -27,7 +27,6 @@ class MiniWobTask(Task[BrowserEnv]):
         "browser_select_option",
         "browser_mouse_click_xy",
     ]
-    _env: BrowserEnv = None  # type: ignore
 
     def model_post_init(self, __context: Any):
         if self.base_url.endswith("/"):
@@ -53,10 +52,9 @@ class MiniWobTask(Task[BrowserEnv]):
         setup_js = self._get_setup_js()
         setup_result = env.evaluate_js(setup_js)
         goal, info = self._parse_setup_result(setup_result)
-        self._env = env
         return goal, info
 
-    def teardown(self) -> None:
+    def teardown(self, env: BrowserEnv) -> None:
         """
         Tear down the task, clean up resources if needed.
 
@@ -65,9 +63,9 @@ class MiniWobTask(Task[BrowserEnv]):
         """
         teardown_js = self._get_teardown_js()
         if teardown_js:
-            self._env.evaluate_js(teardown_js)
+            env.evaluate_js(teardown_js)
 
-    def validate_task(self, *args, **kwargs) -> tuple[float, dict]:
+    def validate_task(self, env: BrowserEnv, *args, **kwargs) -> tuple[float, dict]:
         """
         Validate the task, either per step or at the end.
 
@@ -76,7 +74,7 @@ class MiniWobTask(Task[BrowserEnv]):
             info: dict, custom information from the validation.
         """
         validate_js = self._get_step_validate_js()
-        validate_result = self._env.evaluate_js(validate_js)
+        validate_result = env.evaluate_js(validate_js)
         reward, info = self._parse_validation_result(validate_result)
         return reward, info
 
@@ -195,6 +193,6 @@ return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GL
         logger.info(f"Chosen {len(filtered)} out of {len(actions)} actions for MiniWob task.")
         return filtered
 
-    def finished(self) -> bool:
-        _, info = self.validate_task()
+    def finished(self, env: BrowserEnv) -> bool:
+        _, info = self.validate_task(env)
         return info.get("done", False)
