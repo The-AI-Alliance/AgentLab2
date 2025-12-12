@@ -54,17 +54,6 @@ class MiniWobTask(Task[BrowserEnv]):
         goal, info = self._parse_setup_result(setup_result)
         return goal, info
 
-    def teardown(self, env: BrowserEnv) -> None:
-        """
-        Tear down the task, clean up resources if needed.
-
-        Args:
-            page: the active playwright page.
-        """
-        teardown_js = self._get_teardown_js()
-        if teardown_js:
-            env.evaluate_js(teardown_js)
-
     def validate_task(self, env: BrowserEnv, *args, **kwargs) -> tuple[float, dict]:
         """
         Validate the task, either per step or at the end.
@@ -73,8 +62,9 @@ class MiniWobTask(Task[BrowserEnv]):
             reward: float, the reward obtained.
             info: dict, custom information from the validation.
         """
-        validate_js = self._get_step_validate_js()
-        validate_result = env.evaluate_js(validate_js)
+        validate_result = env.evaluate_js("""() => {
+return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GLOBAL, WOB_EPISODE_ID, WOB_TASK_READY];
+}""")
         reward, info = self._parse_validation_result(validate_result)
         return reward, info
 
@@ -156,14 +146,6 @@ return core.getUtterance();
         else:
             raise ValueError(f"Unexpected setup_result type: {type(setup_result)}")
 
-    def _get_teardown_js(self) -> str:
-        return ""
-
-    def _get_step_validate_js(self) -> str:
-        return """() => {
-return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GLOBAL, WOB_EPISODE_ID, WOB_TASK_READY];
-}"""
-
     def _parse_validation_result(self, validation_result: str | dict | list) -> tuple[float, dict]:
         if isinstance(validation_result, list):
             chunks = validation_result
@@ -194,5 +176,4 @@ return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GL
         return filtered
 
     def finished(self, env: BrowserEnv) -> bool:
-        _, info = self.validate_task(env)
-        return info.get("done", False)
+        return env.evaluate_js("() => {return WOB_DONE_GLOBAL;}")
