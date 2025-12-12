@@ -1,5 +1,5 @@
-from agentlab2.core import Action, Content, EnvironmentOutput
-from agentlab2.environment import STOP_ACTION, Environment, EnvironmentConfig, Task
+from agentlab2.core import Action, EnvironmentOutput
+from agentlab2.environment import EnvironmentConfig, Task, ToolboxEnv
 from agentlab2.tools.playwright import SyncPlaywrightTool
 
 
@@ -16,66 +16,33 @@ class BrowserEnvConfig(EnvironmentConfig):
 
     def make(self, task: Task) -> "BrowserEnv":
         """Create a BrowserEnv instance from the configuration for specified task."""
-        return BrowserEnv(self, task)
+        tool_config = self.model_dump()
+        tool_config.pop("pw_kwargs", None)
+        browser_tool = SyncPlaywrightTool(**tool_config, **self.pw_kwargs)
+        return BrowserEnv(task, browser_tool)
 
 
-class BrowserEnv(Environment):
-    """Environment that uses just a single tool, playwright browser, to interact with web pages."""
+class BrowserEnv(ToolboxEnv):
+    """Environment that uses only one browser tool for interaction."""
 
-    metadata: dict = {"tools": ["SyncPlaywrightTool"]}
-
-    def __init__(self, config: BrowserEnvConfig, task: Task):
-        self.task = task
-        self.config = config
-        self.browser_tool = SyncPlaywrightTool(
-            headless=self.config.headless,
-            timeout=self.config.timeout,
-            use_html=self.config.use_html,
-            use_axtree=self.config.use_axtree,
-            use_screenshot=self.config.use_screenshot,
-            prune_html=self.config.prune_html,
-            **self.config.pw_kwargs,
-        )
-
-    def actions(self):
-        return self.task.filter_actions(self.browser_tool.actions)
+    def __init__(self, task: Task, browser_tool: SyncPlaywrightTool):
+        super().__init__(task, [browser_tool])
+        self.browser_tool = browser_tool
 
     def setup(self) -> EnvironmentOutput:
-        self.browser_tool.reset()
-        goal, info = self.task.setup(self)
-        obs = self.browser_tool.page_obs()
-        obs.contents["goal"] = Content(data=goal)
-        obs = self.task.obs_postprocess(obs)
-        return EnvironmentOutput(obs=obs, info=info)
+        output = super().setup()
+        page_obs = self.browser_tool.page_obs()
+        output.obs.contents += self.task.obs_postprocess(page_obs).contents
+        return output
 
-    def step(self, action: Action | list[Action]) -> EnvironmentOutput:
-        if isinstance(action, list):
-            assert len(action) == 1, f"BrowserEnv only supports single Action per step, got {len(action)}: {action}"
-            action = action[0]
-        if self.is_stop_action(action):
-            action_result = "Task finished by agent."
-            done = True
-        else:
-            action_result = self.browser_tool.execute_action(action)
-            done = self.task.finished(self)
-        obs = self.browser_tool.page_obs(action.id, action_result)
-        if self.task.validate_per_step:
-            reward, info = self.task.validate_task(self, obs, action)
-        elif done:
-            reward, info = self.task.validate_task(self, obs, action)
-        else:
-            reward, info = 0.0, {}
-        return EnvironmentOutput(obs=obs, reward=reward, info=info, done=done)
-
-    def is_stop_action(self, action: Action) -> bool:
-        return action.name == STOP_ACTION.name
+    def step(self, action: Action) -> EnvironmentOutput:
+        output = super().step(action)
+        page_obs = self.browser_tool.page_obs()
+        output.obs.contents += self.task.obs_postprocess(page_obs).contents
+        return output
 
     def goto(self, url: str):
         self.browser_tool.goto(url)
 
     def evaluate_js(self, script: str):
         return self.browser_tool.evaluate_js(script)
-
-    def close(self):
-        self.task.teardown(self)
-        self.browser_tool.close()

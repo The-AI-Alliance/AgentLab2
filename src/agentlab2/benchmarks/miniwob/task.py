@@ -164,10 +164,15 @@ return core.getUtterance();
         }
 
     def obs_postprocess(self, obs: Observation) -> Observation:
-        if screenshot := obs.contents.get("screenshot", None):
-            # crop to 332x214 because this is the viewport size for MiniWob
-            if isinstance(screenshot.data, Image.Image):
-                obs.contents["screenshot"] = Content(data=screenshot.data.crop((0, 0, 332, 214)))
+        contents = []
+        for content in obs.contents:
+            if content.name == "screenshot" and isinstance(content.data, Image.Image):
+                # crop to 332x214 because this is the viewport size for MiniWob
+                cropped_image = content.data.crop((0, 0, 332, 214))
+                contents.append(Content(name=content.name, data=cropped_image))
+            else:
+                contents.append(content)
+        obs.contents = contents
         return obs
 
     def filter_actions(self, actions: list[ToolSchema]) -> list[ToolSchema]:
