@@ -6,5 +6,3 @@ except PackageNotFoundError:
     __version__ = "unknown"
 
 __all__ = ["__version__"]
-
-# TODO: Switch to dyanamic versioning with commit distance and hash later
