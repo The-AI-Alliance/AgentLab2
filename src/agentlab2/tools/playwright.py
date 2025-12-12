@@ -136,11 +136,9 @@ class SyncPlaywrightTool(Tool):
             else:
                 obs.contents.append(Content(data=html, name="html"))
         if self.use_axtree:
-            axtree = self.page_axtree()
-            obs.contents.append(Content(data=axtree, name="axtree_txt"))
+            obs.contents.append(Content(data=self.page_axtree(), name="axtree_txt"))
         if self.use_screenshot:
-            screenshot = self.page_screenshot()
-            obs.contents.append(Content(data=screenshot, name="screenshot"))
+            obs.contents.append(Content(data=self.page_screenshot(), name="screenshot"))
         return obs
 
     def reset(self):
@@ -150,7 +148,7 @@ class SyncPlaywrightTool(Tool):
     def execute_action(self, action: Action) -> Any:
         fn = self._actions[action.name]
         try:
-            action_result = fn(**action.arguments)
+            action_result = fn(**action.arguments) or "Success"
         except Exception as e:
             action_result = f"Error executing action {action.name}: {e}"
             logger.exception(action_result)

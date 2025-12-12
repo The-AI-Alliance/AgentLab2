@@ -133,7 +133,7 @@ class ToolboxEnv(Environment):
         done = False
         reward = 0.0
         info = {}
-        tool_results = []
+        contents = []
         for action in actions:
             if self.is_stop_action(action):
                 obs = Observation.from_text("Task finished by agent.")
@@ -143,22 +143,15 @@ class ToolboxEnv(Environment):
                 raise ValueError(f"Action '{action.name}' is not supported by any tool in this environment.")
             tool = self._action_name_to_tool[action.name]
             tool_result = tool.execute_action(action)
-            tool_results.append(tool_result)
-        obs = self.merge_tool_results(tool_results)
+            if tool_result is not None:
+                content = Content(data=tool_result, tool_call_id=action.id)
+                contents.append(content)
+        obs = Observation(contents=contents)
         done = done or self.task.finished(self)
         if self.task.validate_per_step or done:
             reward, info = self.task.validate_task(self, obs)
 
         return EnvironmentOutput(obs=obs, reward=reward, info=info, done=done)
-
-    def merge_tool_results(self, tool_results: list[Any]) -> Observation:
-        merged_contents = []
-        for result in tool_results:
-            if isinstance(result, Observation):
-                merged_contents += result.contents
-            else:
-                merged_contents.append(Content(data=result))
-        return Observation(contents=merged_contents)
 
     def is_stop_action(self, action: Action) -> bool:
         return action.name == STOP_ACTION.name
