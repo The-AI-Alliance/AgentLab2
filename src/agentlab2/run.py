@@ -38,18 +38,21 @@ class AgentRun(BaseModel):
             logger.info(colored(f"Initial env output: {env_output}", "blue"))
             trajectory = Trajectory(steps=[env_output], metadata={"task_id": self.task.id})
             self.save_trajectory(trajectory)
-            steps = 0
-            while not agent.finished() and not env_output.done and steps < self.max_steps:
+            turns = 0
+            while not agent.finished() and not env_output.done and turns < self.max_steps:
+                # Agent step
                 agent_output = agent.step(env_output.obs)
-                steps += 1
-                self.save_step(agent_output)
-                logger.info(colored(f"Step {steps} Agent output: {agent_output}", "magenta"))
+                logger.info(colored(f"Turn {turns} Agent output: {agent_output}", "magenta"))
                 trajectory.append(agent_output)
-                for action in agent_output.actions:
-                    env_output = env.step(action)
-                    self.save_step(env_output)
-                    logger.info(colored(f"Step {steps} Env output: {env_output}", "blue"))
-                    trajectory.append(env_output)
+                self.save_step(agent_output)
+
+                # Environment step
+                env_output = env.step(agent_output.actions)
+                logger.info(colored(f"Turn {turns} Env output: {env_output}", "blue"))
+                trajectory.append(env_output)
+                self.save_step(env_output)
+
+                turns += 1
         except Exception as e:
             logger.exception(f"Error during agent run: {e}")
             raise e
@@ -66,8 +69,7 @@ class AgentRun(BaseModel):
         with open(f"{self._output_name}.metadata.json", "w") as f:
             f.write(json.dumps(trajectory.metadata, indent=2))
         with open(f"{self._output_name}.jsonl", "a") as f:
-            for step in trajectory.steps:
-                f.write(step.model_dump_json() + "\n")
+            pass  # Create empty file for appending steps later
         logger.info(f"Saved trajectory for task {self.task.id} to {self._output_name}")
 
     def save_step(self, step: AgentOutput | EnvironmentOutput) -> None:
