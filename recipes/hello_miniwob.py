@@ -1,17 +1,12 @@
-import logging
 import os
 import time
 
 from agentlab2.agents.react import ReactAgentConfig
 from agentlab2.benchmarks.miniwob.benchmark import MiniWobBenchmark
 from agentlab2.envs.browser import BrowserEnvConfig
+from agentlab2.exp_runner import run_sequentially, run_with_ray
 from agentlab2.experiment import Experiment
 from agentlab2.llm import LLM
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(levelname)s] %(asctime)s - %(name)s:%(lineno)d %(funcName)s() - %(message)s",
-)
 
 debug = False
 
@@ -27,9 +22,9 @@ def main():
     exp = Experiment(name="miniwob", output_dir=output_dir, agent_config=agent_config, benchmark=benchmark)
 
     if debug:
-        exp.run_sequential(debug_limit=2)
+        run_sequentially(exp, debug_limit=2)
     else:
-        exp.run_ray(n_cpus=4)
+        run_with_ray(exp, n_cpus=6)
 
 
 if __name__ == "__main__":
