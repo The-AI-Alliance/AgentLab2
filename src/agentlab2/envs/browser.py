@@ -1,5 +1,5 @@
 from agentlab2.core import Action, Content, EnvironmentOutput
-from agentlab2.environment import Environment, EnvironmentConfig, Task
+from agentlab2.environment import STOP_ACTION, Environment, EnvironmentConfig, Task
 from agentlab2.tools.playwright import SyncPlaywrightTool
 
 
@@ -52,9 +52,13 @@ class BrowserEnv(Environment):
         if isinstance(action, list):
             assert len(action) == 1, f"BrowserEnv only supports single Action per step, got {len(action)}: {action}"
             action = action[0]
-        action_result = self.browser_tool.execute_action(action)
+        if self.is_stop_action(action):
+            action_result = "Task finished by agent."
+            done = True
+        else:
+            action_result = self.browser_tool.execute_action(action)
+            done = self.task.finished(self)
         obs = self.browser_tool.page_obs(action.id, action_result)
-        done = self.task.finished(self)
         if self.task.validate_per_step:
             reward, info = self.task.validate_task(self, obs, action)
         elif done:
@@ -62,6 +66,9 @@ class BrowserEnv(Environment):
         else:
             reward, info = 0.0, {}
         return EnvironmentOutput(obs=obs, reward=reward, info=info, done=done)
+
+    def is_stop_action(self, action: Action) -> bool:
+        return action.name == STOP_ACTION.name
 
     def goto(self, url: str):
         self.browser_tool.goto(url)

@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 from agentlab2.core import Action, EnvironmentOutput, Observation, ToolSchema
 
+STOP_ACTION = ToolSchema(name="final_step", description="Stop the task execution.")
+
 
 class Tool:
     """Base class for objects that can react on some actions"""

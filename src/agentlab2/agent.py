@@ -22,15 +22,9 @@ class Agent(ABC):
     @abstractmethod
     def step(self, obs: Observation) -> AgentOutput:
         """
-        Take a step given an observation.
-
-        Returns:
-            Actions to perform.
+        Perform a step given an observation and return the agent's output with actions.
         """
-        raise NotImplementedError("Subclasses must implement step()")
+        pass
 
-    def finished(self) -> bool:
-        """Optional check if the agent has finished its task."""
-        return False
-
-    ## TODO: Add a good __repr__
+    def __repr__(self) -> str:
+        return self.config.model_dump_json(indent=2, serialize_as_any=True)

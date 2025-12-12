@@ -39,7 +39,7 @@ class AgentRun(BaseModel):
             trajectory = Trajectory(steps=[env_output], metadata={"task_id": self.task.id})
             self.save_trajectory(trajectory)
             turns = 0
-            while not agent.finished() and not env_output.done and turns < self.max_steps:
+            while not env_output.done and turns < self.max_steps:
                 # Agent step
                 agent_output = agent.step(env_output.obs)
                 logger.info(colored(f"Turn {turns} Agent output: {agent_output}", "magenta"))

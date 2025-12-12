@@ -6,6 +6,7 @@ from termcolor import colored
 
 from agentlab2.agent import Agent, AgentConfig
 from agentlab2.core import Action, AgentOutput, Observation, ToolSchema
+from agentlab2.environment import STOP_ACTION
 from agentlab2.llm import LLM, Prompt, obs_to_messages
 
 logger = logging.getLogger(__name__)
@@ -57,10 +58,9 @@ class ReactAgent(Agent):
         self.llm = config.llm
         self.tools: list[dict] = [tool.as_dict() for tool in tools]
         if config.llm_can_finish:
-            self.tools.append(ToolSchema(name="final_step", description="Stop the task execution.").as_dict())
+            self.tools.append(STOP_ACTION.as_dict())
 
         self.history: list[dict | Message] = []
-        self._finished: bool = False
 
     def step(self, obs: Observation) -> AgentOutput:
         self.history += obs_to_messages(obs)
@@ -96,18 +96,12 @@ class ReactAgent(Agent):
                         raise ValueError(f"Invalid JSON arguments in tool call: {arguments}")
                 if tc.function.name is None:
                     raise ValueError("Tool call must have a function name.")
-                if self.config.llm_can_finish and tc.function.name == "final_step":
-                    self._finished = True  # early stop and return empty actions
-                    return []
                 actions.append(Action(id=tc.id, name=tc.function.name, arguments=arguments))
         return actions
 
     def max_actions_reached(self) -> bool:
         prev_actions = [msg for msg in self.history if isinstance(msg, Message) and msg.tool_calls]
         return len(prev_actions) >= self.config.max_actions
-
-    def finished(self) -> bool:
-        return self._finished or self.max_actions_reached()
 
     def maybe_compact_history(self):
         tokens = self.llm.counter(messages=self.history)
