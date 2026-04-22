@@ -1,0 +1,14 @@
+{
+  "name": "drbench",
+  "version": "0.2.1",
+  "description": "Deep Research Benchmark: 100 enterprise document research tasks requiring multi-hop retrieval across Nextcloud, Mattermost, email, and web.",
+  "authors": ["ServiceNow Research"],
+  "license": "Apache-2.0",
+  "num_tasks": 100,
+  "tags": ["enterprise", "document-retrieval", "multi-hop", "research", "rag"],
+  "reset_isolation": "restart",
+  "requirements": {
+    "docker": true,
+    "docker_image": "drbench-services"
+  }
+}
