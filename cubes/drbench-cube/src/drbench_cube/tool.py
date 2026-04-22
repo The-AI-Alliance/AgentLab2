@@ -93,6 +93,26 @@ def _extract_xlsx_text(content: bytes) -> str:
         return ""
 
 
+def _extract_pptx_text(content: bytes) -> str:
+    try:
+        from pptx import Presentation
+        prs = Presentation(io.BytesIO(content))
+        parts = []
+        for i, slide in enumerate(prs.slides, 1):
+            slide_texts = []
+            for shape in slide.shapes:
+                if shape.has_text_frame:
+                    for paragraph in shape.text_frame.paragraphs:
+                        text = paragraph.text.strip()
+                        if text:
+                            slide_texts.append(text)
+            if slide_texts:
+                parts.append(f"--- Slide {i} ---\n" + "\n".join(slide_texts))
+        return "\n\n".join(parts)
+    except Exception:
+        return ""
+
+
 def _extract_text_from_bytes(content: bytes, path: str, content_type: str) -> str:
     ext = os.path.splitext(path)[1].lower()
     if ext == ".pdf" or "pdf" in content_type:
@@ -101,6 +121,8 @@ def _extract_text_from_bytes(content: bytes, path: str, content_type: str) -> st
         return _extract_docx_text(content)
     if ext == ".xlsx" or "spreadsheetml" in content_type:
         return _extract_xlsx_text(content)
+    if ext == ".pptx" or "presentationml" in content_type:
+        return _extract_pptx_text(content)
     return ""
 
 

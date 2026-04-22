@@ -11,6 +11,7 @@ dependencies = [
     "PyPDF2",
     "python-docx",
     "openpyxl",
+    "python-pptx",
 ]
 
 [project.entry-points."cube.benchmarks"]
