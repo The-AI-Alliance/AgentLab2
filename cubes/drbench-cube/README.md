@@ -366,6 +366,45 @@ done triggers). Run from the **drbench-cube** directory:
 ```bash
 # Requires Docker + at least drbench-services:DR0001 image
 uv run python -m drbench_cube.debug
+
+# Or via the CUBE CLI
+cube test drbench-cube
+```
+
+### Unit tests (no Docker required)
+
+```bash
+pytest tests/
+```
+
+Covers benchmark loading, `DrBenchTaskMetadata` field access, config roundtrip,
+subset operations, and action-set presence — no container needed.
+
+### Known non-determinism in `reset()`
+
+`cube test`'s `test_reset_reproducibility` check will fail for DRBench. This is
+**expected and intentional**: `reset()` embeds dynamically-allocated host port URLs
+(e.g. `http://localhost:55023`) in the agent's initial prompt. These ports are
+assigned by Docker at container launch time, so two resets of the same task produce
+structurally identical but textually different observations.
+
+The non-determinism is confined to port numbers — the research question, persona,
+and credentials are always the same. Agents should treat the URLs as opaque
+endpoints and not rely on port values.
+
+### `evaluate()` requires `OPENAI_API_KEY`
+
+`cube test`'s `test_full_episode` check will also fail without `OPENAI_API_KEY` set,
+because the LLM judge (`score_report`) is called during `evaluate()`. The debug agent
+submits a placeholder report that intentionally scores 0.0. Set `OPENAI_API_KEY` and
+`SERPER_API_KEY` to run a meaningful end-to-end evaluation.
+
+### Regenerating `task_metadata.json`
+
+If the upstream `drbench` package updates its task set, regenerate the metadata file:
+
+```bash
+uv run python scripts/generate_task_metadata.py
 ```
 
 For the full DRBench test suite, see the

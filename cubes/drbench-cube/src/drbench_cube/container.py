@@ -7,9 +7,8 @@ DrBenchContainerBackend launches per-task baked Docker images (with base image f
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Dict
 
 import docker
 from cube.container import (

@@ -13,7 +13,6 @@ import io
 import json
 import logging
 import os
-from pathlib import Path
 
 import requests
 from bs4 import BeautifulSoup
@@ -35,10 +34,39 @@ _MAX_CONTENT_CHARS = 50_000
 # ---------------------------------------------------------------------------
 
 _TEXT_EXTENSIONS = {
-    ".txt", ".csv", ".tsv", ".md", ".markdown", ".rst", ".html", ".htm",
-    ".json", ".xml", ".yaml", ".yml", ".ini", ".cfg", ".conf", ".log",
-    ".py", ".js", ".ts", ".java", ".c", ".cpp", ".h", ".sh", ".bash",
-    ".sql", ".r", ".rb", ".go", ".rs", ".toml", ".env", ".properties",
+    ".txt",
+    ".csv",
+    ".tsv",
+    ".md",
+    ".markdown",
+    ".rst",
+    ".html",
+    ".htm",
+    ".json",
+    ".xml",
+    ".yaml",
+    ".yml",
+    ".ini",
+    ".cfg",
+    ".conf",
+    ".log",
+    ".py",
+    ".js",
+    ".ts",
+    ".java",
+    ".c",
+    ".cpp",
+    ".h",
+    ".sh",
+    ".bash",
+    ".sql",
+    ".r",
+    ".rb",
+    ".go",
+    ".rs",
+    ".toml",
+    ".env",
+    ".properties",
 }
 
 
@@ -52,6 +80,7 @@ def _is_text_content(path: str, content_type: str) -> bool:
 def _extract_pdf_text(content: bytes) -> str:
     try:
         import PyPDF2
+
         reader = PyPDF2.PdfReader(io.BytesIO(content))
         pages = [page.extract_text() for page in reader.pages if page.extract_text()]
         if pages:
@@ -60,6 +89,7 @@ def _extract_pdf_text(content: bytes) -> str:
         pass
     try:
         import pdfplumber
+
         with pdfplumber.open(io.BytesIO(content)) as pdf:
             pages = [page.extract_text() for page in pdf.pages if page.extract_text()]
             if pages:
@@ -72,6 +102,7 @@ def _extract_pdf_text(content: bytes) -> str:
 def _extract_docx_text(content: bytes) -> str:
     try:
         import docx
+
         doc = docx.Document(io.BytesIO(content))
         return "\n".join(p.text for p in doc.paragraphs if p.text)
     except Exception:
@@ -81,6 +112,7 @@ def _extract_docx_text(content: bytes) -> str:
 def _extract_xlsx_text(content: bytes) -> str:
     try:
         import openpyxl
+
         wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
         lines = []
         for sheet in wb.sheetnames:
@@ -96,6 +128,7 @@ def _extract_xlsx_text(content: bytes) -> str:
 def _extract_pptx_text(content: bytes) -> str:
     try:
         from pptx import Presentation
+
         prs = Presentation(io.BytesIO(content))
         parts = []
         for i, slide in enumerate(prs.slides, 1):
@@ -165,12 +198,14 @@ def _fetch_from_html(content_bytes: bytes) -> str:
 def _fetch_from_pdf(content_bytes: bytes) -> str:
     try:
         import PyPDF2
+
         reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
         return "\n".join(page.extract_text() for page in reader.pages if page.extract_text()).strip()
     except Exception:
         pass
     try:
         import pdfplumber
+
         with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
             return "\n".join(p.extract_text() for p in pdf.pages if p.extract_text()).strip()
     except Exception:
@@ -180,6 +215,7 @@ def _fetch_from_pdf(content_bytes: bytes) -> str:
 # ---------------------------------------------------------------------------
 # DrBenchTool
 # ---------------------------------------------------------------------------
+
 
 class DrBenchTool(Tool):
     """
@@ -195,24 +231,32 @@ class DrBenchTool(Tool):
         self._container = container
         self._submitted_report: str | None = None
 
-        self._nc = NextcloudAdapter({
-            "url": container.get_url(8081),
-            "credentials": {"username": username, "password": password},
-        })
-        self._mm = MattermostAdapter({
-            "url": container.get_url(8082),
-            "credentials": {"username": username, "password": password},
-        })
-        self._email = EmailAdapter({
-            "url": f"imap://localhost:{container.forward_port(1143)}",
-            "host_port": container.forward_port(1143),
-            "name": "email_imap",
-            "credentials": {"username": username, "password": password},
-        })
-        self._fb = FileBrowserAdapter({
-            "url": container.get_url(8090),
-            "credentials": {"username": username, "password": password},
-        })
+        self._nc = NextcloudAdapter(
+            {
+                "url": container.get_url(8081),
+                "credentials": {"username": username, "password": password},
+            }
+        )
+        self._mm = MattermostAdapter(
+            {
+                "url": container.get_url(8082),
+                "credentials": {"username": username, "password": password},
+            }
+        )
+        self._email = EmailAdapter(
+            {
+                "url": f"imap://localhost:{container.forward_port(1143)}",
+                "host_port": container.forward_port(1143),
+                "name": "email_imap",
+                "credentials": {"username": username, "password": password},
+            }
+        )
+        self._fb = FileBrowserAdapter(
+            {
+                "url": container.get_url(8090),
+                "credentials": {"username": username, "password": password},
+            }
+        )
 
     def reset(self) -> None:
         self._submitted_report = None
@@ -440,13 +484,15 @@ class DrBenchTool(Tool):
                 text = content_bytes.decode("utf-8", errors="ignore")
                 title = "Web Document"
 
-            return json.dumps({
-                "url": url,
-                "title": title,
-                "content_type": content_type.split(";")[0].strip(),
-                "content_length": len(text),
-                "content": text[:_MAX_CONTENT_CHARS],
-            })
+            return json.dumps(
+                {
+                    "url": url,
+                    "title": title,
+                    "content_type": content_type.split(";")[0].strip(),
+                    "content_length": len(text),
+                    "content": text[:_MAX_CONTENT_CHARS],
+                }
+            )
         except Exception as e:
             return json.dumps({"url": url, "error": f"Fetch failed: {str(e)}"})
 
@@ -472,6 +518,7 @@ class DrBenchTool(Tool):
 # ---------------------------------------------------------------------------
 # DrBenchToolConfig
 # ---------------------------------------------------------------------------
+
 
 class DrBenchToolConfig(ToolConfig):
     """Serializable config that instantiates a DrBenchTool from a container."""

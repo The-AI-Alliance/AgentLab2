@@ -9,15 +9,13 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Tuple
 
-from cube.benchmark import RuntimeContext
 from cube.container import ContainerBackend
 from cube.core import Observation
 from cube.task import Task, TaskConfig, TaskMetadata
-
-from drbench_cube.container import DrBenchContainerBackend
-from drbench_cube.tool import DrBenchToolConfig
 from drbench.score_report import score_report
 from drbench.task_loader import get_task_from_id
+from drbench_cube.container import DrBenchContainerBackend
+from drbench_cube.tool import DrBenchToolConfig
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +24,7 @@ You are {persona_name}, {persona_role} at {company_name} ({company_industry}).
 
 Your credentials:
   username: {username}
-  password: {password}
+  password: {password} 
 
 You have access to the following systems:
   - Nextcloud (company file storage): {nextcloud_url}
@@ -156,9 +154,9 @@ class DrBenchTaskConfig(TaskConfig):
         runtime_context=None,
         container_backend: ContainerBackend | None = None,
     ) -> DrBenchTask:
-        from drbench_cube.benchmark import DrBenchBenchmark
+        from drbench_cube.benchmark import DrBenchBenchmarkConfig
 
-        metadata: TaskMetadata = DrBenchBenchmark.task_metadata[self.task_id]
+        metadata: TaskMetadata = DrBenchBenchmarkConfig.task_metadata[self.task_id]
 
         # Load persona credentials to build the ToolConfig
         drbench_task = get_task_from_id(self.task_id)

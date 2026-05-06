@@ -4,7 +4,7 @@ version = "0.2.1"
 description = "Deep Research Benchmark: 100 enterprise document research tasks requiring multi-hop retrieval across Nextcloud, Mattermost, email, and web."
 requires-python = ">=3.12"
 dependencies = [
-    "cube-standard",
+    "cube-standard>=0.1.0rc8",
     "drbench",
     "requests",
     "beautifulsoup4",
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.entry-points."cube.benchmarks"]
-drbench-cube = "drbench_cube.benchmark:DrBenchBenchmark"
+drbench-cube = "drbench_cube.benchmark:DrBenchBenchmarkConfig"
 
 [build-system]
 requires = ["uv_build>=0.8,<0.9"]

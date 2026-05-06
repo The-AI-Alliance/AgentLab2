@@ -15,7 +15,7 @@ than reward value.
 
 Public API
 ----------
-get_debug_benchmark()        → DrBenchBenchmark (scoped to sanity subset)
+get_debug_benchmark()        → DrBenchBenchmarkConfig (scoped to sanity subset)
 make_debug_agent(task_id)    → DebugAgent
 
 Usage::
@@ -29,7 +29,7 @@ import logging
 
 from cube.core import Action, ActionSchema, Observation
 
-from drbench_cube.benchmark import DrBenchBenchmark
+from drbench_cube.benchmark import DrBenchBenchmarkConfig
 from drbench_cube.container import DrBenchContainerBackend
 
 logger = logging.getLogger(__name__)
@@ -70,19 +70,14 @@ class DebugAgent:
 
     def __init__(self, task_id: str) -> None:
         if task_id not in _TASK_ACTIONS:
-            raise ValueError(
-                f"No debug actions registered for task {task_id!r}. "
-                f"Known tasks: {list(_TASK_ACTIONS)}"
-            )
+            raise ValueError(f"No debug actions registered for task {task_id!r}. Known tasks: {list(_TASK_ACTIONS)}")
         self._task_id = task_id
         self._step = 0
         self._actions = list(_TASK_ACTIONS[task_id])
 
     def get_action(self, obs: Observation) -> Action:
         if self._step >= len(self._actions):
-            raise StopIteration(
-                f"[DebugAgent] task={self._task_id!r}: all {len(self._actions)} actions exhausted"
-            )
+            raise StopIteration(f"[DebugAgent] task={self._task_id!r}: all {len(self._actions)} actions exhausted")
         action = self._actions[self._step]
         logger.info(
             "[DebugAgent] task=%r  step=%d/%d  action=%s",
@@ -103,10 +98,10 @@ class DebugAgent:
 # ---------------------------------------------------------------------------
 
 
-def get_debug_benchmark() -> DrBenchBenchmark:
-    """Return a DrBenchBenchmark scoped to the debug tasks (DR0001 from val subset)."""
+def get_debug_benchmark() -> DrBenchBenchmarkConfig:
+    """Return a DrBenchBenchmarkConfig scoped to the debug tasks (DR0001 from val subset)."""
     debug_ids = list(_TASK_ACTIONS.keys())
-    benchmark = DrBenchBenchmark(container_backend=DrBenchContainerBackend())
+    benchmark = DrBenchBenchmarkConfig(container_backend=DrBenchContainerBackend())
     return benchmark.subset_from_list(debug_ids)
 
 
