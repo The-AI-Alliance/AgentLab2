@@ -87,7 +87,7 @@ class Trajectory(TypedBaseModel):
   `TrajectoryEvent.output`. Callers that pattern-match on those types must
   switch to the new event types.
 - `AgentOutput` itself remains as the return type of `Agent.step()` — it is
-  internally converted into an `AgentEvent` by `LoopContext.record_agent_event`.
+  internally converted into an `AgentEvent` by `TurnRecorder.record()`.
 
 ---
 
@@ -102,21 +102,48 @@ class Agent(ABC):
         self,
         initial_obs: Observation,
         toolbox: "MonitoredToolbox",
-        ctx: "LoopContext",
+        recorder: "TurnRecorder",
     ) -> None
 ```
 
 Default implementation in the base class:
 
 1. `obs = initial_obs`
-2. While not `ctx.is_done` and `ctx.turn < ctx.budget.max_turns`:
+2. Loop forever (termination is driven by exceptions raised out of
+   `toolbox(action)`, not by checking flags):
    1. `agent_output = await asyncio.to_thread(self.step, obs)` (sync agents)
       or `agent_output = await self.astep(obs)` if subclass defines `astep`.
-   2. `ctx.record_agent_event(agent_output)`.
+   2. `recorder.record(agent_output)`.
    3. If `not agent_output.actions and not agent_output.error`: return.
    4. For each `action` in `agent_output.actions`: `await toolbox(action)`.
-      The last `EnvironmentOutput`'s `obs` becomes the next `obs`.
-3. Returns normally on budget exhaustion or empty actions. Raises propagate.
+      The last `EnvironmentOutput`'s `obs` becomes the next `obs`. The call
+      may raise `EpisodeDone` or `BudgetExceeded` (both `BaseException`
+      subclasses) — those propagate to `Episode`.
+3. Returns normally on empty actions. Raises propagate.
+
+### `TurnRecorder`
+
+Agent-facing telemetry sink, constructed by `Episode` per-episode.
+
+```python
+class TurnRecorder:
+    # Coarse — one call per LLM cycle, all-at-once. Default agent uses this.
+    def record(self, output: AgentOutput) -> None
+    # Granular — for streaming agents that emit incrementally.
+    def begin_turn(self) -> "Turn"
+
+class Turn:
+    # Context manager. __exit__ flushes one AgentEvent built from
+    # accumulated fields.
+    def add_llm_call(self, call: LLMCall) -> None
+    def add_thought(self, text: str) -> None
+    def add_response_text(self, text: str) -> None
+    def add_profile(self, label: str, start: float, end: float) -> None
+    def add_error(self, err: StepError) -> None
+```
+
+`record(output)` is internally implemented as a thin wrapper around
+`begin_turn()` — one underlying code path, two surfaces.
 
 ### Semantics
 
@@ -127,7 +154,11 @@ Default implementation in the base class:
   out of `toolbox(action)` should propagate. Catching them is forbidden by
   convention. `MonitoredTool` re-raises immediately on subsequent calls
   (sticky-done), so swallowing once still terminates the agent.
-- Agents must not capture `ctx` references that outlive `run()`.
+- Agents must not capture `recorder` or `toolbox` references that outlive
+  `run()`.
+- Agents do not read budget, `is_done`, or trajectory state. Those concerns
+  belong to `toolbox` (which raises) and `Episode` (which finalizes). The
+  agent's job is to think and call tools.
 
 ### Updated invariants
 
@@ -136,7 +167,7 @@ Default implementation in the base class:
    implementable; agents that override `run` only must still provide a
    trivial `step` that raises `NotImplementedError` for clarity.
 3. Every LLM call inside `step` or `run` must be captured in the resulting
-   `AgentEvent.llm_calls`.
+   `AgentEvent.llm_calls` (via `recorder.record(...)` or `Turn.add_llm_call(...)`).
 
 ### Contracts for implementers
 
@@ -145,6 +176,9 @@ Default implementation in the base class:
 - For early termination from inside the agent: return from `run` (don't raise).
 - For "the env said done" handling: catch `EpisodeDone` only if you need the
   final `EnvironmentOutput` carried on the exception; otherwise let it propagate.
+- For streaming agents: use `recorder.begin_turn() as turn:` and call
+  `turn.add_*` as data arrives. Avoid the coarse `record(output)` for
+  streaming use cases — it loses the partial-emit advantage.
 
 ---
 
@@ -154,19 +188,44 @@ Default implementation in the base class:
 
 ```python
 class MonitoredTool(AsyncTool):
-    def __init__(self, inner: AsyncTool | Tool, ctx: "LoopContext")
+    def __init__(
+        self,
+        inner: AsyncTool | Tool,
+        trajectory: Trajectory,
+        budget: Budget,
+        storage: Storage,
+        summary: SummaryProcessor,
+        tracer: Tracer,
+    )
+    # State the toolbox owns internally (not exposed to agents):
+    #   _is_done: bool                   (sticky)
+    #   _last_env_output: EnvironmentOutput | None
 
     async def __call__(self, action: Action) -> EnvironmentOutput
-    # 1. If ctx.is_done: raise EpisodeDone(ctx.last_env_output).
-    # 2. If ctx.budget.exhausted: set ctx.is_done; raise BudgetExceeded.
+    # 1. If self._is_done: raise EpisodeDone(self._last_env_output).
+    # 2. If self.budget.exhausted: set self._is_done; raise BudgetExceeded.
     # 3. Open OTel span; await inner.aexecute_action(action) wrapping sync as needed.
-    # 4. ctx.record_tool_call(action, env_output).
-    # 5. If env_output.done: set ctx.is_done; raise EpisodeDone(env_output).
-    # 6. Return env_output.
+    # 4. Append a ToolCallEvent to trajectory; storage.save_event; summary.on_event.
+    # 5. self._last_env_output = env_output.
+    # 6. If env_output.done: set self._is_done; raise EpisodeDone(env_output).
+    # 7. Return env_output.
+
+    @property
+    def last_env_output(self) -> EnvironmentOutput | None
+    # Read-only accessor for Episode (to compute final_obs after agent.run returns).
 
 class MonitoredToolbox(AsyncToolbox):
-    def __init__(self, inner: Toolbox | AsyncToolbox, ctx: "LoopContext")
-    # Wraps each member tool as MonitoredTool sharing ctx.
+    def __init__(
+        self,
+        inner: Toolbox | AsyncToolbox,
+        trajectory: Trajectory,
+        budget: Budget,
+        storage: Storage,
+        summary: SummaryProcessor,
+        tracer: Tracer,
+    )
+    # Wraps each member tool as MonitoredTool sharing the same _is_done /
+    # _last_env_output / budget state across the toolbox instance.
 
 class EpisodeDone(BaseException):
     output: EnvironmentOutput | None
@@ -183,8 +242,12 @@ class BudgetExceeded(BaseException):
 - `EpisodeDone` / `BudgetExceeded` subclass `BaseException` (not `Exception`)
   so an agent's `try / except Exception` does not swallow them. Bare `except:`
   in agents is forbidden by review (CC-003 vibe-coding rule).
-- Sticky-done: `ctx.is_done` is checked on entry to every `__call__`. Once
-  set, no further env state mutates.
+- Sticky-done: the toolbox's internal `_is_done` flag is checked on entry to
+  every `__call__`. Once set, no further env state mutates.
+- The agent does not see `_is_done`, `_last_env_output`, or `budget`
+  directly — only the raised exceptions and the `EnvironmentOutput`
+  returned from a successful call. The toolbox is the agent's window on
+  termination signals.
 
 ### Removed
 
@@ -195,8 +258,9 @@ class BudgetExceeded(BaseException):
 
 ### Gotchas
 
-- `MonitoredToolbox` must be constructed per-episode — `ctx` is per-episode
-  state. Re-using a `MonitoredToolbox` across episodes is a bug.
+- `MonitoredToolbox` must be constructed per-episode — its internal state
+  (`_is_done`, `_last_env_output`, budget counters) is per-episode. Re-using
+  a `MonitoredToolbox` across episodes is a bug.
 - The OTel span attribute `gen_ai.tool.call.result` still uses the
   string-coerced result body, same as today.
 
@@ -211,37 +275,47 @@ class BudgetExceeded(BaseException):
 ```python
 async def run(self) -> Trajectory:
     task = self.task_config.make(runtime_context=..., container_backend=...)
-    ctx = LoopContext(
-        task=task, storage=self.storage, summary=self.summary,
-        tracer=self.tracer, trajectory=Trajectory(id=..., events=[]),
-        budget=Budget(max_turns=self.max_steps, ...),
+    trajectory = Trajectory(id=..., events=[])
+    budget = Budget(max_turns=self.max_steps, ...)
+    toolbox = MonitoredToolbox(
+        task.toolbox, trajectory, budget,
+        self.storage, self.summary, self.tracer,
     )
-    toolbox = MonitoredToolbox(task.toolbox, ctx)
+    recorder = TurnRecorder(trajectory, self.storage, self.summary, self.tracer)
     initial = task.reset()
-    ctx.record_reset(initial)                     # synthetic event capturing the initial obs
+    recorder.record_reset(initial)                # Episode-only helper on recorder
     try:
-        await self.agent.run(initial.obs, toolbox, ctx)
+        await self.agent.run(initial.obs, toolbox, recorder)
     except EpisodeDone:
         pass
-    except BudgetExceeded:
-        ctx.record_failure(BudgetExceeded(...))
+    except BudgetExceeded as e:
+        recorder.record_failure(e)
     except BaseException as e:
-        ctx.record_failure(e)
+        recorder.record_failure(e)
     finally:
-        final_obs = ctx.last_env_output.obs if ctx.last_env_output else None
+        final_obs = toolbox.last_env_output.obs if toolbox.last_env_output else None
         try:
             reward, info = task.evaluate(final_obs)
-            ctx.record_evaluation(reward, info)
+            recorder.record_evaluation(reward, info)
         except Exception as e:
-            ctx.record_evaluation(0.0, {"evaluate_failed": str(e)})
-        await self.storage.finalize(ctx.trajectory)
-        self.summary.on_episode_complete(ctx.trajectory, self.storage)
+            recorder.record_evaluation(0.0, {"evaluate_failed": str(e)})
+        await self.storage.finalize(trajectory)
+        self.summary.on_episode_complete(trajectory, self.storage)
         try:
             task.close()
         finally:
             self.tracer.shutdown()
-    return ctx.trajectory
+    return trajectory
 ```
+
+The `trajectory` lives on `Episode`. `toolbox` and `recorder` are both bound
+to it at construction. Only `toolbox` and `recorder` are passed to the agent;
+the agent never sees the trajectory directly.
+
+`TurnRecorder` exposes Episode-only helpers (`record_reset`,
+`record_failure`, `record_evaluation`) on the same object as the agent-facing
+methods, to keep event construction in one place. Agents should not call
+these; the convention is documented but not actively prevented in v1.
 
 ### Invariants
 
@@ -252,8 +326,10 @@ async def run(self) -> Trajectory:
 3. `task.reset()` is always called by `Episode`, never by the agent.
 4. `task.evaluate()` is always called by `Episode` after `agent.run` returns,
    exactly once.
-5. `Trajectory.events` is persisted incrementally — each `record_*` call
-   triggers a corresponding `storage.save_event`.
+5. `Trajectory.events` is persisted incrementally — every `MonitoredTool` call
+   appends a `ToolCallEvent`; every `recorder.record()` / `Turn.__exit__`
+   appends an `AgentEvent`; each append triggers a corresponding
+   `storage.save_event`.
 
 ### Updated `EpisodeConfig`
 
@@ -414,11 +490,12 @@ group (parent `AgentEvent` above, siblings below).
   renders all tabs.
 - **Smoke**: a new experiment dir (events/ layout) loads through XRay and
   renders all tabs.
-- **Unit**: `LoopContext.record_*` methods produce the right events with the
-  right back-references (`AgentEvent.id` / `ToolCallEvent.action_id` /
-  `turn_id`).
+- **Unit**: `TurnRecorder.record()` and `TurnRecorder.begin_turn()` produce
+  equivalent `AgentEvent`s; both paths preserve `AgentEvent.id`,
+  back-references, and field set.
 - **Unit**: `MonitoredTool.__call__` honours sticky-done, budget exhaustion,
-  and `EnvironmentOutput.done`.
+  and `EnvironmentOutput.done`. The internal `_is_done` / `_last_env_output`
+  state is per-toolbox-instance.
 
 ---
 

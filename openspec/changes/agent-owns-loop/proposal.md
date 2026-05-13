@@ -39,27 +39,35 @@ trajectories into typed event streams.
 
 ### In
 
-- New `Agent.run(initial_obs, toolbox, ctx) async` with a default implementation
-  that drives the existing `step()`-based loop. Sync agents keep working.
+- New `Agent.run(initial_obs, toolbox, recorder) async` with a default
+  implementation that drives the existing `step()`-based loop. Sync agents
+  keep working.
 - New `MonitoredTool` / `MonitoredToolbox` wrappers in cube-harness that emit
   trajectory events (and OTel spans) on every call. They replace
-  `ToolWithTelemetry` for in-process runs.
+  `ToolWithTelemetry` for in-process runs. The toolbox owns budget
+  enforcement, the `is_done` sticky flag, and tool-call recording — agents
+  see those concerns only through raised exceptions and tool-call return
+  values.
 - New trajectory event model: `AgentEvent`, `ToolCallEvent`, `EvaluationEvent`,
   replacing the binary `EnvironmentOutput | AgentOutput` union. Alternation
   invariant removed.
-- `LoopContext` (`ctx`) carries the storage, summary, tracer, trajectory,
-  budget, last env output, and an `is_done` sticky flag. Both the default
-  `Agent.run` and `MonitoredTool` mutate it through the same hook helpers.
+- `TurnRecorder` is the agent's outbound telemetry sink. The agent calls
+  methods on it (LLM calls, thoughts, response text, profiling, agent
+  errors) — the toolbox can't observe these. `TurnRecorder` exposes both a
+  coarse API (`record(agent_output)`, one call per turn) and a granular API
+  (`begin_turn() / add_*`) for streaming agents. Replaces the original
+  `LoopContext`.
 - Defensive episode finalization: `Episode` wraps `agent.run` in a
   `try/except BaseException`, then runs `task.evaluate()`, persists final
   trajectory, and updates the experiment summary — regardless of how the agent
-  returned.
+  returned. Cross-turn state (trajectory, storage, summary, tracer) is owned
+  by `Episode`; agents never see it directly.
 - `EpisodeDone(BaseException)` and `BudgetExceeded(BaseException)` propagate
   out of `MonitoredTool.__call__` to terminate misbehaving loops. Subclassing
   `BaseException` (not `Exception`) sidesteps `except Exception:` swallowing.
-- Sticky-done: every `MonitoredTool.__call__` raises immediately if
-  `ctx.is_done` is set, so even an agent that catches once is stopped on its
-  next call.
+- Sticky-done: every `MonitoredTool.__call__` raises immediately if the
+  toolbox's internal `is_done` flag is set, so even an agent that catches
+  once is stopped on its next call.
 - One reference agent that overrides `run()` with parallel tool calls
   (`agents/parallel_tool_agent.py` or evolution of Genny).
 - XRay rewrite: render each event as a card coloured by event kind, with tabs
@@ -104,17 +112,21 @@ class Agent(ABC):
         self,
         initial_obs: Observation,
         toolbox: MonitoredToolbox,
-        ctx: LoopContext,
+        recorder: TurnRecorder,
     ) -> None:
-        """Default impl reproduces today's gym-style loop using ctx hooks."""
+        """Default impl reproduces today's gym-style loop.
+
+        Termination is driven by exceptions raised out of toolbox(action):
+        EpisodeDone, BudgetExceeded — both BaseException subclasses.
+        """
         obs = initial_obs
-        while not ctx.is_done and ctx.turn < ctx.budget.max_turns:
+        while True:
             agent_output = self.step(obs)
-            ctx.record_agent_event(agent_output)
+            recorder.record(agent_output)
             if not agent_output.actions and not agent_output.error:
                 return  # graceful done
             for action in agent_output.actions:
-                env_output = await toolbox(action)
+                env_output = await toolbox(action)  # may raise EpisodeDone / BudgetExceeded
                 obs = env_output.obs
 ```
 
@@ -122,83 +134,136 @@ Agents that want parallel tool calls override `run()` and call
 `asyncio.gather(toolbox(a) for a in actions)`. Agents that don't override get
 backwards-compatible behaviour for free.
 
-### `LoopContext`
+The two parameters split cleanly by direction:
+- **`toolbox`** — what the agent calls into. Raises `EpisodeDone` /
+  `BudgetExceeded` to terminate. Records `ToolCallEvent`s internally.
+- **`recorder`** — what the agent reports out. Telemetry-only. Agents
+  emit LLM calls, thoughts, response text, profiling.
+
+### `TurnRecorder`
 
 ```python
-class LoopContext:
-    task: Task
-    storage: Storage
-    summary: SummaryProcessor
-    tracer: Tracer
-    trajectory: Trajectory
-    budget: Budget                 # max_turns, max_tool_calls, max_cost, etc.
-    is_done: bool                  # sticky — set by env or by budget exhaustion
-    last_env_output: EnvironmentOutput | None
-    turn: int                      # incremented per agent event
+class TurnRecorder:
+    """Agent's outbound telemetry sink. Constructed by Episode, scoped
+    to one episode. Two complementary APIs."""
 
-    def record_agent_event(self, output: AgentOutput) -> None: ...
-    def record_tool_call(self, action: Action, env_output: EnvironmentOutput) -> None: ...
-    def record_evaluation(self, reward: float, info: dict) -> None: ...
-    def record_failure(self, exc: BaseException) -> None: ...
+    # --- Coarse API: one call per LLM cycle, all-at-once. ---
+    def record(self, output: AgentOutput) -> None:
+        """Emit one AgentEvent built from a complete AgentOutput.
+        The default Agent.run uses this — matches today's step-style."""
+
+    # --- Granular API: emit data as it arrives (streaming agents). ---
+    def begin_turn(self) -> "Turn":
+        """Returns a context manager. Use when you want to add events
+        incrementally during a turn (partial LLM responses, mid-turn
+        profiling, etc.)."""
+
+class Turn:  # __enter__ / __exit__
+    def add_llm_call(self, call: LLMCall) -> None: ...
+    def add_thought(self, text: str) -> None: ...
+    def add_response_text(self, text: str) -> None: ...
+    def add_profile(self, label: str, start: float, end: float) -> None: ...
+    def add_error(self, err: StepError) -> None: ...
+    # __exit__ flushes the accumulated fields as one AgentEvent.
 ```
 
-These five `record_*` methods are the single point where storage, summary,
-tracer, and trajectory state are updated. Both `MonitoredTool` and the default
-`Agent.run` go through them. No more inlined `storage.save_step(...)` calls
-scattered through the loop body.
+Why two surfaces:
+
+- **Coarse `record(output)`** is what today's `Agent.step`-style code wants.
+  Structurally enforces "every turn emits a complete `AgentEvent`" — hard to
+  forget fields. The simple agent path stays simple.
+- **Granular `begin_turn() / add_*`** is what streaming agents (Pi-style,
+  Claude Code, Codex) need. LLM responses arrive in chunks; profiling spans
+  open and close at different points; the agent emits as data lands.
+
+Internally, `record(output)` is a thin wrapper around `begin_turn()` — one
+implementation, two surfaces. No double-maintenance.
+
+Cross-turn state (trajectory, storage, summary, tracer) lives on `Episode`
+and is bound into the `TurnRecorder` at construction. Agents never read or
+write that state directly.
 
 ### `MonitoredTool` / `MonitoredToolbox`
 
 ```python
 class MonitoredTool(AsyncTool):
-    def __init__(self, inner: AsyncTool | Tool, ctx: LoopContext): ...
+    def __init__(
+        self,
+        inner: AsyncTool | Tool,
+        trajectory: Trajectory,
+        budget: Budget,
+        storage: Storage,
+        summary: SummaryProcessor,
+        tracer: Tracer,
+    ): ...
+    # State the toolbox owns internally:
+    #   _is_done: bool                  (sticky — set when env or budget says stop)
+    #   _last_env_output: EnvironmentOutput | None
 
     async def __call__(self, action: Action) -> EnvironmentOutput:
-        if self.ctx.is_done:
-            raise EpisodeDone(self.ctx.last_env_output)
-        if self.ctx.budget.exhausted:
-            self.ctx.is_done = True
-            raise BudgetExceeded(self.ctx.last_env_output)
-        env_output = await self.inner.aexecute_action(action)
-        self.ctx.record_tool_call(action, env_output)
+        if self._is_done:
+            raise EpisodeDone(self._last_env_output)
+        if self.budget.exhausted:
+            self._is_done = True
+            raise BudgetExceeded(self._last_env_output)
+        with self.tracer.tool_span(action):
+            env_output = await self.inner.aexecute_action(action)
+        self._last_env_output = env_output
+        self._record_tool_call_event(action, env_output)  # storage + summary + trajectory
         if env_output.done:
-            self.ctx.is_done = True
+            self._is_done = True
             raise EpisodeDone(env_output)
         return env_output
 ```
 
 `MonitoredToolbox` is the same wrapper applied to every tool inside a
-`Toolbox`, with one shared `ctx`.
+`Toolbox`, sharing the same `_is_done` / `_last_env_output` / `budget`
+state across the per-episode toolbox instance.
 
 ### Defensive `Episode.run`
 
 ```python
 async def run(self) -> Trajectory:
     task = self.task_config.make(...)
-    ctx = LoopContext(task, self.storage, self.summary, self.tracer, ..., self.budget)
-    toolbox = MonitoredToolbox(task.toolbox, ctx)
+    trajectory = Trajectory(id=..., events=[])
+    budget = Budget(max_turns=self.max_steps, ...)
+    toolbox = MonitoredToolbox(
+        task.toolbox, trajectory, budget,
+        self.storage, self.summary, self.tracer,
+    )
+    recorder = TurnRecorder(trajectory, self.storage, self.summary, self.tracer)
     try:
         initial = task.reset()
-        ctx.record_tool_call(synthetic_reset_action, initial)
-        await self.agent.run(initial.obs, toolbox, ctx)
+        recorder.record_reset(initial)            # Episode-only helper on recorder
+        await self.agent.run(initial.obs, toolbox, recorder)
     except EpisodeDone:
         pass
-    except BudgetExceeded:
-        ctx.record_failure(BudgetExceeded(...))
+    except BudgetExceeded as e:
+        recorder.record_failure(e)
     except BaseException as e:
-        ctx.record_failure(e)
+        recorder.record_failure(e)
     finally:
-        final_obs = ctx.last_env_output.obs if ctx.last_env_output else None
-        reward, info = task.evaluate(final_obs)
-        ctx.record_evaluation(reward, info)
-        await self.storage.finalize(ctx.trajectory)
-        self.summary.on_episode_complete(ctx.trajectory, self.storage)
-        task.close()
-    return ctx.trajectory
+        final_obs = toolbox.last_env_output.obs if toolbox.last_env_output else None
+        try:
+            reward, info = task.evaluate(final_obs)
+            recorder.record_evaluation(reward, info)
+        except Exception as e:
+            recorder.record_evaluation(0.0, {"evaluate_failed": str(e)})
+        await self.storage.finalize(trajectory)
+        self.summary.on_episode_complete(trajectory, self.storage)
+        try:
+            task.close()
+        finally:
+            self.tracer.shutdown()
+    return trajectory
 ```
 
-The agent cannot prevent finalization. State that needs to survive is in `ctx`,
-which `Episode` owns.
+The agent cannot prevent finalization. The `trajectory`, `toolbox`, and
+`recorder` are all owned by `Episode`; only the latter two are passed to the
+agent. `record_reset` / `record_failure` / `record_evaluation` are
+Episode-only helpers on `TurnRecorder` (not exposed to agents in normal use,
+but accessing them isn't actively prevented — they live on the same object
+to keep all event creation in one place).
 
 ### Event-stream trajectory
 
