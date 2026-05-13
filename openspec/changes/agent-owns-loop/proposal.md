@@ -78,6 +78,18 @@ trajectories into typed event streams.
   duplicative with `cube.server`; consolidation is its own change.
 - WebSocket / streaming transport — covered by the
   `cube-standard/openspec/changes/json-rpc-streaming` change.
+- **Pi-style primitive-toolbox support.** Pi (the
+  [pi-mono](https://lucumr.pocoo.org/2026/1/31/pi/) agent by Armin Ronacher)
+  uses 4 generic tools — `read`, `write`, `edit`, `bash` — and rejects MCP-style
+  pre-declared tools. CUBE should support both styles long-term: rich
+  per-task action sets (today, MCP-compatible via `cube.server`) and a
+  Pi-style primitive toolbox available on shell-accessible cubes. Phase 1
+  declares only the protocol seam (see cube-standard companion: new
+  optional `Task.primitive_toolbox()` method). Phase 2 ships the concrete
+  `cube-shell-tools` package, a `PiStyleAgent` reference that uses it, and
+  a `PiCliAgent` that spawns the real Pi CLI as a subprocess inside the
+  cube's sandbox. The agent-owns-loop design (`Agent.run` + `MonitoredToolbox`)
+  already supports both shapes uniformly — Phase 2 is mostly packaging.
 
 ---
 
