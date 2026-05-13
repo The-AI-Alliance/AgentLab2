@@ -190,7 +190,6 @@ class MonitoredTool(AsyncTool):
     def __init__(
         self,
         inner: AsyncTool | Tool,
-        task: Task,                      # for step-wise evaluate() if requires_step_eval
         trajectory: Trajectory,
         budget: Budget,
         storage: Storage,
@@ -210,8 +209,7 @@ class MonitoredTool(AsyncTool):
         with self.tracer.tool_span(action):
             env_output = await self.inner.aexecute_action(action)
         self._last_env_output = env_output
-        step_eval = self._maybe_step_eval(env_output)         # see Step-wise eval below
-        self._record_tool_call_event(action, env_output, step_eval)
+        self._record_tool_call_event(action, env_output)  # storage + summary + trajectory
         if env_output.done:
             self._is_done = True
             raise EpisodeDone(env_output)
@@ -222,36 +220,14 @@ class MonitoredTool(AsyncTool):
 `Toolbox`, sharing the same `_is_done` / `_last_env_output` / `budget`
 state across the per-episode toolbox instance.
 
-### Step-wise evaluation (opt-in)
-
-Some cubes need a per-tool-call evaluation signal — dense reward for RL,
-mid-episode diagnostics, or success criteria that aren't already in
-`EnvironmentOutput.reward`. To support this, `Task` gains an optional
-property `requires_step_eval: bool` (default `False`, declared in
-cube-standard). When `True`, `MonitoredTool` calls `task.evaluate(env_output.obs)`
-after every successful tool call and attaches the result to the
-`ToolCallEvent`:
-
-```python
-class StepEval(TypedBaseModel):
-    reward: float
-    info: dict
-
-class ToolCallEvent(TypedBaseModel):
-    # ... existing fields ...
-    step_eval: StepEval | None = None     # populated iff task.requires_step_eval
-```
-
-Per-tool-call evaluation is independent of `EnvironmentOutput.reward` (which
-comes from `task.step` / `tool.execute_action`). A cube can use either, both,
-or neither. Failures inside `task.evaluate` during step-wise eval are
-caught and recorded as `StepEval(reward=0.0, info={"step_eval_failed": str(exc)})`
-rather than propagating — a broken evaluator must not crash the episode.
-
-The final `task.evaluate()` call in `Episode.run`'s `finally` still happens
-unconditionally, exactly once, and is recorded as an `EvaluationEvent`. Step-wise
-eval and final eval are separate concerns: dense per-call telemetry vs. terminal
-score.
+**Step-wise evaluation is already handled by cube-standard.** `Task.step()`
+invokes `self.evaluate(obs)` internally when `Task.validate_per_step` is
+`True`, and the resulting `reward` / `info` flow back through
+`EnvironmentOutput.reward` / `info` — captured automatically in
+`ToolCallEvent.output`. `MonitoredTool` doesn't need its own step-eval
+path. The terminal `task.evaluate()` call in `Episode.run`'s `finally`
+still happens unconditionally, exactly once, and is recorded as an
+`EvaluationEvent`.
 
 ### Defensive `Episode.run`
 
@@ -261,7 +237,7 @@ async def run(self) -> Trajectory:
     trajectory = Trajectory(id=..., events=[])
     budget = Budget(max_turns=self.max_steps, ...)
     toolbox = MonitoredToolbox(
-        task.toolbox, task, trajectory, budget,
+        task.toolbox, trajectory, budget,
         self.storage, self.summary, self.tracer,
     )
     recorder = TurnRecorder(trajectory, self.storage, self.summary, self.tracer)
