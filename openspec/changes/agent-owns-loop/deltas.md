@@ -35,10 +35,15 @@ class ToolCallEvent(TypedBaseModel):
     action_id: str                     # AgentEvent.actions[i].id
     output: EnvironmentOutput          # obs / reward / done / info / error
     turn_id: str                       # groups parallel siblings
+    step_eval: StepEval | None = None  # populated iff task.requires_step_eval
+
+class StepEval(TypedBaseModel):
+    reward: float                      # per-tool-call evaluation reward
+    info: dict                         # per-tool-call evaluation info
 
 class EvaluationEvent(TypedBaseModel):
-    reward: float
-    info: dict
+    reward: float                      # terminal eval reward
+    info: dict                         # terminal eval info
 
 class TrajectoryEvent(TypedBaseModel):
     output: AgentEvent | ToolCallEvent | EvaluationEvent
@@ -205,10 +210,14 @@ class MonitoredTool(AsyncTool):
     # 1. If self._is_done: raise EpisodeDone(self._last_env_output).
     # 2. If self.budget.exhausted: set self._is_done; raise BudgetExceeded.
     # 3. Open OTel span; await inner.aexecute_action(action) wrapping sync as needed.
-    # 4. Append a ToolCallEvent to trajectory; storage.save_event; summary.on_event.
-    # 5. self._last_env_output = env_output.
-    # 6. If env_output.done: set self._is_done; raise EpisodeDone(env_output).
-    # 7. Return env_output.
+    # 4. If self.task.requires_step_eval: call self.task.evaluate(env_output.obs);
+    #    build StepEval(reward, info). Catch exceptions and record
+    #    StepEval(0.0, {"step_eval_failed": str(exc)}) instead of propagating.
+    # 5. Append a ToolCallEvent (with step_eval if produced) to trajectory;
+    #    storage.save_event; summary.on_event.
+    # 6. self._last_env_output = env_output.
+    # 7. If env_output.done: set self._is_done; raise EpisodeDone(env_output).
+    # 8. Return env_output.
 
     @property
     def last_env_output(self) -> EnvironmentOutput | None
@@ -218,6 +227,7 @@ class MonitoredToolbox(AsyncToolbox):
     def __init__(
         self,
         inner: Toolbox | AsyncToolbox,
+        task: Task,                    # for step-wise evaluate() if requires_step_eval
         trajectory: Trajectory,
         budget: Budget,
         storage: Storage,
@@ -225,7 +235,7 @@ class MonitoredToolbox(AsyncToolbox):
         tracer: Tracer,
     )
     # Wraps each member tool as MonitoredTool sharing the same _is_done /
-    # _last_env_output / budget state across the toolbox instance.
+    # _last_env_output / budget / task state across the toolbox instance.
 
 class EpisodeDone(BaseException):
     output: EnvironmentOutput | None
@@ -278,7 +288,7 @@ async def run(self) -> Trajectory:
     trajectory = Trajectory(id=..., events=[])
     budget = Budget(max_turns=self.max_steps, ...)
     toolbox = MonitoredToolbox(
-        task.toolbox, trajectory, budget,
+        task.toolbox, task, trajectory, budget,
         self.storage, self.summary, self.tracer,
     )
     recorder = TurnRecorder(trajectory, self.storage, self.summary, self.tracer)
@@ -496,6 +506,11 @@ group (parent `AgentEvent` above, siblings below).
 - **Unit**: `MonitoredTool.__call__` honours sticky-done, budget exhaustion,
   and `EnvironmentOutput.done`. The internal `_is_done` / `_last_env_output`
   state is per-toolbox-instance.
+- **Unit**: when `task.requires_step_eval` is True, every `MonitoredTool.__call__`
+  attaches a `StepEval(reward, info)` to the resulting `ToolCallEvent`.
+  When False, `ToolCallEvent.step_eval` is None. A `task.evaluate()` that
+  raises is captured as `StepEval(0.0, {"step_eval_failed": ...})` without
+  failing the call.
 
 ---
 
