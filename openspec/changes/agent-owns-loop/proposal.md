@@ -100,8 +100,14 @@ trajectories into typed event streams.
   optional `Task.primitive_toolbox()` method). Phase 2 ships the concrete
   `cube-shell-tools` package, a `PiStyleAgent` reference that uses it, and
   a `PiCliAgent` that spawns the real Pi CLI as a subprocess inside the
-  cube's sandbox. The agent-owns-loop design (`Agent.run` + `MonitoredToolbox`)
-  already supports both shapes uniformly — Phase 2 is mostly packaging.
+  cube's sandbox.
+- **Connectors for existing agent frameworks.** CUBE should evaluate agents
+  written against major frameworks without forcing reimplementation. Phase 1
+  adds two small seams (`TurnRecorder.record_external_run`, doc note on
+  `cube.server` as the canonical MCP endpoint for CLI-agent connectors).
+  Phase 2 ships reference connector packages (LangGraph, Pydantic AI,
+  OpenAI Agents SDK, Inspect AI, Claude Agent SDK, A2A, Codex CLI, Goose,
+  Pi CLI). See *Connector taxonomy* below.
 
 ---
 
@@ -290,7 +296,78 @@ Every concern in today's `Episode._run_loop` has a clear new home.
 | Storage finalize | `Episode` (in `finally`) | |
 | Episode-level OTel span | `Episode` | Wraps the whole `try / except / finally`. |
 
-### Defensive `Episode.run`
+### Connector taxonomy (forward-looking, Phase 2)
+
+`Agent.run(initial_obs, task, recorder)` is the seam. Each external agent
+framework is plugged in via an `Agent` subclass that bridges to it. Three
+buckets cover the landscape:
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│ Bucket 1 — In-process Python frameworks                         │
+│   Agent.run() instantiates the framework, wires tools,          │
+│   drives its loop, captures events → recorder.                  │
+│   LangGraph, Pydantic AI, Inspect AI, OpenAI Agents SDK,        │
+│   Claude Agent SDK, smolagents.                                 │
+│   Connector size: ~30 LOC tool-shim + ~150 LOC agent class.     │
+└────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│ Bucket 2 — CLI / subprocess agents (run inside cube sandbox)    │
+│   Agent.run() launches the binary, points it at cube.server's   │
+│   MCP URL for tools, parses its JSON event stream → recorder.   │
+│   Codex CLI, Goose, Pi.                                         │
+│   Connector size: ~150 LOC subprocess + JSONL parser.           │
+└────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────┐
+│ Bucket 3 — HTTP / A2A agents                                    │
+│   Agent.run() acts as A2A client — POSTs Message with task      │
+│   instruction, streams Task state, captures Message exchanges   │
+│   → recorder. Tools bridged via cube.server JSON-RPC.           │
+│   AgentBeats agents, any A2A-compliant agent.                   │
+│   Connector size: ~200 LOC (A2A client + tool bridge).          │
+└────────────────────────────────────────────────────────────────┘
+```
+
+Module layout (Phase 2):
+
+```
+cube_harness/connectors/
+├── pydantic_ai/    langgraph/    openai_agents/    inspect_ai/
+├── claude_agent_sdk/    smolagents/
+├── codex_cli/    goose/    pi_cli/
+└── a2a/
+```
+
+Each module ships `{framework}_agent.py` (an `Agent` subclass) and
+`tools.py` (a ~30-line shim mapping `cube.tool.Tool` → framework-native
+tool form). No core changes per connector; each is self-contained.
+
+#### Trade-offs by bucket
+
+What the recorder can capture depends on what the framework lets us observe:
+
+| Bucket | Tool calls | LLM calls | Tokens/cost | Per-step trajectory |
+|---|---|---|---|---|
+| 1 — In-process Python | ✅ full | ✅ usually | ✅ | ✅ |
+| 2 — CLI subprocess | ✅ via `cube.server` | ❌ | ✅ from CLI's JSON output | Partial (per-turn) |
+| 3 — A2A / HTTP | Messages only | ❌ | Depends on AgentCard | Message-level |
+
+The trade-off is acceptable: connectors trade fine-grained traces for
+**evaluation parity** — a benchmark score from an off-the-shelf agent in
+~minutes of integration work, vs. days of re-implementation.
+
+#### Excluded from connector planning
+
+- **ATA** (claimed AgentBeats protocol) — does not exist as a distinct
+  spec; AgentBeats agents speak A2A + MCP. Covered by the A2A connector.
+- **AGNTCY / SLIM** (Cisco enterprise stack) — heavy gRPC/mTLS layer;
+  every SLIM agent today also speaks A2A. Defer.
+- **AG2 / AutoGen** — conversation-flavored, high impedance mismatch.
+  Skip unless explicitly requested.
+- **Mastra** (TypeScript framework) — not a binary, requires a TS project
+  scaffold. Mis-shaped for CLI-style adapter.
+
+### `Episode.run` (lifecycle owner)
 
 ```python
 async def run(self) -> Trajectory:

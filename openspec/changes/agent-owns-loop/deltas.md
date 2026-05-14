@@ -149,6 +149,39 @@ class Turn:
 `record(output)` is internally implemented as a thin wrapper around
 `begin_turn()` — one underlying code path, two surfaces.
 
+#### Lossy capture path (for connectors)
+
+External-framework connectors (LangGraph, Codex CLI, A2A, …) often cannot
+break the run into per-turn `AgentEvent`s — they only expose a final
+output and aggregate usage. For these, `TurnRecorder` provides a lossy
+shortcut:
+
+```python
+class TurnRecorder:
+    def record_external_run(
+        self,
+        final_text: str | None,
+        usage: Usage | None,                  # tokens, cost — best-effort
+        raw_events: list[dict] | None = None, # framework-specific stream, opaque blob
+    ) -> None:
+        """Emit one synthetic AgentEvent summarizing an external agent's run.
+
+        Use when the connector cannot decompose the agent's execution into
+        per-turn events. The synthetic AgentEvent carries the final response
+        text and the aggregated usage; `raw_events` is preserved verbatim
+        on the event for post-hoc inspection but is not interpreted by the
+        recorder or summary.
+
+        Connectors that CAN observe per-turn events (Pydantic AI, LangGraph,
+        OpenAI Agents SDK, Inspect AI) should use record() or begin_turn()
+        instead — record_external_run is the fallback for opaque frameworks.
+        """
+```
+
+The trade-off is documented per-connector: full-visibility frameworks use
+the standard path; opaque ones use this. See *Connector taxonomy* in
+[proposal.md](proposal.md).
+
 ### Semantics
 
 - `Agent.run` is the **canonical entry point** invoked by `Episode`.
