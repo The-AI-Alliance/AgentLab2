@@ -2,6 +2,7 @@
 
 import logging
 import os
+import signal
 import socket
 import sys
 import time
@@ -12,6 +13,7 @@ from typing import Literal
 from uuid import uuid4
 
 import ray
+from cube.resource import InfraConfig
 
 from cube_harness.core import Trajectory
 from cube_harness.episode import Episode
@@ -69,13 +71,26 @@ def _trajectory_id(episode: Episode) -> str:
 
 
 @contextmanager
-def _experiment_lifecycle(exp_dir: Path, mode: Literal["ray", "sequential"]) -> Iterator[tuple[ExperimentStatus, Path]]:
+def _experiment_lifecycle(
+    exp_dir: Path,
+    mode: Literal["ray", "sequential"],
+    infra: InfraConfig | None = None,
+) -> Iterator[tuple[ExperimentStatus, Path]]:
     """Manage `experiment_status.json` from RUNNING through terminal write.
 
     Writes RUNNING on entry. On normal exit, writes COMPLETED; on exception,
     writes INTERRUPTED. Both initial and terminal writes log a warning on
     failure rather than swallowing silently — these bracket the run, so a
     failure here is something an operator should see.
+
+    When ``infra`` is provided, also installs a SIGTERM handler that raises
+    SystemExit so finally blocks run on orchestrator-driven shutdowns
+    (``kubectl delete``, ``docker stop``, systemd unit stop), and sweeps stale
+    cloud resources via ``infra.cleanup_stale()`` on lifecycle exit. This is
+    best-effort: Ray captures signals delivered to the main thread (see TODO
+    in ``_run_with_ray_impl``), so signal-driven cleanup mainly helps the
+    sequential path. Hard kills (SIGKILL, OOM) cannot be intercepted — rely
+    on the external scheduled sweeper for those.
     """
     now = time.time()
     exp_status = ExperimentStatus(
@@ -92,6 +107,15 @@ def _experiment_lifecycle(exp_dir: Path, mode: Literal["ray", "sequential"]) -> 
         exp_status.write(exp_status_path)
     except Exception:
         logger.warning("Failed to write initial experiment status", exc_info=True)
+
+    prev_sigterm = None
+    if infra is not None:
+        try:
+            prev_sigterm = signal.signal(signal.SIGTERM, _raise_systemexit_on_sigterm)
+        except ValueError:
+            # signal.signal only works in the main thread — non-fatal if we're not there.
+            logger.debug("Could not install SIGTERM handler (non-main thread); skipping")
+
     completed = False
     try:
         yield exp_status, exp_status_path
@@ -104,6 +128,36 @@ def _experiment_lifecycle(exp_dir: Path, mode: Literal["ray", "sequential"]) -> 
             exp_status.write(exp_status_path)
         except Exception:
             logger.warning("Failed to write terminal experiment status", exc_info=True)
+
+        if prev_sigterm is not None:
+            try:
+                signal.signal(signal.SIGTERM, prev_sigterm)
+            except ValueError:
+                pass
+
+        if infra is not None:
+            try:
+                deleted = infra.cleanup_stale()
+                if deleted:
+                    logger.info(
+                        "Lifecycle exit: cleanup_stale() reclaimed %d expired resource(s)",
+                        len(deleted),
+                    )
+            except Exception:
+                logger.warning("Lifecycle exit: cleanup_stale() failed", exc_info=True)
+
+
+def _raise_systemexit_on_sigterm(signum: int, frame: object) -> None:
+    """Convert SIGTERM into SystemExit so the lifecycle's finally blocks run.
+
+    Without this, Python's default SIGTERM behaviour is to terminate the process
+    immediately, bypassing context managers and ``finally`` clauses — meaning a
+    ``kubectl delete pod`` or ``docker stop`` would leak any in-flight cloud
+    resources. Raising SystemExit lets the lifecycle exit gracefully and run
+    ``cleanup_stale()`` on the way out.
+    """
+    logger.warning("Received SIGTERM — propagating as SystemExit for graceful cleanup")
+    raise SystemExit(128 + signum)
 
 
 def _pre_claim(storage: Storage, episode: Episode) -> None:
@@ -159,7 +213,7 @@ def run_with_ray(
     try:
         with (
             tracer.benchmark(exp.name),
-            _experiment_lifecycle(exp.output_dir, mode="ray") as (exp_status, exp_status_path),
+            _experiment_lifecycle(exp.output_dir, mode="ray", infra=exp.infra) as (exp_status, exp_status_path),
         ):
             return _run_with_retries(
                 exp,
@@ -481,7 +535,7 @@ def run_sequentially(
     try:
         with (
             tracer.benchmark(exp.name),
-            _experiment_lifecycle(exp.output_dir, mode="sequential") as (exp_status, exp_status_path),
+            _experiment_lifecycle(exp.output_dir, mode="sequential", infra=exp.infra) as (exp_status, exp_status_path),
         ):
             return _run_sequentially_with_retries(
                 exp,
