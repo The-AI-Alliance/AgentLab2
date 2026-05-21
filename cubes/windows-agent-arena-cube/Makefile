@@ -4,13 +4,13 @@ install:
 	bash scripts/install_system_deps.sh
 	uv sync --all-extras
 	uv pip install -e .
-	uv run python scripts/create_task_metadata.py
+	uv run --no-sync python scripts/create_task_metadata.py
 
 test:
-	uv run cube test waa-cube
+	uv run --no-sync cube test waa-cube
 
 unit-test:
-	uv run pytest tests/
+	uv run --no-sync pytest tests/
 
 # One-time WinRM bootstrap on the base qcow2 (uses WAA's Flask guest agent
 # on port 5000 — no VNC or manual step). Idempotent. Required before the
@@ -20,7 +20,7 @@ unit-test:
 # Refuses to run without a backup in ~/.cube/images/backups/ (pass
 # --skip-backup-check to override).
 bootstrap-winrm:
-	uv run python packer/bootstrap_winrm.py
+	uv run --no-sync python packer/bootstrap_winrm.py
 
 # Build the prepared WAA Windows image via Packer.
 # Requires: packer, qemu-system-x86, ovmf, swtpm, and a base image at

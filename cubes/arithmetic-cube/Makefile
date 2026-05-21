@@ -6,7 +6,7 @@ install:
 	uv pip install -e .
 
 debug:
-	uv run python -m arithmetic_cube.debug
+	uv run --no-sync python -m arithmetic_cube.debug
 
 test:
-	uv run cube test arithmetic-cube
+	uv run --no-sync cube test arithmetic-cube
