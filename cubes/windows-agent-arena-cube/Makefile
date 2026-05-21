@@ -1,8 +1,8 @@
 .PHONY: install test unit-test bootstrap-winrm build-image
 
 install:
+	bash scripts/install_system_deps.sh
 	uv sync --all-extras
-	uv pip install -e .
 	uv run python scripts/create_task_metadata.py
 
 test:

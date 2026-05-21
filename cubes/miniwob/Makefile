@@ -8,5 +8,4 @@ debug:
 
 install:
 	uv sync --all-extras
-	uv pip install -e .
 	uv run playwright install chromium

@@ -23,6 +23,9 @@ dev = [
     "pytest>=9.0",
 ]
 
+[tool.uv.sources]
+cube-standard = { git = "https://github.com/The-AI-Alliance/cube-standard", branch = "dev" }
+
 [tool.ruff]
 fix = true
 line-length = 120

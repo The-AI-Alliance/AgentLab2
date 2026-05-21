@@ -8,4 +8,3 @@ debug:
 
 install:
 	uv sync --all-extras
-	uv pip install -e .

@@ -8,6 +8,5 @@ debug:
 
 install:
 	uv sync --all-extras
-	uv pip install -e .
 	uv run scripts/generate_task_metadata.py
 	uv run playwright install chromium
