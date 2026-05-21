@@ -7,6 +7,7 @@ the window in which orphaned cloud VMs can accumulate.
 """
 
 import signal
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -52,10 +53,11 @@ def test_cleanup_stale_not_called_when_infra_is_none(tmp_path: Path) -> None:
     _drain_lifecycle(tmp_path, infra=None)
 
 
-def test_cleanup_stale_skipped_on_keyboard_interrupt(tmp_path: Path) -> None:
-    """Ctrl+C must NOT trigger ``cleanup_stale()`` — the user wants out fast,
-    and the ARM list call inside cleanup_stale can take several seconds even
-    with zero orphans. The next benchmark setup (L3) sweeps the residue."""
+def test_cleanup_stale_runs_on_keyboard_interrupt(tmp_path: Path) -> None:
+    """Ctrl+C still triggers ``cleanup_stale()`` — so Ray workers get their
+    teardown window and stale infra resources get reclaimed. Bounded by the
+    grace timeout (see test_cleanup_stale_timeout_does_not_block_exit) and
+    interruptible by a second Ctrl+C."""
     infra = MagicMock(spec=InfraConfig)
     infra.cleanup_stale.return_value = []
 
@@ -63,7 +65,27 @@ def test_cleanup_stale_skipped_on_keyboard_interrupt(tmp_path: Path) -> None:
         with _experiment_lifecycle(tmp_path, mode="sequential", infra=infra):
             raise KeyboardInterrupt
 
-    infra.cleanup_stale.assert_not_called()
+    infra.cleanup_stale.assert_called_once_with()
+
+
+def test_cleanup_stale_timeout_does_not_block_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """If ``cleanup_stale`` hangs (network blip, throttle), the lifecycle must
+    exit within the grace window, not wait forever. The daemon thread keeps
+    running but dies when the main process exits — next launch sweeps residue."""
+    import cube_harness.exp_runner as exp_runner_mod
+
+    monkeypatch.setattr(exp_runner_mod, "_CLEANUP_GRACE_TIMEOUT_S", 0.5)
+
+    infra = MagicMock(spec=InfraConfig)
+    infra.cleanup_stale.side_effect = lambda: time.sleep(10)
+
+    start = time.time()
+    with _experiment_lifecycle(tmp_path, mode="sequential", infra=infra):
+        pass
+    elapsed = time.time() - start
+
+    assert elapsed < 3.0, f"Lifecycle exit blocked for {elapsed:.1f}s waiting on hung cleanup"
+    infra.cleanup_stale.assert_called_once_with()
 
 
 def test_cleanup_stale_called_on_systemexit(tmp_path: Path) -> None:
