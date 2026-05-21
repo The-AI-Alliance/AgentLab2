@@ -91,6 +91,11 @@ def _experiment_lifecycle(
     in ``_run_with_ray_impl``), so signal-driven cleanup mainly helps the
     sequential path. Hard kills (SIGKILL, OOM) cannot be intercepted — rely
     on the external scheduled sweeper for those.
+
+    Ctrl+C (KeyboardInterrupt) intentionally **skips** ``cleanup_stale()`` —
+    the user wants out fast, and ``cleanup_stale`` makes a paginated ARM list
+    call that can take seconds even with zero orphans. The next benchmark
+    setup (L3) will sweep the residue.
     """
     now = time.time()
     exp_status = ExperimentStatus(
@@ -117,9 +122,13 @@ def _experiment_lifecycle(
             logger.debug("Could not install SIGTERM handler (non-main thread); skipping")
 
     completed = False
+    keyboard_interrupted = False
     try:
         yield exp_status, exp_status_path
         completed = True
+    except KeyboardInterrupt:
+        keyboard_interrupted = True
+        raise
     finally:
         exp_status.status = "COMPLETED" if completed else "INTERRUPTED"
         exp_status.ended_at = time.time()
@@ -135,7 +144,7 @@ def _experiment_lifecycle(
             except ValueError:
                 pass
 
-        if infra is not None:
+        if infra is not None and not keyboard_interrupted:
             try:
                 deleted = infra.cleanup_stale()
                 if deleted:

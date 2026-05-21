@@ -52,6 +52,34 @@ def test_cleanup_stale_not_called_when_infra_is_none(tmp_path: Path) -> None:
     _drain_lifecycle(tmp_path, infra=None)
 
 
+def test_cleanup_stale_skipped_on_keyboard_interrupt(tmp_path: Path) -> None:
+    """Ctrl+C must NOT trigger ``cleanup_stale()`` — the user wants out fast,
+    and the ARM list call inside cleanup_stale can take several seconds even
+    with zero orphans. The next benchmark setup (L3) sweeps the residue."""
+    infra = MagicMock(spec=InfraConfig)
+    infra.cleanup_stale.return_value = []
+
+    with pytest.raises(KeyboardInterrupt):
+        with _experiment_lifecycle(tmp_path, mode="sequential", infra=infra):
+            raise KeyboardInterrupt
+
+    infra.cleanup_stale.assert_not_called()
+
+
+def test_cleanup_stale_called_on_systemexit(tmp_path: Path) -> None:
+    """SystemExit (which is what our SIGTERM handler raises) is NOT a
+    KeyboardInterrupt — orchestrator-driven shutdowns get the full cleanup
+    because the orchestrator gives us a grace period to do it."""
+    infra = MagicMock(spec=InfraConfig)
+    infra.cleanup_stale.return_value = []
+
+    with pytest.raises(SystemExit):
+        with _experiment_lifecycle(tmp_path, mode="sequential", infra=infra):
+            raise SystemExit(143)
+
+    infra.cleanup_stale.assert_called_once_with()
+
+
 def test_cleanup_stale_failure_does_not_propagate(tmp_path: Path) -> None:
     """If the sweep itself fails (transient cloud error, throttling, etc.) we
     must not mask the original exception or crash on a clean exit. Failures are
