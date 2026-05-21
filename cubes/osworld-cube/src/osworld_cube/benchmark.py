@@ -242,7 +242,6 @@ class OSWorldBenchmark(Benchmark["OSWorldBenchmarkConfig"]):
 
         self._runtime_context["osworld"] = True
         if self._infra is not None:
-            self._infra.cleanup_stale()
             self._runtime_context["infra"] = self._infra
 
         logger.info("OSWorldBenchmark ready with %d tasks", self.config.num_tasks)

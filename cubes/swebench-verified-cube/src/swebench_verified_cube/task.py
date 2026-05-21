@@ -118,6 +118,15 @@ class SWEBenchVerifiedTask(Task[SWEBenchVerifiedTaskMetadata, ContainerTerminalT
     def _build_tool(self) -> None:
         """Ensure /testbed files are writable and git-safe, then build the tool.
 
+        NON-ROOT DOCKER WORKAROUND. Upstream SWE-bench images assume `USER root`
+        (matched by Daytona, local Docker, AWS, Azure) and bake conda+sources
+        into a root-owned /testbed. On non-root infras — the EAI Toolkit enforces
+        uid 13011 by cluster policy — the runtime user can't `chmod` root-owned
+        files in place, can't write to a read-only /testbed, and Git 2.35.2+
+        rejects repos owned by a different user. This block normalises all three
+        before the tool is constructed. Root-running infras short-circuit at the
+        writability probes and pay essentially nothing.
+
         Two pre-flight fixes applied unconditionally:
         1. git safe.directory: Git 2.35.2+ refuses to operate in repos owned by a
            different user. Configure /testbed as safe so agents can run `git diff`.
@@ -125,6 +134,10 @@ class SWEBenchVerifiedTask(Task[SWEBenchVerifiedTaskMetadata, ContainerTerminalT
            world-writable /testbed. mv unlinks via the writable parent and recreates
            with the runtime user's ownership, making every file writable without sudo.
            Running before relocate_if_readonly keeps conda editable-install paths stable.
+
+        The trailing ``relocate_if_readonly`` call falls back to /tmp/testbed
+        when /testbed itself is not writable (toolkit case); on root-running
+        infras the probe returns immediately with the original path.
         """
         self._container.exec(
             f"git config --global --add safe.directory {self.tool_config.working_dir}",

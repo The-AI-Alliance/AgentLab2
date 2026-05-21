@@ -615,35 +615,6 @@ class TestOSWorldBenchmark:
         finally:
             bench.close()
 
-    def test_setup_invokes_cleanup_stale(self) -> None:
-        """Benchmark setup must sweep stale resources from previous runs before
-        launching new VMs. Skipping this lets crashed-task orphans accumulate and
-        bill until manual cleanup."""
-        from osworld_cube.benchmark import OSWorldBenchmarkConfig
-
-        mock_infra = MagicMock(spec=InfraConfig)
-        mock_infra.provision_status.return_value = "ready"
-        mock_infra.cleanup_stale.return_value = []
-
-        cfg = OSWorldBenchmarkConfig()
-        bench = cfg.make(infra=mock_infra)
-        try:
-            mock_infra.cleanup_stale.assert_called_once()
-        finally:
-            bench.close()
-
-    def test_setup_without_infra_does_not_call_cleanup_stale(self) -> None:
-        """When no infra is configured (local-only runs), ``_setup`` must not
-        attempt to sweep — there is nothing to sweep against."""
-        from osworld_cube.benchmark import OSWorldBenchmark, OSWorldBenchmarkConfig
-
-        bench = OSWorldBenchmark(config=OSWorldBenchmarkConfig())
-        bench.setup()
-        try:
-            assert bench._infra is None
-        finally:
-            bench.close()
-
     def test_close_does_not_raise(self) -> None:
         """Closing a fresh runtime pair must succeed without errors."""
         from osworld_cube.benchmark import OSWorldBenchmark, OSWorldBenchmarkConfig
