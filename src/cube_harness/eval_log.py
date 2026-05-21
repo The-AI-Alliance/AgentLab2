@@ -11,8 +11,13 @@ Classes:
     UsageSummary      — aggregated LLM token/cost stats across an episode
     AgentInfo         — agent descriptor: config, dependency versions, git provenance
     BenchmarkSubset   — benchmark subset descriptor for MNAR propensity correction
-    JudgeConfig       — configuration of the judge LLM (optional)
-    JudgeOutput       — per-episode judge assessment (optional)
+    InvestigatorLLMConfig       — configuration of the investigator LLM (optional)
+    BlameCategory     — closed-world taxonomy of failure causes
+    Outcome           — outcome of the episode as investigated
+    EvidenceItem      — step-indexed transcript quote backing a blame attribution
+    BaseFindings   — per-episode investigator assessment, base shape (recipes extend it)
+    Findings       — deprecated alias for BaseFindings
+    InvestigationMetadata     — billing/provenance for a single investigator invocation (optional)
     Verifier          — task verifier reference (optional)
     ExperimentRecord  — experiment-level record written to experiment_record.json
     EpisodeRecord     — episode-level record written after each episode completes
@@ -26,9 +31,11 @@ import logging
 import re
 import subprocess
 import time
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
+import cube
 from cube.benchmark import BenchmarkConfig
 from cube.core import TypedBaseModel
 from pydantic import Field
@@ -221,6 +228,18 @@ class AgentInfo(TypedBaseModel):
             "from git_commit alone. None when git info is unavailable."
         ),
     )
+    cube_standard_git_commit: str | None = Field(
+        default=None,
+        description=(
+            "Git SHA-1 of the installed cube-standard (`cube`) package's repo HEAD. Populated only "
+            "when cube-standard is an editable/source checkout (the common case while it tracks an "
+            "unreleased branch); None for a released wheel — use dependency_versions['cube'] then."
+        ),
+    )
+    cube_standard_git_is_dirty: bool | None = Field(
+        default=None,
+        description="True when the cube-standard checkout had uncommitted changes. None when unavailable.",
+    )
     description: str | None = Field(
         default=None,
         description="Free-form prose description of the agent for Atlas LLM embedding warm-start.",
@@ -244,6 +263,12 @@ class AgentInfo(TypedBaseModel):
         config_type = config_dict.get("_type", type(agent_config).__name__)
         llm_model = _extract_llm_model(config_dict)
         git_commit, git_remote_url, git_is_dirty = _get_git_info(cwd=git_cwd)
+        # cube-standard is a separate repo; capturing its hash matters because it is
+        # frequently run from an unreleased branch (dependency_versions only has the
+        # PyPI version string). Probe the installed `cube` package's source dir —
+        # yields a commit only for an editable/source checkout, None for a wheel.
+        cube_standard_dir = str(Path(cube.__file__).resolve().parent)
+        cube_standard_git_commit, _, cube_standard_git_is_dirty = _get_git_info(cwd=cube_standard_dir)
 
         return cls(
             agent_id=agent_id,
@@ -255,6 +280,8 @@ class AgentInfo(TypedBaseModel):
             git_commit=git_commit,
             git_remote_url=git_remote_url,
             git_is_dirty=git_is_dirty,
+            cube_standard_git_commit=cube_standard_git_commit,
+            cube_standard_git_is_dirty=cube_standard_git_is_dirty,
         )
 
 
@@ -281,20 +308,117 @@ class BenchmarkSubset(TypedBaseModel):
         return cls(name=name, n_tasks=n_tasks)
 
 
-class JudgeConfig(TypedBaseModel):
-    """Configuration of the LLM judge used for post-hoc episode assessment."""
+class InvestigatorLLMConfig(TypedBaseModel):
+    """Configuration of the LLM investigator used for post-hoc episode assessment."""
 
-    model: str = Field(description="Judge model identifier (e.g. 'claude-opus-4-7').")
-    prompt_version: str = Field(description="Version or hash of the judge prompt template.")
-    judged_at: str | None = Field(default=None, description="ISO-8601 timestamp when judging was run.")
+    model: str = Field(description="Investigator model identifier (e.g. 'claude-opus-4-7').")
+    prompt_version: str = Field(description="Version or hash of the investigator prompt template.")
+    investigated_at: str | None = Field(default=None, description="ISO-8601 timestamp when the investigation was run.")
 
 
-class JudgeOutput(TypedBaseModel):
-    """Per-episode assessment from a post-hoc LLM judge."""
+FINDINGS_SCHEMA_VERSION = "v1"
 
-    difficulty: str | None = Field(default=None, description="Estimated task difficulty (free-form or enum).")
-    feasible: bool | None = Field(default=None, description="Whether the task was deemed completable by the judge.")
-    failure_root_cause: str | None = Field(default=None, description="Short description of why the agent failed.")
+
+class BlameCategory(str, Enum):
+    """Closed-world taxonomy of failure causes. The investigator must pick from this set or `none`."""
+
+    task_unclear = "task_unclear"
+    model_capability = "model_capability"
+    tool_failure = "tool_failure"
+    env_failure = "env_failure"
+    agent_scaffolding = "agent_scaffolding"
+    action_space_limited = "action_space_limited"
+    insufficient_observation = "insufficient_observation"
+    eval_brittle = "eval_brittle"
+    submission_format = "submission_format"
+    none = "none"
+
+
+class Outcome(str, Enum):
+    """What happened in the episode, beyond the binary reward."""
+
+    success = "success"
+    success_lucky = "success_lucky"
+    almost = "almost"
+    failure = "failure"
+    should_have_been_rewarded = "should_have_been_rewarded"
+
+
+class EvidenceItem(TypedBaseModel):
+    """A step-indexed transcript quote backing a blame attribution."""
+
+    step: int = Field(description="Step index in the trajectory.")
+    quote: str = Field(description="Verbatim excerpt from the agent or environment output.")
+
+
+class BaseFindings(TypedBaseModel):
+    """Base per-episode assessment from a post-hoc LLM investigator.
+
+    Each investigator recipe (general_blame, profiling, agent_scaffolding, ...) extends this
+    base with use-case-specific fields. The cross-recipe core fields (analysis,
+    outcome, summary, primary_blame, primary_blame_confidence) live here so that
+    aggregate views (CSV report, cross-experiment joins) can flatten any recipe's
+    output to a common schema.
+
+    Field order is CoT-deliberate. Models token-emit in declared order, so:
+
+      1. `analysis` — free-form scratchpad, full reasoning before commitment.
+      2. `evidence` — cite specific transcript quotes that ground what comes next.
+      3. `summary` — narrative of what happened, before categorizing.
+      4. `outcome` — categorical commitment.
+      5. `primary_blame` — attribute the dominant cause.
+      6. `primary_blame_confidence` — score the attribution (after making it).
+      7. `other_blames` — secondary causes (knowing the primary).
+      8. `hypothesis` — propose the fix.
+      9. `hypothesis_confidence` — score the fix (after proposing it).
+
+    Pydantic accepts JSON keys in any order on parse, so this reorder does not
+    break existing on-disk records.
+    """
+
+    analysis: str = Field(
+        description="Multi-paragraph reasoning scratchpad. Filled first; grounds all structured fields below."
+    )
+    evidence: list[EvidenceItem] = Field(
+        default_factory=list,
+        description="Step-indexed quotes from the transcript. Required when primary_blame != 'none'.",
+    )
+    summary: str = Field(description="1-3 sentence description of what happened.")
+    outcome: Outcome = Field(description="What happened in the episode beyond the binary reward.")
+    primary_blame: BlameCategory = Field(description="Dominant failure cause; `none` for clean successes.")
+    primary_blame_confidence: int = Field(
+        ge=0, le=5, description="Confidence in primary_blame (0=no basis, 5=certain)."
+    )
+    other_blames: list[BlameCategory] = Field(
+        default_factory=list,
+        description="Secondary contributing causes. Must not repeat primary_blame.",
+    )
+    hypothesis: str = Field(description="1-2 sentences: what change would most likely fix this class of failure.")
+    hypothesis_confidence: int = Field(
+        ge=0, le=5, description="Confidence in the proposed fix (0=pure guess, 5=certain)."
+    )
+
+
+# Deprecated alias — `Findings` was renamed to `BaseFindings` to make the
+# extension contract explicit. The `general_blame` recipe's `OutputModel` is the
+# direct successor (identical on-disk shape). Kept for one release window so
+# existing callers (investigation_report.py, downstream consumers) keep working.
+Findings = BaseFindings
+
+
+class InvestigationMetadata(TypedBaseModel):
+    """Billing and provenance for a single investigator invocation. Sibling to `findings`."""
+
+    model: str = Field(description="Investigator model identifier (e.g. 'claude-opus-4-7').")
+    prompt_tokens: int = Field(default=0, description="Input tokens consumed by the investigator call.")
+    completion_tokens: int = Field(default=0, description="Output tokens produced by the investigator call.")
+    cost_usd: float = Field(default=0.0, description="Total USD cost of the investigator call.")
+    duration_s: float = Field(default=0.0, description="Wall-clock duration of the investigator call in seconds.")
+    timestamp: float = Field(description="Wall-clock time the investigator ran (Unix seconds).")
+    findings_schema_version: str = Field(
+        default=FINDINGS_SCHEMA_VERSION,
+        description="Schema version of the Findings record produced — for forward compatibility.",
+    )
 
 
 class Verifier(TypedBaseModel):
@@ -327,9 +451,9 @@ class ExperimentRecord(TypedBaseModel):
     benchmark_name: str = Field(description="Benchmark name from benchmark_metadata.name.")
     benchmark_version: str | None = Field(default=None, description="Benchmark version string.")
     benchmark_subset: BenchmarkSubset = Field(description="Subset descriptor for MNAR propensity correction.")
-    judge_config: JudgeConfig | None = Field(
+    investigator_llm_config: InvestigatorLLMConfig | None = Field(
         default=None,
-        description="Judge configuration if a post-hoc LLM judge was run on these episodes.",
+        description="Investigator configuration if a post-hoc LLM investigator was run on these episodes.",
     )
 
     @classmethod
@@ -372,7 +496,7 @@ class EpisodeRecord(TypedBaseModel):
     """Episode-level record. Written to episodes/<trajectory_id>/episode_record.json after each episode.
 
     Links to ExperimentRecord via evaluation_id. Contains all episode-specific fields:
-    task identity, per-episode tool list, outcome, usage, and optional judge output.
+    task identity, per-episode tool list, outcome, usage, and optional investigator output.
     """
 
     evaluation_id: str = Field(description="FK → ExperimentRecord.evaluation_id.")
@@ -414,9 +538,16 @@ class EpisodeRecord(TypedBaseModel):
         default=None,
         description="Task verifier reference for reproducibility and post-hoc inspection.",
     )
-    judge_output: JudgeOutput | None = Field(
+    findings: BaseFindings | None = Field(
         default=None,
-        description="Per-episode LLM judge assessment (difficulty, feasibility, failure root cause).",
+        description=(
+            "Per-episode LLM investigator assessment (outcome, blame, evidence, hypothesis). "
+            "Concrete shape depends on the recipe used; the base fields are always present."
+        ),
+    )
+    investigation_metadata: InvestigationMetadata | None = Field(
+        default=None,
+        description="Billing/provenance for the investigator invocation. None until a investigator has run.",
     )
 
     @classmethod

@@ -1,0 +1,30 @@
+[project]
+name = "terminalbench2-cube"
+version = "0.1.0"
+description = "Terminal-Bench 2 — real-world terminal tasks with pytest-based validation"
+requires-python = ">=3.12"
+dependencies = [
+    "cube-standard[docker]>=0.1.0rc8",
+    "datasets",
+    "typer~=0.25",
+]
+
+[project.entry-points."cube.benchmarks"]
+terminalbench2-cube = "terminalbench2_cube.benchmark:TerminalBench2BenchmarkConfig"
+
+[build-system]
+requires = ["uv_build>=0.8,<0.9"]
+build-backend = "uv_build"
+
+[tool.uv-build]
+include = ["src/terminalbench2_cube/task_metadata.json"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+]
+
+[tool.ruff]
+fix = true
+line-length = 120
+indent-width = 4

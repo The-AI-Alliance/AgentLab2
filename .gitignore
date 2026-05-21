@@ -12,8 +12,8 @@ temp/
 # Claude Code worktrees (created by Claude during development sessions)
 .claude/worktrees/
 
-# Meta-agent experiment outputs (large, not for VCS)
-meta_agent/results/
+# Auto-CUBE experiment outputs (large, not for VCS)
+auto_cube/results/
 
 # Personal experiment recipes (shared recipes are committed without the custom_ prefix)
 recipes/custom_*
@@ -299,3 +299,4 @@ pac.entitlement
 cube-standard/
 # Personal/throwaway experiment recipes (use custom_* prefix)
 recipes/custom_*
+.venv-auto-cube/

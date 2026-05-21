@@ -15,18 +15,42 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Literal
 
-Status = Literal["QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED", "STALE", "MAX_STEPS_REACHED"]
+Status = Literal[
+    "QUEUED", "RUNNING", "COMPLETED", "FAILED", "CANCELLED", "STALE", "MAX_STEPS_REACHED", "INVALID_CONFIG"
+]
 
 # In-flight: episode hasn't reached a terminal state yet. Driver poll should
 # leave these alone (subject to orphan/heartbeat sweeps for dead-worker cleanup).
 IN_FLIGHT_STATUSES: frozenset[Status] = frozenset({"QUEUED", "RUNNING"})
 
-TERMINAL_STATUSES: frozenset[Status] = frozenset({"COMPLETED", "FAILED", "CANCELLED", "STALE", "MAX_STEPS_REACHED"})
-# MAX_STEPS_REACHED is terminal but NOT retriable: the agent legitimately ran out of
-# its step budget, retrying would just truncate again from a fresh initial state.
+TERMINAL_STATUSES: frozenset[Status] = frozenset(
+    {"COMPLETED", "FAILED", "CANCELLED", "STALE", "MAX_STEPS_REACHED", "INVALID_CONFIG"}
+)
+# Two terminal statuses are deliberately NOT retriable:
+# - MAX_STEPS_REACHED: the agent legitimately ran out of its step budget; retrying
+#   would just truncate again from a fresh initial state.
+# - INVALID_CONFIG: a permanent provider error (e.g. typo'd model name, bad API key,
+#   malformed request). The identical request will fail identically on retry, so
+#   replaying the episode only burns the retry budget. See is_permanent_llm_error.
 RETRIABLE_STATUSES: frozenset[Status] = frozenset({"FAILED", "CANCELLED", "STALE"})
 
 STATUS_FILENAME = "status.json"
+
+# Canonical icons by raw Status. One-character/one-grapheme per entry so terminal
+# tools (e.g. ``scripts/experiments_report.py``) can lay them out cleanly. The XRay viewer
+# wraps these in ``<span title='…'>`` for hover tooltips and additionally splits
+# COMPLETED into success/fail using the recorded reward; that split lives in
+# ``analyze/xray_utils.py`` since it depends on reward semantics, not status alone.
+STATUS_ICONS: dict[Status, str] = {
+    "QUEUED": "🕐",
+    "RUNNING": "▶",
+    "COMPLETED": "✓",
+    "MAX_STEPS_REACHED": "⏱",
+    "FAILED": "✗",
+    "STALE": "👻",
+    "CANCELLED": "🚫",
+    "INVALID_CONFIG": "⛔",
+}
 
 
 @dataclass
@@ -84,12 +108,36 @@ class EpisodeStatus:
         os.replace(tmp, path)
 
 
+def should_sweep_running_to_stale(
+    status: EpisodeStatus,
+    *,
+    now: float,
+    step_timeout_s: float,
+    cancel_grace_s: float,
+    process_start_s: float | None = None,
+) -> bool:
+    """Return True iff a RUNNING episode's worker appears dead and should become STALE.
+
+    Two cases:
+    - heartbeat predates `process_start_s` — worker is provably from a dead prior process.
+    - heartbeat age > `step_timeout_s + cancel_grace_s` — worker died without writing a
+      terminal status.
+
+    Returns False when `last_heartbeat_at` is None (episode never left QUEUED; no worker).
+    """
+    if status.last_heartbeat_at is None:
+        return False
+    if process_start_s is not None and status.last_heartbeat_at < process_start_s:
+        return True
+    return now - status.last_heartbeat_at > step_timeout_s + cancel_grace_s
+
+
 def next_retry_count(prior: "EpisodeStatus | None") -> int:
     """Return the retry_count for a new attempt, given the prior status (if any).
 
     - No prior: 0 (original attempt).
     - Prior in-flight (QUEUED / RUNNING): same retry_count (idempotent re-pre-claim).
-    - Prior terminal (FAILED/CANCELLED/STALE/COMPLETED/MAX_STEPS_REACHED): prior + 1.
+    - Prior terminal (FAILED/CANCELLED/STALE/COMPLETED/MAX_STEPS_REACHED/INVALID_CONFIG): prior + 1.
     """
     if prior is None:
         return 0

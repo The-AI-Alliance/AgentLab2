@@ -1,13 +1,12 @@
 """WorkArena task implementation for the CUBE framework."""
 
-import importlib
 import logging
 import time
 from typing import Any, List, Literal, override
 
+import browsergym.workarena
 from browsergym.workarena.tasks.base import AbstractServiceNowTask
 from cube.benchmark import RuntimeContext
-from cube.container import ContainerBackend
 from cube.core import Action, EnvironmentOutput, Observation
 from cube.task import Task, TaskConfig, TaskMetadata
 from cube.tool import Toolbox
@@ -61,7 +60,7 @@ class WorkArenaTask(Task):
             tool = self.tool
         if not isinstance(tool, WorkArenaBrowserTool):
             raise RuntimeError(
-                f"The browser tool must satisfy the WorkArenaBrowserTool protocol (e.g., BrowsergymTool or SyncPlaywrightTool), got {type(tool).__name__}"
+                f"The browser tool must satisfy the WorkArenaBrowserTool protocol (e.g., BgymTool or SyncPlaywrightTool), got {type(tool).__name__}"
             )
         return tool
 
@@ -187,9 +186,8 @@ class WorkArenaTaskConfig(TaskConfig[WorkArenaTaskMetadata]):
     def make(
         self,
         runtime_context: RuntimeContext | None = None,
-        container_backend: ContainerBackend | None = None,
     ) -> WorkArenaTask:
-        _ = runtime_context, container_backend
+        _ = runtime_context
         assert self.tool_config, f"WorkArenaTaskConfig requires a tool_config, got {self.tool_config}"
         return WorkArenaTask(
             metadata=self.metadata,
@@ -200,9 +198,13 @@ class WorkArenaTaskConfig(TaskConfig[WorkArenaTaskMetadata]):
 
 def _load_task_class(class_path: str) -> type:
     """Reconstruct a task class from its dotted module-qualified name."""
-    module_name, class_name = class_path.rsplit(".", 1)
-    module = importlib.import_module(module_name)
-    return getattr(module, class_name)
+    matches = [
+        cls for cls in browsergym.workarena.ALL_WORKARENA_TASKS if f"{cls.__module__}.{cls.__name__}" == class_path
+    ]
+    if len(matches) == 0:
+        raise ValueError(f"{class_path!r} is not a registered WorkArena task class")
+    assert len(matches) == 1, f"Duplicate task class registered for {class_path!r}"
+    return matches[0]
 
 
 def _apply_task_runtime_preferences(tool: WorkArenaBrowserTool, workarena_task: AbstractServiceNowTask) -> None:

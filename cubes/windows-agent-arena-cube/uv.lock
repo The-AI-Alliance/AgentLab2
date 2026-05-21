@@ -554,7 +554,7 @@ wheels = [
 [[package]]
 name = "cube-computer-tool"
 version = "0.2.0"
-source = { git = "https://github.com/The-AI-Alliance/cube-standard?subdirectory=cube-tools%2Fcube-computer-tool&branch=main#9edb8524aeb7a02d027fea211ff4c02d9e98be69" }
+source = { git = "https://github.com/The-AI-Alliance/cube-standard?subdirectory=cube-tools%2Fcube-computer-tool&branch=dev#4bc662209fb771fd21014f0894655573eb4d5cd2" }
 dependencies = [
     { name = "cube-standard" },
     { name = "pillow" },
@@ -566,7 +566,7 @@ dependencies = [
 [[package]]
 name = "cube-infra-azure"
 version = "0.1.0"
-source = { git = "https://github.com/The-AI-Alliance/cube-standard?subdirectory=cube-resources%2Fcube-infra-azure&branch=main#9edb8524aeb7a02d027fea211ff4c02d9e98be69" }
+source = { git = "https://github.com/The-AI-Alliance/cube-standard?subdirectory=cube-resources%2Fcube-infra-azure&branch=dev#4bc662209fb771fd21014f0894655573eb4d5cd2" }
 dependencies = [
     { name = "azure-identity" },
     { name = "azure-mgmt-compute" },
@@ -581,7 +581,7 @@ dependencies = [
 [[package]]
 name = "cube-standard"
 version = "0.1.0rc8"
-source = { git = "https://github.com/The-AI-Alliance/cube-standard?branch=main#9edb8524aeb7a02d027fea211ff4c02d9e98be69" }
+source = { git = "https://github.com/The-AI-Alliance/cube-standard?branch=dev#4bc662209fb771fd21014f0894655573eb4d5cd2" }
 dependencies = [
     { name = "docstring-parser" },
     { name = "fastapi" },
@@ -3517,9 +3517,9 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "cssselect", specifier = ">=1.2" },
-    { name = "cube-computer-tool", git = "https://github.com/The-AI-Alliance/cube-standard?subdirectory=cube-tools%2Fcube-computer-tool&branch=main" },
-    { name = "cube-infra-azure", marker = "extra == 'azure'", git = "https://github.com/The-AI-Alliance/cube-standard?subdirectory=cube-resources%2Fcube-infra-azure&branch=main" },
-    { name = "cube-standard", git = "https://github.com/The-AI-Alliance/cube-standard?branch=main" },
+    { name = "cube-computer-tool", git = "https://github.com/The-AI-Alliance/cube-standard?subdirectory=cube-tools%2Fcube-computer-tool&branch=dev" },
+    { name = "cube-infra-azure", marker = "extra == 'azure'", git = "https://github.com/The-AI-Alliance/cube-standard?subdirectory=cube-resources%2Fcube-infra-azure&branch=dev" },
+    { name = "cube-standard", git = "https://github.com/The-AI-Alliance/cube-standard?branch=dev" },
     { name = "docker", specifier = ">=7.1.0" },
     { name = "easyocr", specifier = ">=1.7" },
     { name = "fastdtw", specifier = ">=0.3" },

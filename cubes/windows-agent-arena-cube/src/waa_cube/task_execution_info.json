@@ -5114,7 +5114,7 @@
       },
       "result": {
         "type": "vm_file",
-        "path": "C:\\Users\\Docker\\Downloads\\DownloadssBackup.zip",
+        "path": "C:\\Users\\Docker\\Downloads\\DownloadsBackup.zip",
         "dest": "DownloadsBackup.zip"
       }
     },
@@ -8959,7 +8959,7 @@
       "expected": {
         "type": "rule",
         "rules": {
-          "expected": "Bing"
+          "expected": "Microsoft Bing"
         }
       }
     },

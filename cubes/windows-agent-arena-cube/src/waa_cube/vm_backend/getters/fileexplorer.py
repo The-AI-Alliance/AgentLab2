@@ -57,6 +57,11 @@ def get_are_files_sorted_by_modified_time(env, config: dict) -> bool:
 
 def get_is_file_saved_desktop(env, config) -> str:
     desktop_path = env.controller.get_vm_desktop_path()
+    if desktop_path is None:
+        # Guest-agent failed to resolve the desktop path. Surface as an evaluation
+        # error (info.evaluation_error) rather than silently scoring 0 — the agent
+        # may have completed the task; we just couldn't observe it.
+        raise RuntimeError("get_vm_desktop_path returned None")
     file_name = config["filename"]
     file = env.controller.get_file_as_text(desktop_path + "\\" + file_name)
     if file is not None and config["textcontent"] in file:
@@ -205,6 +210,8 @@ def get_are_all_images_tagged(env, config) -> bool:
 
 def get_is_file_desktop(env, config) -> str:
     desktop_path = env.controller.get_vm_desktop_path()
+    if desktop_path is None:
+        raise RuntimeError("get_vm_desktop_path returned None")
     file_name = config["filename"]
     file = env.controller.get_file(desktop_path + "\\" + file_name)
     if file is not None:

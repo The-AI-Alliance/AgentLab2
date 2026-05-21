@@ -22,10 +22,9 @@ _DEBUG_TASK_IDS = list(_TASK_ACTIONS)
 
 def test_config_roundtrip():
     """``model_dump_json`` → ``model_validate_json`` produces an equivalent config."""
-    cfg = SWEBenchVerifiedBenchmarkConfig(include_hints=True, oracle_mode=True).subset_from_list(_DEBUG_TASK_IDS)
+    cfg = SWEBenchVerifiedBenchmarkConfig(oracle_mode=True).subset_from_list(_DEBUG_TASK_IDS)
     js = cfg.model_dump_json()
     restored = SWEBenchVerifiedBenchmarkConfig.model_validate_json(js)
-    assert restored.include_hints is True
     assert restored.oracle_mode is True
     assert restored.task_ids == _DEBUG_TASK_IDS
     assert restored.num_tasks == len(_DEBUG_TASK_IDS)
@@ -83,7 +82,6 @@ def test_execution_info_roundtrip():
     """Typed ``SWEBenchVerifiedExecutionInfo`` round-trips through the TaskExecutionInfo discriminator."""
     ei = SWEBenchVerifiedExecutionInfo(
         problem_statement="test issue",
-        hints_text="useful hint",
         patch="diff --git a/x b/x",
         test_patch="diff --git a/y b/y",
         fail_to_pass=["test_a", "test_b"],

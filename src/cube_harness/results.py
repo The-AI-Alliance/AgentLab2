@@ -6,6 +6,8 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict
 
 from cube_harness.core import Trajectory, TrajectoryStep
+from cube_harness.episode_status import STATUS_FILENAME
+from cube_harness.episode_status import EpisodeStatus as RawEpisodeStatus
 from cube_harness.storage import (
     ARCHIVED_MARKER,
     EPISODE_METADATA,
@@ -158,6 +160,31 @@ class ExperimentResult:
                         if (ep_dir / EPISODE_METADATA).exists():
                             self._episodes[ep_dir.name] = EpisodeResult(ep_dir, self._storage)
         return self._episodes
+
+    def iter_episode_statuses(self) -> Iterator[RawEpisodeStatus]:
+        """Yield typed :class:`cube_harness.episode_status.EpisodeStatus` for every
+        non-archived episode dir that has a ``status.json`` file.
+
+        Unlike :meth:`episodes` (which requires the finalized ``episode.metadata.json``),
+        this also surfaces in-flight (``QUEUED``/``RUNNING``) episodes — used by
+        ``scripts/experiments_report.py`` and the XRay viewer's per-experiment row computation
+        so both tools see the same episode set. Deduplicated by ``(task_id, episode_id)``.
+        """
+        episodes_dir = self._dir / EPISODES_DIR
+        if not episodes_dir.exists():
+            return
+        seen: set[tuple[str, int]] = set()
+        for ep_dir in sorted(episodes_dir.iterdir()):
+            if ARCHIVED_MARKER in ep_dir.name or not ep_dir.is_dir():
+                continue
+            es = RawEpisodeStatus.read(ep_dir / STATUS_FILENAME)
+            if es is None:
+                continue
+            key = (es.task_id, es.episode_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            yield es
 
     def summary(self) -> ExperimentSummary | None:
         path = self._dir / "experiment_summary.json"

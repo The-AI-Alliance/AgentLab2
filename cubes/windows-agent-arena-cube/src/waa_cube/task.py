@@ -180,7 +180,7 @@ class WAATask(Task):
 
     def model_post_init(self, __context: Any) -> None:
         """Create the Computer tool without a VM — VM is deferred to reset()."""
-        self._tool = self.tool_config.make(container=None, vm=None)
+        self._tool = self.tool_config.make(container=None)
 
     @property
     def _computer(self) -> "ComputerBase":
@@ -206,9 +206,8 @@ class WAATask(Task):
         # without this gate we'd burn ~4min of in-task retries before
         # failing the episode. Fail fast so Ray re-queues on a fresh VM.
         self._health_gate_or_raise()
-        # ComputerBase.attach_vm() takes any object with an `.endpoint` str
-        # attribute; the cube-infra handle satisfies that protocol.
-        self._computer.attach_vm(self._resource_handle)
+        # ComputerBase.attach_endpoint() takes the endpoint URL string.
+        self._computer.attach_endpoint(self._resource_handle.endpoint)
 
     def _extract_public_ip(self) -> str:
         """Pull the VM's public IP out of the resource handle's SSH tunnel argv.

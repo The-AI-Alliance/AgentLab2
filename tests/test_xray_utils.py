@@ -787,14 +787,15 @@ class TestRewardMeanStderr:
     def test_empty_returns_zeros(self) -> None:
         assert xray_utils._reward_mean_stderr([]) == (0.0, 0.0)
 
-    def test_binary_uses_sample_formula(self) -> None:
-        # 3 successes / 4 trials → p=0.75, stderr = std(ddof=1)/sqrt(n)
+    def test_binary_uses_binomial_formula(self) -> None:
+        # 3 successes / 4 trials → p=0.75, binomial stderr = sqrt(p*(1-p)/n).
+        # _reward_mean_stderr now delegates to analyze.stats.reward_mean_stderr,
+        # which auto-selects binomial SE for binary data (same as scripts/experiments_report.py).
         rewards = [1.0, 1.0, 1.0, 0.0]
         mean, stderr = xray_utils._reward_mean_stderr(rewards)
         n = len(rewards)
         assert mean == pytest.approx(0.75)
-        expected_var = sum((r - mean) ** 2 for r in rewards) / (n - 1)
-        assert stderr == pytest.approx((expected_var / n) ** 0.5)
+        assert stderr == pytest.approx((mean * (1 - mean) / n) ** 0.5)
 
     def test_continuous_uses_sample_formula(self) -> None:
         rewards = [0.2, 0.4, 0.6, 0.8]

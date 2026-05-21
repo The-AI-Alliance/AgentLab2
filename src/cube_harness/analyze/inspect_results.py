@@ -6,6 +6,7 @@ import numpy as np
 import pandas as pd
 from cube.core import EnvironmentOutput
 
+from cube_harness.analyze.stats import binomial_std_err
 from cube_harness.core import Trajectory
 
 TASK_KEY = "task_name"
@@ -123,9 +124,8 @@ def set_index_from_variables(
 def get_std_err(df: pd.DataFrame, metric: str) -> tuple[float, float]:
     data = df[metric].dropna().values
     if np.all(np.isin(data, [0, 1])):
-        mean = np.mean(data)
-        std_err = np.sqrt(mean * (1 - mean) / len(data))
-        return float(mean), float(std_err)
+        mean = float(np.mean(data))
+        return mean, binomial_std_err(mean, len(data))
     return get_sample_std_err(df, metric)
 
 

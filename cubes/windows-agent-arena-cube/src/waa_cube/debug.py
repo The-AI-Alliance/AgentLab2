@@ -21,7 +21,6 @@ from pathlib import Path
 from typing import ClassVar
 
 from cube.benchmark import BenchmarkConfig
-from cube.container import ContainerBackend
 from cube.core import Action, ActionSchema, Observation
 from cube.task import TaskConfig, TaskMetadata
 
@@ -43,7 +42,6 @@ class DebugWAATaskConfig(WAATaskConfig):
     def make(
         self,
         runtime_context: dict | None = None,
-        container_backend: ContainerBackend | None = None,
     ) -> WAATask:
         metadata = DebugWAABenchmark.task_metadata[self.task_id]
         return WAATask(
@@ -51,7 +49,6 @@ class DebugWAATaskConfig(WAATaskConfig):
             tool_config=self.tool_config or ComputerConfig(),
             infra=self.infra,
             runtime_context=runtime_context,
-            container_backend=container_backend,
         )
 
 

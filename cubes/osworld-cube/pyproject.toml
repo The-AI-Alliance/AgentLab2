@@ -6,7 +6,6 @@ requires-python = ">=3.12"
 dependencies = [
     "cube-standard>=0.1.0rc8",
     "cube-computer-tool",
-    "cube-vm-backend[docker]",
     "pillow>=9.0",
     "requests>=2.28",
     "requests-toolbelt>=0.10",
@@ -79,10 +78,10 @@ markers = [
 override-dependencies = ["protobuf>=6.33.5"]
 
 [tool.uv.sources]
-cube-computer-tool = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-tools/cube-computer-tool" }
-cube-vm-backend = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-resources/cube-vm-backend" }
-cube-infra-azure = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-resources/cube-infra-azure" }
-cube-infra-aws = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-resources/cube-infra-aws" }
+cube-standard = { git = "https://github.com/The-AI-Alliance/cube-standard", branch = "dev" }
+cube-computer-tool = { git = "https://github.com/The-AI-Alliance/cube-standard", branch = "dev", subdirectory = "cube-tools/cube-computer-tool" }
+cube-infra-azure = { git = "https://github.com/The-AI-Alliance/cube-standard", branch = "dev", subdirectory = "cube-resources/cube-infra-azure" }
+cube-infra-aws = { git = "https://github.com/The-AI-Alliance/cube-standard", branch = "dev", subdirectory = "cube-resources/cube-infra-aws" }
 
 [tool.ruff]
 fix = true

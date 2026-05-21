@@ -8,15 +8,6 @@ exists so we can pick up simplification work when timing allows.
 
 ## Dead / broken code
 
-### `tools/computer.py` — empty stub superseded by osworld-cube
-[src/cube_harness/tools/computer.py](src/cube_harness/tools/computer.py)
-
-51 lines of `pass` / `raise NotImplementedError` stubs for mouse/keyboard actions.
-The real implementation lives in `cubes/osworld-cube/src/osworld_cube/computer.py`
-(wrapping `cube_computer_tool`). Never imported inside cube-harness.
-
-**Action:** delete the file; remove any `__init__.py` exports.
-
 ### Legacy XML-tag agent and its tests
 - [src/cube_harness/agents/legacy_generic_agent.py](src/cube_harness/agents/legacy_generic_agent.py) (~1260 lines)
 - [tests/test_legacy_generic_agent.py](tests/test_legacy_generic_agent.py) (~910 lines)
@@ -27,7 +18,7 @@ Genny ([agents/genny.py](src/cube_harness/agents/genny.py)). Confirm no active
 recipe or cube imports it:
 
 ```bash
-grep -r "legacy_generic_agent\|GenericAgent\|GenericPromptFlags" recipes/ cubes/ meta_agent/
+grep -r "legacy_generic_agent\|GenericAgent\|GenericPromptFlags" recipes/ cubes/
 ```
 
 **Action:** once grep comes up clean, remove file + test + exports. ~2100 LOC gone.
@@ -35,18 +26,6 @@ grep -r "legacy_generic_agent\|GenericAgent\|GenericPromptFlags" recipes/ cubes/
 ---
 
 ## Legacy parameters / migration debt
-
-### `container_backend` passthrough
-- [src/cube_harness/episode.py:48](src/cube_harness/episode.py#L48) (parameter)
-- [src/cube_harness/episode.py:113](src/cube_harness/episode.py#L113) (forward to `task_config.make`)
-- [src/cube_harness/experiment.py:87](src/cube_harness/experiment.py#L87) (populate from benchmark)
-
-Flagged as legacy upstream (cube-standard [DEPRECATED.md](../cube-standard/DEPRECATED.md)).
-Only used as a passthrough from `Benchmark` to `Task`; adds parameter clutter.
-
-**Action:** remove from `Episode`, `EpisodeConfig`, and `Experiment` in lockstep
-with the upstream removal. ~8 usages across 3 files — minimal refactor once
-upstream lands.
 
 ### V1 storage format read paths
 [src/cube_harness/storage.py](src/cube_harness/storage.py) — all `_v1_*` methods (~150 LOC)
@@ -114,8 +93,7 @@ complete, delete the background loader.
 [src/cube_harness/episode.py:64-104](src/cube_harness/episode.py#L64-L104)
 
 `load_episode_from_config` accepts an optional `benchmark`, then checks
-`if benchmark is not None` twice to decide whether to forward `runtime_context`
-and `container_backend`.
+`if benchmark is not None` to decide whether to forward `runtime_context`.
 
 **Action:** split into two classmethods — `load_from_config(path)` (bare) and
 `load_from_config_with_benchmark(path, benchmark)` (full). Clearer contract, no

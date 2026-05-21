@@ -28,6 +28,48 @@ _accessibility_ns_map = {
 
 logger = logging.getLogger("waa_cube.vm_backend.getters.chrome")
 
+
+def _chrome_profile_path(env, *parts: str) -> str:
+    """Return an absolute path inside Chrome's user-data-dir, resolved on the VM.
+
+    WAA tasks launch Chrome with ``--user-data-dir=C:\\Temp\\cdp-profile`` so any
+    Preferences/Cookies/History/Bookmarks the agent modifies live there, not under
+    the platform-default Chrome directory. Probe for the WAA dir at eval time and
+    fall back to the default if absent (so this also works for tasks that use the
+    default profile or for non-WAA cube users).
+
+    ``parts`` are joined onto the resolved user-data-dir on the VM (e.g.
+    ``("Default", "Preferences")`` or ``("Local State",)``).
+    """
+    os_type = env.vm_platform
+    parts_repr = ", ".join(repr(p) for p in parts)
+    if os_type == "Windows":
+        script = (
+            r"import os; "
+            r"d = r'C:\Temp\cdp-profile' if os.path.isdir(r'C:\Temp\cdp-profile\Default') "
+            r"else os.path.join(os.getenv('LOCALAPPDATA'), 'Google', 'Chrome', 'User Data'); "
+            f"print(os.path.join(d, {parts_repr}))"
+        )
+    elif os_type == "Darwin":
+        script = (
+            "import os; "
+            "d = os.path.join(os.getenv('HOME'), 'Library', 'Application Support', 'Google', 'Chrome'); "
+            f"print(os.path.join(d, {parts_repr}))"
+        )
+    elif os_type == "Linux":
+        script = (
+            "import os, platform; "
+            "d = os.path.join(os.getenv('HOME'), "
+            "'snap/chromium/common/chromium' if 'arm' in platform.machine() "
+            "else '.config/google-chrome'); "
+            f"print(os.path.join(d, {parts_repr}))"
+        )
+    else:
+        raise Exception(f"Unsupported operating system: {os_type}")
+    result = env.controller.execute_python_command(script)
+    return (result or {}).get("output", "").strip()
+
+
 """
 WARNING: 
 1. Functions from this script assume that no account is registered on Chrome, otherwise the default file path needs to be changed.
@@ -210,25 +252,7 @@ def get_info_from_website(env, config: Dict[Any, Any]) -> Any:
 
 # The following ones just need to load info from the files of software, no need to connect to the software
 def get_default_search_engine(env, config: Dict[str, str]):
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")["output"].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))"
-            )["output"].strip()
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Default", "Preferences")
 
     try:
         content = env.controller.get_file(preference_file_path)
@@ -249,106 +273,46 @@ def get_cookie_data(env, config: Dict[str, str]):
     Get the cookies from the Chrome browser.
     Assume the cookies are stored in the default location, not encrypted and not large in size.
     """
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        chrome_cookie_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Cookies'))""")["output"].strip()
-    elif os_type == "Darwin":
-        chrome_cookie_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Cookies'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            chrome_cookie_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Cookies'))"
-            )["output"].strip()
-        else:
-            chrome_cookie_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Cookies'))"
-            )["output"].strip()
-    else:
-        raise Exception("Unsupported operating system")
+    # Chrome 90+ stores cookies under Default/Network/ (legacy: Default/Cookies).
+    chrome_cookie_file_path = _chrome_profile_path(env, "Default", "Network", "Cookies")
 
-    try:
-        content = env.controller.get_file(chrome_cookie_file_path)
-        _path = os.path.join(env.cache_dir, config["dest"])
+    content = env.controller.get_file(chrome_cookie_file_path)
+    if content is None:
+        # Distinguish "evaluator could not read the cookie DB" from "agent did not delete cookies".
+        # Surfaces via info.evaluation_error rather than silently scoring 0.
+        raise FileNotFoundError(f"Chrome Cookies DB not found at {chrome_cookie_file_path}")
 
-        with open(_path, "wb") as f:
-            f.write(content)
+    _path = os.path.join(env.cache_dir, config["dest"])
+    with open(_path, "wb") as f:
+        f.write(content)
 
-        conn = sqlite3.connect(_path)
-        cursor = conn.cursor()
-
-        # Query to check for OpenAI cookies
-        cursor.execute("SELECT * FROM cookies")
-        cookies = cursor.fetchall()
-        return cookies
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        return None
+    conn = sqlite3.connect(_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM cookies")
+    cookies = cursor.fetchall()
+    return cookies
 
 
 def get_history(env, config: Dict[str, str]):
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        chrome_history_path = env.controller.execute_python_command(
-            """import os; print(os.path.join(os.getenv('USERPROFILE'), "AppData", "Local", "Google", "Chrome", "User Data", "Default", "History"))"""
-        )["output"].strip()
-    elif os_type == "Darwin":
-        chrome_history_path = env.controller.execute_python_command(
-            """import os; print(os.path.join(os.getenv('HOME'), "Library", "Application Support", "Google", "Chrome", "Default", "History"))"""
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            chrome_history_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/History'))"
-            )["output"].strip()
-        else:
-            chrome_history_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config', 'google-chrome', 'Default', 'History'))"
-            )["output"].strip()
-    else:
-        raise Exception("Unsupported operating system")
+    chrome_history_path = _chrome_profile_path(env, "Default", "History")
 
-    try:
-        content = env.controller.get_file(chrome_history_path)
-        _path = os.path.join(env.cache_dir, config["dest"])
+    content = env.controller.get_file(chrome_history_path)
+    if content is None:
+        raise FileNotFoundError(f"Chrome History DB not found at {chrome_history_path}")
 
-        with open(_path, "wb") as f:
-            f.write(content)
+    _path = os.path.join(env.cache_dir, config["dest"])
+    with open(_path, "wb") as f:
+        f.write(content)
 
-        conn = sqlite3.connect(_path)
-        cursor = conn.cursor()
-
-        # Query to check for OpenAI cookies
-        cursor.execute("SELECT url, title, last_visit_time FROM urls")
-        history_items = cursor.fetchall()
-        return history_items
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        return None
+    conn = sqlite3.connect(_path)
+    cursor = conn.cursor()
+    cursor.execute("SELECT url, title, last_visit_time FROM urls")
+    history_items = cursor.fetchall()
+    return history_items
 
 
 def get_enabled_experiments(env, config: Dict[str, str]):
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                                'Google\\Chrome\\User Data\\Local State'))""")["output"].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Local State'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Local State'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Local State'))"
-            )["output"].strip()
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Local State")
 
     try:
         content = env.controller.get_file(preference_file_path)
@@ -367,25 +331,7 @@ def get_profile_name(env, config: Dict[str, str]):
     Get the username from the Chrome browser.
     Assume the cookies are stored in the default location, not encrypted and not large in size.
     """
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")["output"].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))"
-            )["output"].strip()
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Default", "Preferences")
 
     try:
         content = env.controller.get_file(preference_file_path)
@@ -400,25 +346,7 @@ def get_profile_name(env, config: Dict[str, str]):
 
 
 def get_chrome_language(env, config: Dict[str, str]):
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                                    'Google\\Chrome\\User Data\\Local State'))""")["output"].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Local State'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Local State'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Local State'))"
-            )["output"].strip()
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Local State")
 
     try:
         content = env.controller.get_file(preference_file_path)
@@ -433,27 +361,7 @@ def get_chrome_language(env, config: Dict[str, str]):
 
 
 def get_chrome_font_size(env, config: Dict[str, str]):
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                                'Google\\Chrome\\User Data\\Default\\Preferences'))""")[
-            "output"
-        ].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))"
-            )["output"].strip()
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Default", "Preferences")
 
     try:
         content = env.controller.get_file(preference_file_path)
@@ -470,25 +378,7 @@ def get_chrome_font_size(env, config: Dict[str, str]):
 
 
 def get_bookmarks(env, config: Dict[str, str]):
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Bookmarks'))""")["output"].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Bookmarks'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Bookmarks'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Bookmarks'))"
-            )["output"].strip()
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Default", "Bookmarks")
 
     content = env.controller.get_file(preference_file_path)
     if not content:
@@ -501,26 +391,7 @@ def get_bookmarks(env, config: Dict[str, str]):
 # todo: move this to the main.py
 def get_extensions_installed_from_shop(env, config: Dict[str, str]):
     """Find the Chrome extensions directory based on the operating system."""
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        chrome_extension_dir = env.controller.execute_python_command(
-            """os.path.expanduser('~') + '\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Extensions\\'"""
-        )["output"].strip()
-    elif os_type == "Darwin":  # macOS
-        chrome_extension_dir = env.controller.execute_python_command(
-            """os.path.expanduser('~') + '/Library/Application Support/Google/Chrome/Default/Extensions/'"""
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            chrome_extension_dir = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Extensions/'))"
-            )["output"].strip()
-        else:
-            chrome_extension_dir = env.controller.execute_python_command(
-                """os.path.expanduser('~') + '/.config/google-chrome/Default/Extensions/'"""
-            )["output"].strip()
-    else:
-        raise Exception("Unsupported operating system")
+    chrome_extension_dir = _chrome_profile_path(env, "Default", "Extensions")
 
     manifests = []
     for extension_id in os.listdir(chrome_extension_dir):
@@ -596,6 +467,11 @@ def get_page_info(env, config: Dict[str, str]):
                 try:
                     # Wait for the page to finish loading, this prevents the "execution context was destroyed" issue
                     page.wait_for_load_state("networkidle", timeout=timeout_ms)  # Wait for the 'load' event to complete
+                    # `networkidle` only waits for requests to settle; SPA frameworks (Steam,
+                    # Discourse, etc.) can still be hydrating components into the DOM after
+                    # network is quiet. A short fixed wait gives client-side rendering time
+                    # to populate the snapshot we capture below.
+                    page.wait_for_timeout(2000)
                     title = page.title()
                     url = page.url
                     page_info = {"title": title, "url": url, "content": page.content()}
@@ -752,24 +628,34 @@ def get_active_url_from_accessTree(env, config):
         return None
 
     # Determine the correct selector based on system architecture
-    selector = None
     arch = platform.machine()
     print(f"Your architecture is: {arch}")
 
     if "arm" in arch:
-        selector_string = "application[name=Chromium] entry[name=Address\\ and\\ search\\ bar]"
+        selector_strings = ["application[name=Chromium] entry[name=Address\\ and\\ search\\ bar]"]
     else:
-        selector_string = "application[name=Google\\ Chrome] entry[name=Address\\ and\\ search\\ bar]"
+        # Linux Chrome exposes the omnibox as <entry name="Address and search bar">. Windows
+        # Chrome exposes it as <omniboxviewviews> (no `name` attribute on the entry-shaped
+        # ancestor), so the Linux selector silently returns no elements. Try fallbacks in order.
+        selector_strings = [
+            "application[name=Google\\ Chrome] entry[name=Address\\ and\\ search\\ bar]",
+            "application[name=Google\\ Chrome] omniboxviewviews",
+        ]
 
-    try:
-        selector = CSSSelector(selector_string, namespaces=_accessibility_ns_map)
-    except Exception as e:
-        logger.error(f"Failed to parse the selector for active tab URL: {e}")
-        return None
+    elements = []
+    for sel_str in selector_strings:
+        try:
+            sel = CSSSelector(sel_str, namespaces=_accessibility_ns_map)
+        except Exception as e:
+            logger.error(f"Failed to parse selector {sel_str!r}: {e}")
+            continue
+        elements = sel(at)
+        if elements:
+            logger.info(f"Active URL found via selector: {sel_str!r}")
+            break
 
-    elements = selector(at) if selector else []
     if not elements:
-        print("No elements found.")
+        print("No elements found across all selectors.")
         return None
     elif not elements[-1].text:
         print("No text found in the latest element.")
@@ -1085,11 +971,24 @@ def get_shortcuts_on_desktop(env, config: Dict[str, str]):
     short_cuts = {}
 
     for shortcut_path in shortcuts_paths:
-        short_cuts[shortcut_path] = env.controller.get_file(
+        raw = env.controller.get_file(
             env.controller.execute_python_command(
                 f"import os; print(os.path.join(os.path.expanduser('~'), 'Desktop', '{shortcut_path}'))"
             )["output"].strip()
-        ).decode("utf-8")
+        )
+        if raw is None:
+            raise FileNotFoundError(f"Desktop shortcut not retrievable: {shortcut_path}")
+
+        if os_name == "Windows":
+            # `.lnk` is a binary shell-link record, not utf-8. The downstream check
+            # `is_shortcut_on_desktop` matches `Name=<rule_name>\n` (Linux .desktop syntax).
+            # On Windows, the shortcut's display name is the filename without extension —
+            # synthesise a Linux-style content line so the consumer's substring check works
+            # across all platforms without needing a Windows .lnk parser.
+            base, _ = os.path.splitext(shortcut_path)
+            short_cuts[shortcut_path] = f"Name={base}\n"
+        else:
+            short_cuts[shortcut_path] = raw.decode("utf-8")
 
     return short_cuts
 
@@ -1242,26 +1141,7 @@ def get_googledrive_file(env, config: Dict[str, Any]) -> Any:
 
 
 def get_enable_do_not_track(env, config: Dict[str, str]):
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")["output"].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))"
-            )["output"].strip()
-
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Default", "Preferences")
 
     content = env.controller.get_file(preference_file_path)
     if content is None:
@@ -1272,26 +1152,7 @@ def get_enable_do_not_track(env, config: Dict[str, str]):
 
 
 def get_enable_enhanced_safety_browsing(env, config: Dict[str, str]):
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")["output"].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))"
-            )["output"].strip()
-
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Default", "Preferences")
 
     try:
         content = env.controller.get_file(preference_file_path)
@@ -1305,26 +1166,7 @@ def get_enable_enhanced_safety_browsing(env, config: Dict[str, str]):
 
 
 def get_enable_safe_browsing(env, config: Dict[str, str]):
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")["output"].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))"
-            )["output"].strip()
-
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Default", "Preferences")
 
     try:
         content = env.controller.get_file(preference_file_path)
@@ -1340,26 +1182,7 @@ def get_enable_safe_browsing(env, config: Dict[str, str]):
 
 
 def get_new_startup_page(env, config: Dict[str, str]):
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")["output"].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))"
-            )["output"].strip()
-
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Default", "Preferences")
 
     try:
         content = env.controller.get_file(preference_file_path)
@@ -1378,26 +1201,7 @@ def get_new_startup_page(env, config: Dict[str, str]):
 
 
 def get_find_unpacked_extension_path(env, config: Dict[str, str]):
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")["output"].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))"
-            )["output"].strip()
-
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Default", "Preferences")
 
     try:
         content = env.controller.get_file(preference_file_path)
@@ -1415,26 +1219,7 @@ def get_find_unpacked_extension_path(env, config: Dict[str, str]):
 
 
 def get_find_installed_extension_name(env, config: Dict[str, str]):
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")["output"].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))"
-            )["output"].strip()
-
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Default", "Preferences")
 
     try:
         content = env.controller.get_file(preference_file_path)
@@ -1455,25 +1240,7 @@ def get_data_delete_automacally(env, config: Dict[str, str]):
     """
     This function is used to open th "auto-delete" mode of chromium
     """
-    os_type = env.vm_platform
-    if os_type == "Windows":
-        preference_file_path = env.controller.execute_python_command("""import os; print(os.path.join(os.getenv('LOCALAPPDATA'),
-                                            'Google\\Chrome\\User Data\\Default\\Preferences'))""")["output"].strip()
-    elif os_type == "Darwin":
-        preference_file_path = env.controller.execute_python_command(
-            "import os; print(os.path.join(os.getenv('HOME'), 'Library/Application Support/Google/Chrome/Default/Preferences'))"
-        )["output"].strip()
-    elif os_type == "Linux":
-        if "arm" in platform.machine():
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Preferences'))"
-            )["output"].strip()
-        else:
-            preference_file_path = env.controller.execute_python_command(
-                "import os; print(os.path.join(os.getenv('HOME'), '.config/google-chrome/Default/Preferences'))"
-            )["output"].strip()
-    else:
-        raise Exception("Unsupported operating system")
+    preference_file_path = _chrome_profile_path(env, "Default", "Preferences")
 
     try:
         content = env.controller.get_file(preference_file_path)

@@ -21,6 +21,7 @@ import fcntl
 import time
 from pathlib import Path
 
+import litellm
 import pytest
 import ray
 from cube.benchmark import Benchmark as CubeBenchmark
@@ -68,7 +69,7 @@ class DebugCubeTask(CubeTask):
 
 
 class DebugCubeTaskConfig(CubeTaskConfig):
-    def make(self, runtime_context=None, container_backend=None) -> DebugCubeTask:
+    def make(self, runtime_context=None) -> DebugCubeTask:
         return DebugCubeTask(
             metadata=self.metadata,
             tool_config=self.tool_config or MockToolConfig(),
@@ -173,6 +174,12 @@ class DebugAgent(Agent):
         if behavior == "loop":
             # Non-terminating action — drives the runner toward max_steps.
             return AgentOutput(actions=[Action(name="click", arguments={"element_id": "x"})])
+        if behavior == "bad_model":
+            raise litellm.NotFoundError(
+                message="model 'gpt-5-mini-typo-this-model-does-not-exist' does not exist",
+                model="gpt-5-mini-typo-this-model-does-not-exist",
+                llm_provider="openai",
+            )
         raise ValueError(f"Unknown behavior: {behavior}")
 
 
@@ -486,6 +493,47 @@ def test_max_retries_zero_disables_auto_retry(tmp_dir: Path) -> None:
     assert traj_id in result.failures
 
 
+def test_bad_model_does_not_waste_retries(tmp_dir: Path) -> None:
+    """A permanent LLM provider error (e.g. typo'd model name) must not be retried.
+
+    A permanent error like `litellm.NotFoundError` ("model does not exist") would
+    fail identically on every retry. `episode.py` classifies it via
+    `is_permanent_llm_error` and tags the episode with the terminal, non-retriable
+    `INVALID_CONFIG` status instead of `FAILED`, so the runner stops immediately
+    (retry_count=0) instead of burning `max_retries` worker slots with zero chance
+    of success.
+    """
+    scenarios = {"task_bad_model": ["bad_model"]}
+    benchmark = make_debug_benchmark(scenarios)
+    agent_config = DebugAgentConfig(
+        counter_dir=str(tmp_dir / "_counters"),
+        scenarios=scenarios,
+        hang_seconds=0.0,
+    )
+    exp = Experiment(
+        name="bad_model_retry_waste",
+        output_dir=tmp_dir,
+        agent_config=agent_config,
+        benchmark_config=benchmark,
+        max_retries=3,
+    )
+
+    result = run_sequentially(exp)
+
+    storage = FileStorage(tmp_dir)
+    statuses = storage.list_episode_statuses()
+    traj_id, final = next(iter(statuses.items()))
+
+    assert final.status == "INVALID_CONFIG"
+    assert final.error_type == "NotFoundError"
+    assert final.retry_count == 0, (
+        f"permanent provider error was retried {final.retry_count} times; "
+        f"the harness must classify NotFoundError as non-retriable"
+    )
+    assert _archive_count(tmp_dir, traj_id) == 0
+    assert traj_id in result.failures
+
+
 def _archive_count(output_dir: Path, traj_id: str) -> int:
     base = output_dir / EPISODES_DIR
     return sum(1 for p in base.iterdir() if p.name.startswith(f"{traj_id}{ARCHIVED_MARKER}"))
@@ -516,3 +564,136 @@ def _read_all_archived_statuses(output_dir: Path, traj_id: str) -> list[dict]:
             if status_path.exists():
                 archived.append(json.loads(status_path.read_text()))
     return archived
+
+
+# ---------------------------------------------------------------------------
+# experiment_status.json lifecycle — end-to-end
+# ---------------------------------------------------------------------------
+
+from cube_harness.analyze.xray_utils import GHOST_TIMEOUT, _promote_ghost_episodes  # noqa: E402
+from cube_harness.experiment_status import EXPERIMENT_STATUS_FILENAME, ExperimentStatus, is_driver_alive  # noqa: E402
+
+
+def _make_simple_exp(tmp_dir: Path, scenarios: dict[str, list[str]], name: str = "exp_status") -> Experiment:
+    """Build an Experiment with the debug benchmark for a given scenario dict."""
+    return Experiment(
+        name=name,
+        output_dir=tmp_dir,
+        agent_config=DebugAgentConfig(
+            counter_dir=str(tmp_dir / "_counters"),
+            scenarios=scenarios,
+            hang_seconds=0.0,
+        ),
+        benchmark_config=make_debug_benchmark(scenarios),
+        max_retries=0,
+    )
+
+
+def test_experiment_status_sequential_happy_path(tmp_dir: Path) -> None:
+    """After a successful sequential run, experiment_status.json is COMPLETED with correct counters."""
+    exp = _make_simple_exp(tmp_dir, {"task_a": ["succeed"], "task_b": ["succeed"]})
+
+    run_sequentially(exp)
+
+    es = ExperimentStatus.read(tmp_dir / EXPERIMENT_STATUS_FILENAME)
+    assert es is not None, "experiment_status.json should exist after run"
+    assert es.status == "COMPLETED"
+    assert es.mode == "sequential"
+    assert es.total_episodes == 2
+    assert es.completed == 2
+    assert es.failed == 0
+    assert es.ended_at is not None
+    assert es.ended_at >= es.started_at
+    # Driver is done — XRay must see it as not alive.
+    assert is_driver_alive(es, tmp_dir, timeout_s=GHOST_TIMEOUT) is False
+
+
+def test_experiment_status_sequential_interrupted(tmp_dir: Path, monkeypatch) -> None:
+    """A driver-level exception leaves experiment_status.json marked INTERRUPTED."""
+    exp = _make_simple_exp(tmp_dir, {"task_a": ["succeed"]})
+
+    # Inject a failure in the retry loop so the lifecycle context manager
+    # exits via exception, exercising the INTERRUPTED branch.
+    from cube_harness import exp_runner
+
+    def _boom(*_args, **_kwargs) -> None:
+        raise RuntimeError("simulated driver crash")
+
+    monkeypatch.setattr(exp_runner, "_run_sequentially_with_retries", _boom)
+
+    with pytest.raises(RuntimeError, match="simulated driver crash"):
+        run_sequentially(exp)
+
+    es = ExperimentStatus.read(tmp_dir / EXPERIMENT_STATUS_FILENAME)
+    assert es is not None
+    assert es.status == "INTERRUPTED"
+    assert es.ended_at is not None
+    assert is_driver_alive(es, tmp_dir, timeout_s=GHOST_TIMEOUT) is False
+
+
+@pytest.mark.slow
+def test_experiment_status_ray_happy_path(tmp_dir: Path) -> None:
+    """Ray run heartbeats experiment_status.json, ends COMPLETED with counters set."""
+    exp = _make_simple_exp(tmp_dir, {"task_a": ["succeed"], "task_b": ["succeed"]})
+    started_before = time.time()
+
+    run_with_ray(exp, n_cpus=2, ray_poll_timeout=0.2, step_timeout_s=10.0, cancel_grace_s=0.5)
+
+    es = ExperimentStatus.read(tmp_dir / EXPERIMENT_STATUS_FILENAME)
+    assert es is not None
+    assert es.status == "COMPLETED"
+    assert es.mode == "ray"
+    assert es.total_episodes == 2
+    assert es.completed == 2
+    assert es.failed == 0
+    assert es.started_at >= started_before
+    assert es.ended_at is not None and es.ended_at >= es.started_at
+    # Driver finished — not alive.
+    assert is_driver_alive(es, tmp_dir, timeout_s=GHOST_TIMEOUT) is False
+
+
+def test_experiment_status_interrupted_promotes_queued(tmp_dir: Path, monkeypatch) -> None:
+    """When the driver dies mid-run, leftover QUEUED episodes are swept to STALE by XRay.
+
+    This is the contract XRay relies on: a missing terminal status (or an
+    INTERRUPTED one) plus a stale heartbeat is the signal to clean up orphans.
+    """
+    from cube_harness import exp_runner
+
+    # Set up an experiment whose pre-claim runs but never reaches episode.run().
+    exp = _make_simple_exp(tmp_dir, {"task_a": ["succeed"]})
+
+    # Allow pre-claim to write QUEUED, then crash before any episode runs.
+    real_impl = exp_runner._run_sequentially_impl
+
+    def _crash_after_preclaim(exp_arg, **kw):
+        # Borrow the pre-claim path: get_episodes_to_run + _pre_claim + then bail.
+        storage = FileStorage(exp_arg.output_dir)
+        with exp_arg.benchmark_config.make(exp_arg.infra) as benchmark:
+            episodes = exp_arg.get_episodes_to_run(benchmark, step_timeout_s=10.0, cancel_grace_s=0.5)
+            for ep in episodes:
+                exp_runner._pre_claim(storage, ep)
+        raise RuntimeError("crash after pre-claim")
+
+    monkeypatch.setattr(exp_runner, "_run_sequentially_impl", _crash_after_preclaim)
+
+    with pytest.raises(RuntimeError):
+        run_sequentially(exp)
+
+    # Reset patch so we can use the runner internals freely.
+    monkeypatch.setattr(exp_runner, "_run_sequentially_impl", real_impl)
+
+    # The episode is QUEUED on disk, experiment is INTERRUPTED.
+    storage = FileStorage(tmp_dir)
+    statuses = storage.list_episode_statuses()
+    assert len(statuses) == 1
+    traj_id, ep_status = next(iter(statuses.items()))
+    assert ep_status.status == "QUEUED"
+
+    es = ExperimentStatus.read(tmp_dir / EXPERIMENT_STATUS_FILENAME)
+    assert es is not None and es.status == "INTERRUPTED"
+
+    # XRay refresh should now promote the orphan QUEUED → STALE.
+    _promote_ghost_episodes(tmp_dir)
+    promoted = storage.list_episode_statuses()[traj_id]
+    assert promoted.status == "STALE"

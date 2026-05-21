@@ -52,9 +52,9 @@ requires = ["uv_build>=0.8,<0.9"]
 build-backend = "uv_build"
 
 [tool.uv.sources]
-cube-standard = { git = "https://github.com/The-AI-Alliance/cube-standard", branch = "main" }
-cube-computer-tool = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-tools/cube-computer-tool", branch = "main" }
-cube-infra-azure = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-resources/cube-infra-azure", branch = "main" }
+cube-standard = { git = "https://github.com/The-AI-Alliance/cube-standard", branch = "dev" }
+cube-computer-tool = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-tools/cube-computer-tool", branch = "dev" }
+cube-infra-azure = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-resources/cube-infra-azure", branch = "dev" }
 
 [dependency-groups]
 dev = [

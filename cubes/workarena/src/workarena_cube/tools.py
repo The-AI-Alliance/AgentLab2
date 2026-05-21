@@ -15,7 +15,7 @@ from playwright.sync_api import Page
 class WorkarenaBrowserToolConfig(Protocol):
     """
     Protocol for browser tool configs used by WorkArenaTask — requires a `browser` attribute and a `make()` method.
-    Both BrowsergymConfig and PlaywrightConfig satisfy this protocol, so WorkArenaTask can work with either.
+    Both BgymToolConfig and PlaywrightConfig satisfy this protocol, so WorkArenaTask can work with either.
     """
 
     browser: PlaywrightSessionConfig
@@ -27,7 +27,7 @@ class WorkarenaBrowserToolConfig(Protocol):
 class WorkArenaBrowserTool(Protocol):
     """
     Protocol for browser tools used by WorkArena tasks — requires a Playwright `page` attribute.
-    Both BrowsergymTool and SyncPlaywrightTool satisfy this protocol, so WorkArenaTask can work with either.
+    Both BgymTool and SyncPlaywrightTool satisfy this protocol, so WorkArenaTask can work with either.
     """
 
     config: WorkarenaBrowserToolConfig

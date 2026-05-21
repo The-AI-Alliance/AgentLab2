@@ -10,15 +10,15 @@ name: integration (local)
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
-      - 'cubes/terminalbench-cube/**'
+      - 'cubes/terminalbench2-cube/**'
       - 'cubes/swebench-verified-cube/**'
       - 'cubes/swebench-live-cube/**'
       - 'integration-tests/**'
       - '.github/workflows/integration-local.yml'
   push:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:  # manual trigger
 
 concurrency:
@@ -34,7 +34,7 @@ jobs:
       fail-fast: false  # always run all three cubes so a single failure is scoped
       matrix:
         cube:
-          - terminalbench
+          - terminalbench2
           - swebench_verified
           - swebench_live
     steps:
@@ -53,13 +53,23 @@ jobs:
         working-directory: integration-tests
         run: uv sync --group local --group dev
 
+      # Cross-repo dep override: swe-*/terminalbench cubes import cube.tools.terminal
+      # which is on cube-standard's dev branch but not yet in a published release.
+      # TODO: remove once cube-standard ships an rc with cube.tools.terminal.
+      - name: Override cube-standard with dev branch (cross-repo dep)
+        working-directory: integration-tests
+        run: uv pip install --force-reinstall --no-deps 'cube-standard[docker] @ git+https://github.com/The-AI-Alliance/cube-standard.git@dev'
+
       - name: Docker daemon info
         run: docker info
 
       - name: Run integration suite
+        # --no-sync: keep the cube-standard@dev override from the previous step.
+        # Without it, `uv run` re-syncs the venv back to the lockfile state and
+        # reverts cube-standard to PyPI rc8, which doesn't have cube.tools.terminal.
         working-directory: integration-tests
         run: >-
-          uv run --group local --group dev pytest test_debug_matrix.py
+          uv run --no-sync --group local --group dev pytest test_debug_matrix.py
           -v --tb=short --log-cli-level=INFO
           -k "${{ matrix.cube }} and local"
 

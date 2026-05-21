@@ -395,6 +395,22 @@ class TestWAABenchmark:
         bench.make(infra=mock_infra)
         assert mock_infra.provision.call_count == len(bench.resources)
 
+    def test_setup_invokes_cleanup_stale(self) -> None:
+        """Runtime setup must sweep stale resources from previous runs before
+        launching new VMs. Skipping this lets crashed-task orphans accumulate and
+        bill until manual cleanup."""
+        from waa_cube.benchmark import WAABenchmark
+        from waa_cube.computer import ComputerConfig
+
+        mock_infra = _make_mock_infra()
+        mock_infra.cleanup_stale.return_value = []
+        bench_config = WAABenchmark(tool_config=ComputerConfig(), infra=mock_infra)
+        runtime = bench_config.make()
+        try:
+            mock_infra.cleanup_stale.assert_called_once()
+        finally:
+            runtime.close()
+
     def test_debug_tasks_overlay(self) -> None:
         """tasks_file overlays debug tasks onto shipped metadata."""
         import waa_cube

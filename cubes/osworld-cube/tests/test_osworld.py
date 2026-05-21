@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import io
-from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
 from unittest.mock import MagicMock, patch
 import importlib.util
 import json
@@ -20,11 +18,9 @@ from cube.resource import InfraConfig, ResourceHandle
 # Patch targets — pointing at cube_computer_tool and osworld_cube.task
 # ---------------------------------------------------------------------------
 
-PATCH_QEMU_MGR = "cube_vm_backend.local.QEMUManager"
 PATCH_GUEST_AGENT = "cube_computer_tool.computer.GuestAgent"
 PATCH_EVALUATOR = "osworld_cube.task.Evaluator"
 PATCH_SETUP_CTRL = "osworld_cube.task.SetupController"
-PATCH_ENSURE_IMAGE = "cube_vm_backend.local.ensure_base_image"
 PATCH_SLEEP = "osworld_cube.task.time.sleep"
 
 # ---------------------------------------------------------------------------
@@ -40,16 +36,6 @@ def _make_screenshot_bytes(w: int = 100, h: int = 100) -> bytes:
     return buf.getvalue()
 
 
-def _make_mock_qemu() -> MagicMock:
-    """Return a Mock that looks like a started QEMUManager."""
-    qemu = MagicMock()
-    qemu.server_port = 15000
-    qemu.chromium_port = 19222
-    qemu.vnc_port = 18006
-    qemu.vlc_port = 18080
-    return qemu
-
-
 def _make_mock_guest(screenshot: bytes | None = None, axtree: str = "<root/>") -> MagicMock:
     """Return a Mock that looks like GuestAgent."""
     guest = MagicMock()
@@ -59,36 +45,6 @@ def _make_mock_guest(screenshot: bytes | None = None, axtree: str = "<root/>") -
     guest.execute_action.return_value = None
     guest.execute_python_command.return_value = {"returncode": 0, "output": ""}
     return guest
-
-
-def _make_mock_evaluator(reward: float = 1.0) -> MagicMock:
-    """Return a Mock that looks like Evaluator."""
-    evaluator = MagicMock()
-    evaluator.evaluate.return_value = reward
-    return evaluator
-
-
-@contextmanager
-def _backend(
-    screenshot: bytes | None = None,
-    axtree: str = "<root/>",
-    reward: float = 1.0,
-) -> Generator[tuple[MagicMock, MagicMock, MagicMock], None, None]:
-    """Context manager that patches all vm_backend components.
-
-    Yields (mock_qemu, mock_guest, mock_evaluator).
-    """
-    mock_qemu = _make_mock_qemu()
-    mock_guest = _make_mock_guest(screenshot, axtree)
-    mock_evaluator = _make_mock_evaluator(reward)
-    with (
-        patch(PATCH_ENSURE_IMAGE, return_value=Path("/fake/Ubuntu.qcow2")),
-        patch(PATCH_QEMU_MGR, return_value=mock_qemu),
-        patch(PATCH_GUEST_AGENT, return_value=mock_guest),
-        patch(PATCH_SETUP_CTRL),
-        patch(PATCH_EVALUATOR, return_value=mock_evaluator),
-    ):
-        yield mock_qemu, mock_guest, mock_evaluator
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +103,6 @@ class TestComputer:
         cfg = ComputerConfig()
         computer = cfg.make()
         assert computer.config is not None
-        assert computer._vm is None
         assert computer._guest is None
 
     def test_action_set_computer13(self) -> None:
@@ -181,18 +136,16 @@ class TestComputer:
             assert terminal in names, f"Missing action: {terminal}"
         assert "click" not in names
 
-    def test_attach_vm_connects_guest(self) -> None:
+    def test_attach_endpoint_connects_guest(self) -> None:
         from osworld_cube.computer import ComputerConfig
 
         computer = ComputerConfig().make()
-        mock_vm = MagicMock()
-        mock_vm.endpoint = "http://localhost:15000"
 
         with patch(PATCH_GUEST_AGENT) as mock_ga_cls:
             mock_ga_cls.return_value = MagicMock()
-            computer.attach_vm(mock_vm)
+            computer.attach_endpoint("http://host:5000")
 
-        assert computer._vm is mock_vm
+        mock_ga_cls.assert_called_once_with(host="host", port=5000)
         assert computer._guest is not None
 
     def test_click_dispatches_to_guest(self) -> None:
@@ -255,14 +208,20 @@ class TestComputer:
         mock_guest.execute_action.assert_called_once()
 
     def test_close_does_not_stop_vm(self) -> None:
-        """ComputerBase.close() must NOT stop the VM -- caller owns VM lifecycle."""
+        """ComputerBase.close() must NOT tear down the VM -- caller owns VM lifecycle.
+
+        The tool no longer holds a VM reference (provisioning is owned by the
+        InfraConfig/ResourceHandle path); close() must be a pure no-op that does
+        not touch the attached guest connection.
+        """
         from osworld_cube.computer import ComputerConfig
 
         computer = ComputerConfig().make()
-        mock_vm = MagicMock()
-        computer._vm = mock_vm
+        mock_guest = _make_mock_guest()
+        computer._guest = mock_guest
         computer.close()
-        mock_vm.stop.assert_not_called()
+        assert computer._guest is mock_guest
+        mock_guest.stop.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -295,16 +254,6 @@ def _make_execution_info(evaluator: dict | None = None):
     )
 
 
-def _make_mock_vm(server_port: int = 15000, chromium_port: int = 19222, vlc_port: int = 18080) -> MagicMock:
-    """Return a Mock that looks like LocalQEMUVM."""
-    vm = MagicMock()
-    vm.endpoint = f"http://localhost:{server_port}"
-    vm.server_port = server_port
-    vm.chromium_port = chromium_port
-    vm.vlc_port = vlc_port
-    return vm
-
-
 def _make_mock_handle(server_port: int = 15000) -> MagicMock:
     """Return a Mock that looks like a ResourceHandle."""
     handle = MagicMock(spec=ResourceHandle)
@@ -329,7 +278,7 @@ class TestOSWorldTask:
             tool_config=ComputerConfig(),
         )
         assert task._computer is not None
-        assert task._computer._vm is None
+        assert task._computer._guest is None
         assert task._handle is None
 
     def test_reset_with_infra_launches_vm(self) -> None:
@@ -663,6 +612,35 @@ class TestOSWorldBenchmark:
         bench = cfg.make(infra=mock_infra)
         try:
             assert bench._runtime_context.get("infra") is mock_infra
+        finally:
+            bench.close()
+
+    def test_setup_invokes_cleanup_stale(self) -> None:
+        """Benchmark setup must sweep stale resources from previous runs before
+        launching new VMs. Skipping this lets crashed-task orphans accumulate and
+        bill until manual cleanup."""
+        from osworld_cube.benchmark import OSWorldBenchmarkConfig
+
+        mock_infra = MagicMock(spec=InfraConfig)
+        mock_infra.provision_status.return_value = "ready"
+        mock_infra.cleanup_stale.return_value = []
+
+        cfg = OSWorldBenchmarkConfig()
+        bench = cfg.make(infra=mock_infra)
+        try:
+            mock_infra.cleanup_stale.assert_called_once()
+        finally:
+            bench.close()
+
+    def test_setup_without_infra_does_not_call_cleanup_stale(self) -> None:
+        """When no infra is configured (local-only runs), ``_setup`` must not
+        attempt to sweep — there is nothing to sweep against."""
+        from osworld_cube.benchmark import OSWorldBenchmark, OSWorldBenchmarkConfig
+
+        bench = OSWorldBenchmark(config=OSWorldBenchmarkConfig())
+        bench.setup()
+        try:
+            assert bench._infra is None
         finally:
             bench.close()
 

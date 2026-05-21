@@ -60,10 +60,16 @@ Computed at end-of-episode and stored in `Trajectory.summary_stats`. Includes
 ## Main loop semantics
 
 1. Enter `tracer.episode(task_id, experiment=exp_name)` span
-2. `task_config.make(runtime_context=..., container_backend=...)` → live Task
-3. `setup_fn()` → first `EnvironmentOutput` from `task.reset()`
-4. Save initial trajectory + episode_config on disk
-5. While not done and turns < max_steps:
+2. `_open_status` writes RUNNING `status.json` with `current_step=0`. This is the
+   **phase signal** the runner's `_kill_stale_workers` reads — `current_step == 0`
+   means setup hasn't completed yet, so the setup-phase budget applies.
+3. `task_config.make(runtime_context=..., container_backend=...)` → live Task
+4. `setup_fn()` → first `EnvironmentOutput` from `task.reset()`
+5. Save initial trajectory + episode_config on disk
+6. While not done and turns < max_steps:
+   - Heartbeat: write `status.json` with `current_step = turns + 1` and fresh
+     `last_heartbeat_at`. Heartbeat write is **fail-open** (logs warning, does
+     not abort the run on transient I/O errors).
    - `agent.step(obs)` → `AgentOutput`
      - On exception: save the failed agent step, re-raise (trajectory is preserved)
    - Append agent step to trajectory + save incrementally
@@ -71,8 +77,8 @@ Computed at end-of-episode and stored in `Trajectory.summary_stats`. Includes
    - `step_fn(agent_output.actions)` → `EnvironmentOutput`
      - On exception: save failed env step (with prior obs), re-raise
    - Append env step + save
-6. `finally`: call `task.close()` and `tracer.shutdown()`
-7. Compute `summary_stats`, persist final trajectory, return
+7. `finally`: call `task.close()` and `tracer.shutdown()`
+8. Compute `summary_stats`, persist final trajectory, return
 
 Final episode status is `OK` if `final_reward > 0`, else `ERROR` (sets OTel span status).
 

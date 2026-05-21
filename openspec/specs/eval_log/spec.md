@@ -10,7 +10,7 @@ Exports two structured files per experiment, together forming the Atlas EvalLog:
   agent description, benchmark metadata, and git provenance. Does not repeat per episode.
 - **`episodes/<trajectory_id>/episode_record.json`** — one JSON file per completed
   episode, co-located with trajectory data. Holds outcome, usage, trajectory summary,
-  and optional judge output. Links to `experiment_record.json` via `experiment_id` FK.
+  and optional investigator output. Links to `experiment_record.json` via `experiment_id` FK.
   Retried episodes overwrite stale records naturally.
 - **`to_jsonl(path)`** — submission helper on `EvalLog` that assembles all per-trajectory
   records into a flat JSONL for ATLAS upload. Call explicitly after `export_eval_log()`.
@@ -69,6 +69,8 @@ class AgentInfo(TypedBaseModel):
     git_commit: str | None
     git_remote_url: str | None           # permanent GitHub permalink
     git_is_dirty: bool | None
+    cube_standard_git_commit: str | None   # cube-standard repo HEAD (editable/source checkout only)
+    cube_standard_git_is_dirty: bool | None
 
     # LLM warm-start embedding (ATLAS cold-start)
     description: str | None
@@ -122,31 +124,31 @@ extract the glob pattern from a benchmark object automatically.
 
 ---
 
-### `JudgeConfig`
+### `InvestigatorLLMConfig`
 
 ```python
-class JudgeConfig(TypedBaseModel):
+class InvestigatorLLMConfig(TypedBaseModel):
     model: str           # e.g. "claude-opus-4-7"
-    prompt_version: str  # version or hash of the judge prompt template
-    judged_at: str | None  # ISO-8601 timestamp
+    prompt_version: str  # version or hash of the investigator prompt template
+    investigated_at: str | None  # ISO-8601 timestamp
 ```
 
-Configuration of the LLM judge used for post-hoc episode assessment. Stored in
-`ExperimentRecord.judge_config`; `None` if no judge was run.
+Configuration of the LLM investigator used for post-hoc episode assessment. Stored in
+`ExperimentRecord.investigator_llm_config`; `None` if no investigator was run.
 
 ---
 
-### `JudgeOutput`
+### `Findings`
 
 ```python
-class JudgeOutput(TypedBaseModel):
+class Findings(TypedBaseModel):
     difficulty: str | None         # estimated task difficulty (free-form or enum)
     feasible: bool | None          # whether the task was deemed completable
     failure_root_cause: str | None # short description of why the agent failed
 ```
 
-Per-episode LLM judge assessment. Stored in `EpisodeRecord.judge_output`; `None` if no
-judge was run. Populated in a post-processing step, not during the episode run.
+Per-episode LLM investigator assessment. Stored in `EpisodeRecord.findings`; `None` if no
+investigator was run. Populated in a post-processing step, not during the episode run.
 
 ---
 
@@ -175,7 +177,7 @@ class ExperimentRecord(TypedBaseModel):
     benchmark_name: str             # benchmark_metadata.name
     benchmark_version: str | None
     benchmark_subset: BenchmarkSubset
-    judge_config: JudgeConfig | None = None
+    investigator_llm_config: InvestigatorLLMConfig | None = None
 
     @classmethod
     def from_experiment(
@@ -232,7 +234,7 @@ class EpisodeRecord(TypedBaseModel):
 
     # Optional post-hoc fields
     verifier: Verifier | None = None
-    judge_output: JudgeOutput | None = None
+    findings: Findings | None = None
 
     @classmethod
     def from_trajectory(

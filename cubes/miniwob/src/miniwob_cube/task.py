@@ -2,7 +2,6 @@ import logging
 from typing import Any
 
 from cube.benchmark import RuntimeContext
-from cube.container import ContainerBackend
 from cube.core import Content, Observation
 from cube.task import Task, TaskConfig, TaskMetadata  # noqa: F401 — TaskMetadata kept for typing
 from cube.tools.browser import BrowserTool
@@ -70,9 +69,8 @@ class MiniWobTaskConfig(TaskConfig[MiniWobTaskMetadata]):
     def make(
         self,
         runtime_context: RuntimeContext | None = None,
-        container_backend: ContainerBackend | None = None,
     ) -> MiniWobTask:
-        _ = runtime_context, container_backend
+        _ = runtime_context
         assert self.tool_config is not None, "tool_config must be set"
         return MiniWobTask(
             metadata=self.metadata,

@@ -56,8 +56,12 @@ def get_vlc_config(env, config: Dict[str, str]):
             "import os; print(os.path.expanduser('~/Library/Preferences/org.videolan.vlc/vlcrc'))"
         )["output"].strip()
     elif os_type == "Windows":
+        # Path is sent as Python source to the VM and re-parsed there. A literal
+        # like '~\AppData\Roaming\vlc\vlcrc' makes the VM Python interpret
+        # `\v` as vertical tab (U+000B), corrupting the path. Build it with
+        # os.path.join on the VM side to avoid escape-sequence interpretation.
         config_path = env.controller.execute_python_command(
-            "import os; print(os.path.expanduser('~\\AppData\\Roaming\\vlc\\vlcrc'))"
+            "import os; print(os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming', 'vlc', 'vlcrc'))"
         )["output"].strip()
     else:
         raise Exception("Unsupported operating system", os_type)

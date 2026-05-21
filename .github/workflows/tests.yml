@@ -2,13 +2,13 @@ name: Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'src/**'
       - 'tests/**'
       - 'pyproject.toml'
   pull_request:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - 'src/**'
       - 'tests/**'
@@ -36,11 +36,41 @@ jobs:
       - name: Install dependencies
         run: make ci-install
 
+      # Cross-repo dep override: cube-harness's swe-* and terminalbench cubes
+      # import cube.tools.terminal (TerminalTool) which is on cube-standard's dev
+      # branch but not yet in a published release. The convention is to keep the
+      # PyPI pin in pyproject.toml and signal cross-repo deps via the PR body's
+      # `Depends-on:` line — but no automation reads that yet, so the override
+      # is hard-coded here. TODO: remove once cube-standard ships an rc with
+      # cube.tools.terminal and update pyproject pins to `>=0.1.0rc<N>`.
+      - name: Override cube-standard with dev branch (cross-repo dep)
+        run: uv pip install --force-reinstall --no-deps 'cube-standard[docker] @ git+https://github.com/The-AI-Alliance/cube-standard.git@dev'
+
+      # --no-sync on the three uv run invocations below preserves the cube-standard@dev
+      # override above. Without it, `uv run` re-syncs the venv back to the lockfile
+      # state and reverts cube-standard to PyPI rc8, which doesn't have cube.tools.terminal.
+      #
+      # Test tiers (see pyproject markers + AGENTS.md "Test categories"):
+      #   - default: fast tier only — excludes `slow` (Ray retry orchestration + xray
+      #     e2e; flaky on shared GitHub Actions runners due to timing assumptions) and
+      #     `live_api` (real-LLM tests; cost money; auto-skip without ANTHROPIC_API_KEY).
+      #     ~30s wall-clock instead of ~25 min when slow tests are included.
+      #   - integration: Playwright tests, after `playwright install`.
+      #   - slow: runs locally with `pytest -m slow`. TODO: add a nightly scheduled
+      #     workflow that runs `pytest -m "slow and not live_api"` on a dedicated
+      #     runner where flakies don't block PR merges.
+      #   - live_api: never runs in CI; opt-in locally via `pytest -m live_api`.
       - name: Run tests
-        run: uv run pytest -n 10 tests/ -v
+        run: uv run --no-sync pytest -n 10 tests/ -m "not slow and not live_api" -v
 
       - name: Install Playwright browsers
-        run: uv run playwright install chromium
+        run: uv run --no-sync playwright install chromium
 
       - name: Run integration tests
-        run: uv run pytest tests/ -m integration -v
+        # cube-harness owns no integration tests — browser/tool integration
+        # tests live in cube-standard (cube-browser-tool). pytest exits 5 on
+        # "no tests collected"; treat that as success, fail on anything else.
+        run: |
+          uv run --no-sync pytest tests/ -m "integration and not slow and not live_api" -v || rc=$?
+          [ "${rc:-0}" -eq 5 ] && exit 0
+          exit "${rc:-0}"

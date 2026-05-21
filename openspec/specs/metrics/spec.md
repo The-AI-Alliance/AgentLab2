@@ -33,7 +33,7 @@ class Tracer(Protocol):
 ```
 
 ### `tool_span(action: Action) -> Iterator[Span]`
-Module-level context manager used by `ToolWithTelemetry`. Records:
+Module-level context manager that tool dispatchers wrap around `execute_action`. Records:
 - `gen_ai.tool.name` = `action.name`
 - `gen_ai.tool.call.id` = `action.id` (or `""`)
 - `gen_ai.tool.call.arguments` = JSON-encoded `action.arguments`
@@ -82,8 +82,8 @@ so LLM-call spans created by litellm inherit the episode context.
 
 - Wrap new long-running operations in `tracer.span(name)` so they appear in the
   trace hierarchy.
-- Tool spans are automatic if you subclass `ToolWithTelemetry`. Custom tool dispatchers
-  should use `tool_span(action)` directly.
+- Tool dispatchers should wrap `execute_action` in `tool_span(action)` to surface
+  invocations in the trace.
 - On shutdown, always call `tracer.shutdown()` — BatchSpanProcessor flushes pending
   spans to the exporter. The runners already do this in `finally` blocks.
 

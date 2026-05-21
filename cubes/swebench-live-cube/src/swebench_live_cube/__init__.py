@@ -8,17 +8,17 @@ from swebench_live_cube.task import (
     SWEBenchLiveTaskConfig,
     SWEBenchLiveTaskMetadata,
 )
-from swebench_live_cube.tool import SWEBenchTool, SWEBenchToolConfig
+
+from swebench_live_cube.configs import SWEBENCH_LIVE_CONFIGS
 
 __all__ = [
+    "SWEBENCH_LIVE_CONFIGS",
     "SWEBenchLiveBenchmark",
     "SWEBenchLiveBenchmarkConfig",
     "SWEBenchLiveExecutionInfo",
     "SWEBenchLiveTask",
     "SWEBenchLiveTaskConfig",
     "SWEBenchLiveTaskMetadata",
-    "SWEBenchTool",
-    "SWEBenchToolConfig",
     "get_debug_benchmark",
     "make_debug_agent",
 ]

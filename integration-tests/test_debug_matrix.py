@@ -4,7 +4,7 @@ Runs every (cube, task_id, infra) combination end-to-end through the cube's
 debug suite (oracle-mode agent replays gold actions, benchmark-defined
 evaluator must return reward == 1.0).
 
-Cubes:  terminalbench, swebench-verified, swebench-live
+Cubes:  terminalbench2, swebench-verified, swebench-live
 Infras: local (Docker), daytona, toolkit, modal
 
 Each parametrised case is independently skippable based on prerequisites
@@ -22,14 +22,14 @@ Run examples
     ./run_matrix.sh
 
     # Specific cube + infra
-    ./run_matrix.sh terminalbench toolkit
+    ./run_matrix.sh terminalbench2 toolkit
 
     # Specific task
-    ./run_matrix.sh terminalbench toolkit overfull-hbox
+    ./run_matrix.sh terminalbench2 toolkit overfull-hbox
 
     # Direct pytest (same thing, more flags)
     uv run --group toolkit pytest test_debug_matrix.py -v
-        --log-cli-level=INFO -k "terminalbench and toolkit"
+        --log-cli-level=INFO -k "terminalbench2 and toolkit"
 """
 
 from __future__ import annotations
@@ -43,14 +43,14 @@ from types import ModuleType
 import pytest
 import swebench_live_cube.debug as _swebench_live
 import swebench_verified_cube.debug as _swebench_verified
-import terminalbench_cube.debug as _terminalbench
+import terminalbench2_cube.debug as _terminalbench2
 from cube.resource import InfraConfig
 from cube_integration_tests.debug_harness import run_debug_task
 
 # ── cubes ────────────────────────────────────────────────────────────────────
 
 _CUBES: list[tuple[str, ModuleType]] = [
-    ("terminalbench", _terminalbench),
+    ("terminalbench2", _terminalbench2),
     ("swebench_verified", _swebench_verified),
     ("swebench_live", _swebench_live),
 ]

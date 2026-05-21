@@ -12,7 +12,7 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "cube-standard>=0.1.0rc8",
-    "cube-browser-playwright>=0.2.0",  # added back temporarily for browsergym.py, should be removed once browsergym.py is moved to cube-browser-tool package
+    "cube-browser-playwright>=0.2.0",  # used by cubes/workarena (PlaywrightSessionConfig)
     "pydantic~=2.0",
     "litellm~=1.80.8",
     "Pillow~=11.0",
@@ -20,6 +20,7 @@ dependencies = [
     "numpy~=2.3.5",
     "ray[default]>=2.52.1",
     "tenacity>=8.5.0",
+    "typer~=0.25",
     "python-dotenv~=1.2.0",
     "termcolor~=3.2",
     "opentelemetry-api>=1.20.0",
@@ -38,6 +39,10 @@ dependencies = [
 analyze = [
     "gradio~=5.49",
     "pandas~=2.0",
+]
+# Trajectory investigator — post-hoc LLM analysis via Claude Code
+investigator = [
+    "claude-agent-sdk>=0.1.6",
 ]
 
 [build-system]
@@ -62,13 +67,13 @@ line-ending = "auto"
 [tool.ruff.lint]
 extend-select = ["I"] # sort imports
 
-[tool.ruff.lint.per-file-ignores]
-"meta_agent/recipes/*.py" = ["E402"]
-
 [project.scripts]
 ch-mcp-server = "cube_harness.mcp.server:main"
 ch-xray = "cube_harness.analyze.xray:main"
 ch-trace = "cube_harness.analyze.trace:main"
+ch-investigate = "cube_harness.analyze.investigator:main"
+ch-investigation-report = "cube_harness.analyze.investigation_report:main"
+ch-reset-episodes = "cube_harness.analyze.reset_episodes:main"
 
 [dependency-groups]
 dev = [
@@ -82,9 +87,10 @@ dev = [
 
 [tool.pytest.ini_options]
 markers = [
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "serial: mark test to be run sequantially (deselect with '-m \"not serial\"')",
-    "integration: requires a live browser (headless Chromium via Playwright)"
+    "slow: tests taking >5s but no external deps (Ray retry, xray e2e). CI runs them; deselect locally for fast feedback ('-m \"not slow\"').",
+    "serial: mark test to be run sequentially (deselect with '-m \"not serial\"').",
+    "integration: requires a live browser (headless Chromium via Playwright). CI runs them after `playwright install`.",
+    "live_api: hits a real LLM provider — costs money, needs API key (e.g. ANTHROPIC_API_KEY). Auto-skipped without the key; never run by default CI. Run locally to validate cache-control / streaming / etc. against a real model.",
 ]
 
 [tool.setuptools.packages.find]

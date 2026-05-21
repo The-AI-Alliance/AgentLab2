@@ -44,7 +44,7 @@ azure = [
     "webarena-verified-cube",
 ]
 local = [
-    "terminalbench-cube",
+    "terminalbench2-cube",
     "swebench-verified-cube",
     "swebench-live-cube",
     "docker>=7.1.0",
@@ -52,19 +52,19 @@ local = [
 ]
 daytona = [
     "cube-infra-daytona",
-    "terminalbench-cube",
+    "terminalbench2-cube",
     "swebench-verified-cube",
     "swebench-live-cube",
 ]
 toolkit = [
     "cube-infra-toolkit",
-    "terminalbench-cube",
+    "terminalbench2-cube",
     "swebench-verified-cube",
     "swebench-live-cube",
 ]
 modal = [
     "cube-infra-modal",
-    "terminalbench-cube",
+    "terminalbench2-cube",
     "swebench-verified-cube",
     "swebench-live-cube",
 ]
@@ -94,9 +94,8 @@ cube-infra-azure = { git = "https://github.com/The-AI-Alliance/cube-standard", s
 cube-infra-daytona = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-resources/cube-infra-daytona" }
 cube-infra-toolkit = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-resources/cube-infra-toolkit" }
 cube-infra-modal = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-resources/cube-infra-modal" }
-cube-vm-backend = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-resources/cube-vm-backend" }
 osworld-cube = { path = "../cubes/osworld-cube", editable = true }
 webarena-verified-cube = { path = "../cubes/webarena-verified", editable = true }
-terminalbench-cube = { path = "../cubes/terminalbench-cube", editable = true }
+terminalbench2-cube = { path = "../cubes/terminalbench2-cube", editable = true }
 swebench-verified-cube = { path = "../cubes/swebench-verified-cube", editable = true }
 swebench-live-cube = { path = "../cubes/swebench-live-cube", editable = true }

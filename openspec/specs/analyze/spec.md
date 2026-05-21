@@ -35,7 +35,22 @@ CLI-style inspection helpers used by the viewer and exported for ad-hoc scripts.
 
 ### `xray_utils` (`cube_harness.analyze.xray_utils`)
 Formatting and data-extraction helpers (HTML rendering, trace fragments, step
-summaries).
+summaries), plus `_promote_ghost_episodes(exp_dir)` — best-effort sweep run on
+every UI refresh:
+
+  - RUNNING + ray (or no exp_status) → promote when per-episode heartbeat is older
+    than `GHOST_TIMEOUT` (`should_sweep_running_to_stale` predicate).
+  - RUNNING + sequential + driver_dead → promote immediately (driver IS the
+    worker; both dead).
+  - QUEUED + driver_dead → promote (no worker will ever pick it up if the
+    scheduler is gone). QUEUED is **never** promoted when the driver is alive —
+    in a large parallel batch, tasks legitimately wait hours for a slot.
+
+The "is the driver alive?" decision lives with the type it queries: see
+`is_driver_alive(exp_status, exp_dir, *, timeout_s)` in
+`cube_harness.experiment_status` for the mode-aware logic. Same shape as
+`should_sweep_running_to_stale` for episode statuses — predicate over the
+status object, callable from any consumer (viewer, monitoring, reports).
 
 ## UI model
 
@@ -46,7 +61,11 @@ follows it. Navigation moves between environment steps. For UI step N:
 
 ## Invariants
 
-1. Read-only — the viewer never writes to experiment dirs.
+1. Read-only for *trajectory* data — the viewer never modifies trajectories,
+   logs, or configs. The single exception is `_promote_ghost_episodes` writing
+   `STALE` into `status.json` files for in-flight episodes whose driver is
+   provably dead (see `xray_utils` above). This is gated by
+   `experiment_status.json` so the viewer cannot accidentally kill live work.
 2. Handles V2 (episodes/) and V1 (jsonl) layouts via `FileStorage`.
 3. Background loading: a worker thread populates `trajectories` incrementally;
    stale threads self-abort by comparing `_bg_gen`.

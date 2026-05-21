@@ -28,7 +28,6 @@ def _build_execution_info(row: dict[str, Any]) -> dict[str, Any]:
     """
     return {
         "problem_statement": row["problem_statement"],
-        "hints_text": row.get("hints_text", ""),
         "patch": row["patch"],
         "test_patch": row["test_patch"],
         "fail_to_pass": json.loads(row["FAIL_TO_PASS"])
@@ -86,7 +85,6 @@ class SWEBenchVerifiedBenchmarkConfig(BenchmarkConfig[SWEBenchVerifiedTaskMetada
     benchmark_class: ClassVar[type[Benchmark]] = SWEBenchVerifiedBenchmark
 
     # User-configurable fields
-    include_hints: bool = False
     oracle_mode: bool = False
 
     # ------------------------------------------------------------------
@@ -153,11 +151,10 @@ class SWEBenchVerifiedBenchmarkConfig(BenchmarkConfig[SWEBenchVerifiedTaskMetada
         return cast(SWEBenchVerifiedBenchmark, super().make(infra=infra or LocalInfraConfig()))
 
     def get_task_configs(self) -> Generator[SWEBenchVerifiedTaskConfig, None, None]:
-        """Yield TaskConfigs with include_hints and oracle_mode forwarded from benchmark settings."""
+        """Yield TaskConfigs with oracle_mode forwarded from benchmark settings."""
         for tm in self.tasks().values():
             yield SWEBenchVerifiedTaskConfig(
                 metadata=tm,
                 tool_config=self.tool_config,
-                include_hints=self.include_hints,
                 oracle_mode=self.oracle_mode,
             )

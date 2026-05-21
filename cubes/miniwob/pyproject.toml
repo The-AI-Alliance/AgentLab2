@@ -6,7 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "cube-standard>=0.1.0rc8",
     "miniwob>=1.0",
-    "cube-browser-tool"
+    "cube-browser-tool[bgym]>=0.3.0"
 ]
 
 [project.entry-points."cube.benchmarks"]
@@ -18,6 +18,12 @@ build-backend = "uv_build"
 
 [tool.uv-build]
 include = ["src/miniwob_cube/task_metadata.json", "src/miniwob_cube/scripts/install.sh"]
+
+[tool.uv.sources]
+# TODO: drop once cube-browser-tool 0.3.0 ships to PyPI.
+# Until then, 0.3.0 lives on cube-standard's dev branch
+# (cube-tools/cube-browser-tool subdirectory); PyPI only has <=0.2.0.
+cube-browser-tool = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-tools/cube-browser-tool" }
 
 [tool.ruff]
 fix = true

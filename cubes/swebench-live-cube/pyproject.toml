@@ -16,7 +16,10 @@ requires = ["uv_build>=0.8,<0.9"]
 build-backend = "uv_build"
 
 [tool.uv-build]
-include = ["src/swebench_live_cube/task_metadata.json"]
+include = [
+    "src/swebench_live_cube/task_metadata.json",
+    "src/swebench_live_cube/lite_solvable_2026-05-12.json",
+]
 
 [dependency-groups]
 dev = [

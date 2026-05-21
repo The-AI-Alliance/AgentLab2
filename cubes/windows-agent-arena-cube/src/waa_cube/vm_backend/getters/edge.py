@@ -79,27 +79,30 @@ def get_default_search_engine_from_edge(env, config: Dict[str, str]):
         )["output"].strip()
     else:
         raise Exception("Unsupported operating system")
-    try:
-        content = env.controller.get_file(preference_file_path)
-        data = json.loads(content)
-        engine_guids = {
-            "485bf7d3-0215-45af-87dc-538868000001": "Bing",
-            "485bf7d3-0215-45af-87dc-538868000002": "Yahoo!",
-            "485bf7d3-0215-45af-87dc-538868000003": "Google",
-            "485bf7d3-0215-45af-87dc-538868000092": "DuckDuckGo",
-            "485bf7d3-0215-45af-87dc-538868000015": "Yandex",
-        }
-        cur_guid = data.get("default_search_provider", {}).get("synced_guid")
-        logger.info(f"Current search engine guid: {cur_guid}")
+    content = env.controller.get_file(preference_file_path)
+    if content is None:
+        raise FileNotFoundError(f"Edge Preferences not found at {preference_file_path}")
+    data = json.loads(content)
 
-        search_engine = engine_guids.get(cur_guid, {})
-        if not search_engine:  # fallback
-            search_engine = "Unknown"
-        logger.info(f"Current search engine: {search_engine}")
-        return search_engine
-    except Exception as e:
-        logger.error(f"Error: {e}")
-        return "Unknown"
+    # Built-in Edge search providers ship with stable GUIDs; user-added providers (e.g. via
+    # "visit site to add as search engine") get a freshly-generated GUID that wouldn't be in
+    # this list. Prefer the human-readable short_name from the full provider data, which is
+    # populated for both built-in and user-added engines.
+    short_name = data.get("default_search_provider_data", {}).get("template_url_data", {}).get("short_name")
+    if short_name:
+        logger.info(f"Current search engine (short_name): {short_name}")
+        return short_name
+
+    engine_guids = {
+        "485bf7d3-0215-45af-87dc-538868000001": "Bing",
+        "485bf7d3-0215-45af-87dc-538868000002": "Yahoo!",
+        "485bf7d3-0215-45af-87dc-538868000003": "Google",
+        "485bf7d3-0215-45af-87dc-538868000092": "DuckDuckGo",
+        "485bf7d3-0215-45af-87dc-538868000015": "Yandex",
+    }
+    cur_guid = data.get("default_search_provider", {}).get("synced_guid")
+    logger.info(f"Current search engine guid: {cur_guid}")
+    return engine_guids.get(cur_guid, "Unknown")
 
 
 def get_edge_font_size(env, config: Dict[str, str]):

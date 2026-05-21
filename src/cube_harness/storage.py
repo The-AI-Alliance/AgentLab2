@@ -171,7 +171,16 @@ class FileStorage:
 
     def _archive_episode(self, ep_dir: Path) -> None:
         archived = ep_dir.parent / f"{ep_dir.name}{ARCHIVED_MARKER}{time.time()}"
+        # Preserve episode_config.json so the retry pipeline still discovers this
+        # episode via _episode_config_dirs(). The config is written once at
+        # experiment prep time (Experiment.prepare_episodes) and is not re-saved
+        # on retry, so the archive must not destroy it.
+        config_src = ep_dir / "episode_config.json"
+        config_bytes = config_src.read_bytes() if config_src.exists() else None
         ep_dir.rename(archived)
+        if config_bytes is not None:
+            ep_dir.mkdir()
+            (ep_dir / "episode_config.json").write_bytes(config_bytes)
         logger.info(f"Archived {ep_dir.name} -> {archived.name}")
 
     def archive_episode(self, trajectory_id: str) -> None:

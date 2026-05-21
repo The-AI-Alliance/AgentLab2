@@ -12,7 +12,6 @@ import logging
 from typing import ClassVar, Generator
 
 from cube.benchmark import Benchmark, BenchmarkMetadata, RuntimeContext
-from cube.container import ContainerBackend
 from cube.core import Action, ActionSchema, Observation
 from cube.resource import InfraConfig
 from cube.task import TaskConfig, TaskMetadata
@@ -81,7 +80,6 @@ class DebugBrowseCompTaskConfig(BrowseCompTaskConfig):
     def make(
         self,
         runtime_context: RuntimeContext | None = None,
-        container_backend: ContainerBackend | None = None,
     ) -> DebugBrowseCompTask:
         idx = int(self.metadata.id.rsplit("-", 1)[-1])
         record = _DEBUG_RECORDS[idx]
@@ -93,7 +91,6 @@ class DebugBrowseCompTaskConfig(BrowseCompTaskConfig):
             tool_config=tool_cfg,
             scorer_model=self.scorer_model,
             runtime_context=runtime_context,
-            container_backend=container_backend,
         )
 
 

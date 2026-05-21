@@ -17,7 +17,10 @@ from osworld_cube.benchmark import (
 )
 from osworld_cube.debug import make_debug_agent, get_debug_benchmark
 
+from osworld_cube.configs import OSWORLD_CONFIGS
+
 __all__ = [
+    "OSWORLD_CONFIGS",
     # Tool classes
     "ComputerBase",
     "Computer13",

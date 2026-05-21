@@ -2,12 +2,12 @@
 
 from abc import ABC, abstractmethod
 
-from cube.core import ActionSchema, Observation, TypedBaseModel
+from cube.core import ActionSchema, Observation, ValidatedConfig
 
 from cube_harness.core import AgentOutput
 
 
-class AgentConfig(TypedBaseModel, ABC):
+class AgentConfig(ValidatedConfig, ABC):
     """Configuration for creating an Agent."""
 
     @property

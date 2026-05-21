@@ -13,7 +13,6 @@ breaking changes), see [cube-standard's openspec/README.md](https://github.com/T
 |-------|--------|------|
 | Core types (Trajectory, AgentOutput) | `src/cube_harness/core.py` | [core/spec.md](specs/core/spec.md) |
 | Agent | `src/cube_harness/agent.py` | [agent/spec.md](specs/agent/spec.md) |
-| Tool (OTel wrapper) | `src/cube_harness/tool.py` | [tool/spec.md](specs/tool/spec.md) |
 | LLM | `src/cube_harness/llm.py` | [llm/spec.md](specs/llm/spec.md) |
 | Episode | `src/cube_harness/episode.py` | [episode/spec.md](specs/episode/spec.md) |
 | Experiment + runners | `src/cube_harness/experiment.py`, `exp_runner.py` | [experiment/spec.md](specs/experiment/spec.md) |

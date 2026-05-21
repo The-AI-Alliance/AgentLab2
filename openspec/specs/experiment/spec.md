@@ -33,6 +33,7 @@ class Experiment(TypedBaseModel):
         step_timeout_s: float = 1800.0,
         cancel_grace_s: float = 120.0,
         orphan_threshold_s: float = 3600.0,
+        process_start_s: float | None = None,    # current driver's wall-clock start
     ) -> list[Episode]
     def save_config(self) -> None        # writes experiment_config.json
     @classmethod
@@ -57,11 +58,23 @@ may omit `benchmark`; the resulting episodes carry no `runtime_context` and no
 | `False`  | All episodes from scratch                                                                                                                 |
 | `True`   | Episodes with no `status.json` (never started), plus retriable statuses (`FAILED`, `CANCELLED`, `STALE`) with `retry_count < max_retries` |
 
-`RUNNING` / `QUEUED` (in-flight) are never returned. `COMPLETED` and
-`MAX_STEPS_REACHED` (terminal, non-retriable) are always skipped.
+`RUNNING` / `QUEUED` (in-flight) are never returned. `COMPLETED`,
+`MAX_STEPS_REACHED`, and `INVALID_CONFIG` (terminal, non-retriable) are always
+skipped. `INVALID_CONFIG` is set when the episode died from a permanent provider
+error (typo'd model name, bad key, malformed/oversized/policy-violating request —
+classified by `is_permanent_llm_error` in `llm.py`); retrying it would fail
+identically, so it terminates with `retry_count=0`.
 
 When `resume=True`, `sweep_stale_statuses` runs first so orphaned `RUNNING`/`QUEUED`
-entries become `STALE` and are eligible for retry.
+entries become `STALE` and are eligible for retry. The runner threads its own
+`process_start_s` into the sweep so RUNNING episodes whose heartbeat predates the
+new process are force-swept regardless of heartbeat age — fixes the kill-and-retry
+race where a freshly killed worker still has a recent heartbeat.
+
+The shared "is this RUNNING worker dead?" predicate
+(`should_sweep_running_to_stale` in `episode_status.py`) is the single source of
+truth used by both `sweep_stale_statuses` (runner-side) and
+`_promote_ghost_episodes` (XRay-side).
 
 ### `ExpResult`
 ```python
@@ -75,25 +88,59 @@ class ExpResult(TypedBaseModel):
 
 ### Runners
 
-#### `run_sequentially(exp, debug_limit=None, otlp_endpoint=None, model=None, agent_name=None) -> ExpResult`
-Runs episodes one at a time. `debug_limit` caps the list (useful for `make debug`).
+#### `run_sequentially(exp, debug_limit=None, *, step_timeout_s=1800.0, cancel_grace_s=120.0, orphan_threshold_s=3600.0, max_retry_rounds=3, otlp_endpoint=None, model=None, agent_name=None) -> ExpResult`
+Runs episodes one at a time in-process. `debug_limit` caps the list (useful for
+`make debug`). The driver IS the worker — `experiment_status.json` is heartbeated
+*between* episodes, so a long episode can leave the experiment heartbeat stale even
+though the driver is alive (XRay falls back to per-episode heartbeats in this case).
 
-#### `run_with_ray(exp, n_cpus=4, ray_poll_timeout=2.0, episode_timeout=3600.0, otlp_endpoint=None, model=None, agent_name=None) -> ExpResult`
-Parallel via Ray `@remote`. Initializes Ray with dashboard enabled. `episode_timeout`
-(seconds) cancels stuck episodes — graceful for `_CANCEL_GRACE_PERIOD_S=60`, force
-after.
+#### `run_with_ray(exp, *, n_cpus=4, ray_poll_timeout=2.0, step_timeout_s=1800.0, setup_timeout_s=7200.0, cancel_grace_s=120.0, orphan_threshold_s=3600.0, max_retry_rounds=3, otlp_endpoint=None, model=None, agent_name=None) -> ExpResult`
+Parallel via Ray `@remote`. Initializes Ray with dashboard enabled.
+
+Driver-side step timeout is enforced in `_kill_stale_workers` by reading each
+active episode's `status.json` and comparing `now - last_heartbeat_at` against a
+**phase-aware budget**: episodes still in setup (`current_step == 0`) get
+`setup_timeout_s` (default `4 × step_timeout_s = 7200s`; container scheduling /
+toolkit queuing can be slow); episodes inside the agent loop get the full
+`step_timeout_s`. Workers exceeding their budget are `ray.cancel(force=True)`-ed
+and stamped `CANCELLED` with `error_type="SetupTimeout"` or `"StepTimeout"`.
 
 Both runners:
 1. Enter `tracer.benchmark(exp.name)` span
-2. `exp.save_config()`
-3. `with exp.benchmark_config.make(exp.infra) as benchmark:` — `make` provisions
+2. Enter `_experiment_lifecycle(exp.output_dir, mode=...)` — writes RUNNING to
+   `experiment_status.json` on enter, COMPLETED (or INTERRUPTED on exception) on
+   exit. The driver heartbeats the file: every ~30 s in Ray mode (from the
+   `_poll_ray` loop), and before each `episode.run()` in sequential mode.
+3. `exp.save_config()`
+4. `with exp.benchmark_config.make(exp.infra) as benchmark:` — `make` provisions
    declared resources, instantiates the runtime pair, and calls `setup()`. The
    context manager guarantees `close()` on exit.
-4. Call the internal `_run_*_impl` with the live `benchmark`
-5. `tracer.shutdown()`
+5. Call the internal `_run_*_impl` with the live `benchmark`
+6. `tracer.shutdown()`
 
 Per-episode stdout/stderr is redirected to `<output_dir>/episodes/<traj_id>/logs/`
 via `redirect_output_to_log` from `episode_logs.py`.
+
+### Recipes (declarative config files)
+
+A recipe imports canonical configs by name, tweaks attributes, builds one or
+more `Experiment` objects, and ends with `run(...)`. No per-recipe argparse.
+
+- `ConfigRegistry` (`cube_harness.config_registry`) — a `Mapping`; every
+  `reg[name]` returns a `model_copy(deep=True)`, so a recipe cannot mutate the
+  shared canonical instance. Unknown name → `KeyError` listing valid names.
+- Canonical registries: `GENNY_CONFIGS`, `REACT_CONFIGS`
+  (`cube_harness.agents.*_configs`); per-cube `*_CONFIGS` (e.g.
+  `swebench_verified_cube.SWEBENCH_CONFIGS`).
+- `cube_harness.infra.INFRA_CONFIGS` — built-in `"local"` plus entries from
+  `~/.cube/infra.py` (a `dict[str, InfraConfig]`, machine-local, never
+  committed; credentials resolved from env, never fields).
+- `cube_harness.recipe.run(*exps)` — the only CLI, fixed for every recipe:
+  `--limit N` (first N tasks via `run_sequentially`), `--ray N`
+  (`run_with_ray` worker count), `--set dotted.path=value` (repeatable;
+  JSON-parsed, then assigned — `ValidatedConfig` validates the type).
+- Config attribute assignment validates at the assignment site because the
+  config ABCs subclass `cube.core.ValidatedConfig`.
 
 ## Invariants
 
@@ -107,6 +154,12 @@ via `redirect_output_to_log` from `episode_logs.py`.
    every run. `make()` calls `setup()` internally, and the context manager calls
    `close()` on exit — resource cleanup is guaranteed on exceptions.
 4. Ray disrupts signal handling (Ctrl+C) — known limitation, no fix yet.
+5. `experiment_status.json` (sibling of `experiment_config.json`) is written by
+   the driver, never by Ray workers. Its lifecycle is RUNNING on entry →
+   COMPLETED on clean return → INTERRUPTED on exception. Heartbeats update
+   `last_heartbeat_at` and counters (`completed`, `failed`). Old experiments
+   without this file behave as before — XRay treats "no file" as "driver alive"
+   for backward compat.
 
 ## Contracts for implementers
 
@@ -124,7 +177,13 @@ via `redirect_output_to_log` from `episode_logs.py`.
   environments.
 - Ray workers inherit `env_vars` from `get_trace_env_vars()` — if you need extra env
   vars in workers, they must be added explicitly (not automatic from the driver).
-- Episode timeouts use the Ray dashboard API (`list_tasks`). If the dashboard is
-  unreachable, timeouts are silently skipped that cycle — logs a debug message.
-- Cancellation is best-effort: graceful cancel waits `_CANCEL_GRACE_PERIOD_S` seconds,
-  then force-kills. An episode that hangs in a C extension may not respect cancel.
+- Episode timeouts are enforced by reading per-episode `status.json` heartbeats
+  from disk (filesystem-driven, no Ray dashboard dependency). Workers exceeding
+  their phase-aware budget are `ray.cancel(force=True)`-ed.
+- Cancellation is best-effort: `cancel_grace_s` (default 120s) is added to the
+  budget before the kill. An episode that hangs in a C extension may not respect
+  cancel.
+- `_promote_ghost_episodes` (XRay) only sweeps QUEUED → STALE when
+  `experiment_status.json` reports the driver dead — never on every refresh.
+  Sequential mode falls back to per-episode heartbeats to avoid false-positive
+  promotions during long episodes.

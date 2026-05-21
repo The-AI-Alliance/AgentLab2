@@ -26,7 +26,6 @@ def _make_test_episode(
         max_steps=max_steps,
         runtime_context=None,
         storage=None,
-        container_backend=None,
     )
 
 
@@ -194,8 +193,8 @@ class TestEpisode:
                 super().close()
 
         class TrackCloseConfig(MockCubeTaskConfig):
-            def make(self, runtime_context=None, container_backend=None):
-                _ = runtime_context, container_backend
+            def make(self, runtime_context=None):
+                _ = runtime_context
                 return TrackCloseTask(
                     metadata=TaskMetadata(id=self.task_id),
                     tool_config=MockToolConfig(),
@@ -221,8 +220,8 @@ class TestEpisode:
                 super().close()
 
         class TrackCloseConfig(MockCubeTaskConfig):
-            def make(self, runtime_context=None, container_backend=None):
-                _ = runtime_context, container_backend
+            def make(self, runtime_context=None):
+                _ = runtime_context
                 return TrackCloseTask(
                     metadata=TaskMetadata(id=self.task_id),
                     tool_config=MockToolConfig(),
@@ -319,8 +318,8 @@ class TestEpisode:
                 raise ValueError("Environment validation failed")
 
         class ErrorEvalConfig(MockCubeTaskConfig):
-            def make(self, runtime_context=None, container_backend=None):
-                _ = runtime_context, container_backend
+            def make(self, runtime_context=None):
+                _ = runtime_context
                 return ErrorEvalTask(
                     metadata=TaskMetadata(id=self.task_id),
                     tool_config=MockToolConfig(),
@@ -367,7 +366,6 @@ class TestEpisode:
             max_steps=5,
             runtime_context=None,
             storage=None,
-            container_backend=None,
         )
         episode.run()
 
@@ -381,7 +379,6 @@ class TestEpisode:
             max_steps=5,
             runtime_context=None,
             storage=None,
-            container_backend=None,
         )
         with pytest.raises(FileExistsError):
             episode2.run()
@@ -397,7 +394,6 @@ class TestEpisode:
             max_steps=5,
             runtime_context=None,
             storage=None,
-            container_backend=None,
         )
         episode.run()
 
@@ -410,7 +406,6 @@ class TestEpisode:
             max_steps=5,
             runtime_context=None,
             storage=None,
-            container_backend=None,
         )
         episode2.allow_overwrite = True
         episode2.run()

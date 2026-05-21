@@ -10,7 +10,10 @@ from workarena_cube.tools import (
     WorkArenaCheatToolConfig,
 )
 
+from workarena_cube.configs import WORKARENA_CONFIGS
+
 __all__ = [
+    "WORKARENA_CONFIGS",
     "WorkArenaBenchmark",
     "WorkArenaBenchmarkConfig",
     "WorkArenaSeedGenerator",

@@ -549,6 +549,57 @@ class TestFileStorageOverwrite:
         with pytest.raises(FileExistsError):
             storage2.save_trajectory(traj)
 
+    def test_archive_preserves_episode_config_for_retry(
+        self, tmp_dir, mock_agent_config, mock_cube_task_config
+    ) -> None:
+        """Archiving an episode dir must leave episode_config.json behind so the
+        retry pipeline (list_episode_configs / _episode_config_dirs) still finds
+        the task. The config is written once at experiment prep and is not
+        re-saved on retry.
+        """
+        from cube_harness.episode import EpisodeConfig
+
+        storage = FileStorage(tmp_dir)
+        episode_config = EpisodeConfig(
+            id=0,
+            agent_config=mock_agent_config,
+            task_config=mock_cube_task_config,
+            exp_name="test_exp",
+            output_dir=tmp_dir,
+            max_steps=100,
+        )
+        storage.save_episode_config(episode_config)
+        traj_id = f"{mock_cube_task_config.task_id}_ep0"
+        traj = Trajectory(id=traj_id, metadata={"task_id": mock_cube_task_config.task_id, "agent_name": "A"})
+        storage.save_trajectory(traj)
+
+        ep_dir = storage._episode_dir(traj_id)
+        storage._archive_episode(ep_dir)
+
+        episodes_dir = Path(tmp_dir) / "episodes"
+        archived = [d for d in episodes_dir.iterdir() if ".archived_" in d.name]
+        assert len(archived) == 1
+        assert (archived[0] / "episode_config.json").exists()
+        assert ep_dir.exists()
+        assert (ep_dir / "episode_config.json").exists()
+        assert ep_dir in list(storage._episode_config_dirs())
+
+    def test_archive_no_config_leaves_no_dir(self, tmp_dir) -> None:
+        """If the episode dir has no episode_config.json (e.g. legacy run), archive
+        should still rename the dir without creating an empty replacement.
+        """
+        storage = FileStorage(tmp_dir)
+        traj = Trajectory(id="task_1_ep0", metadata={"task_id": "task_1", "agent_name": "A"})
+        storage.save_trajectory(traj)
+
+        ep_dir = storage._episode_dir("task_1_ep0")
+        storage._archive_episode(ep_dir)
+
+        assert not ep_dir.exists()
+        episodes_dir = Path(tmp_dir) / "episodes"
+        archived = [d for d in episodes_dir.iterdir() if ".archived_" in d.name]
+        assert len(archived) == 1
+
 
 class TestLoadTrajectoryMetadata:
     def test_load_metadata_returns_trajectory_with_no_steps(self, tmp_dir: Path) -> None:

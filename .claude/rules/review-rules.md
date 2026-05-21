@@ -268,6 +268,35 @@ Prefer a smaller, simpler codebase. If a feature adds significant complexity but
 
 ---
 
+## Pillar V: Code Craft (cont.)
+
+### AF-001: Auto-fix marker integrity
+
+**Severity**: WARNING
+
+Auto-CUBE-produced fixes carry `# auto-fix(N)↓ … # /auto-fix(N)` markers and a
+one-line machine-readable footnote at module bottom. `N` is the PR number
+(L0/L1) or design-debt issue number (L2/L3). Spec:
+`openspec/specs/auto-fix/spec.md`.
+
+**Check** (Tier-2 semantic review; Tier-1 structural checks are in
+`scripts/auto_fix_lint.py`): when a diff touches code inside an
+`auto-fix(N)` region, crosses a marker boundary, or removes/edits a
+marker or footnote, treat it as **possibly rotten**:
+
+- Pull the PR or design-debt issue at `N`; verify the fix's stated invariant still holds after the change.
+- If the change is unrelated churn → require the footnote `hash=` be
+  re-stamped (acknowledgement, not prevention — never silently leave drift).
+- If the fix now looks **subsumed** by surrounding code (the real fix
+  landed) → recommend promoting the band-aid into permanent code and
+  closing the design-debt issue, rather than keeping a dead marker.
+- Orphaned marker (no footnote) or orphaned footnote (no marker) → flag.
+
+**Not** a hard block: flag for acknowledgement. Hard-failing makes
+auto-fix blocks radioactive and invites marker deletion.
+
+---
+
 ## Quick Reference
 
 | Rule ID | Pillar | Severity | Summary |
@@ -286,3 +315,4 @@ Prefer a smaller, simpler codebase. If a feature adds significant complexity but
 | CC-003 | Code Craft | WARNING | No vibe coding |
 | CC-004 | Code Craft | SUGGESTION | Function atomicity |
 | CC-005 | Code Craft | SUGGESTION | Minimalist imperative |
+| AF-001 | Code Craft | WARNING | Auto-fix marker integrity / rot detection |

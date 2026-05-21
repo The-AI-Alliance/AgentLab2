@@ -28,7 +28,6 @@ class TestCubeEpisode:
             max_steps=5,
             storage=None,
             runtime_context=None,
-            container_backend=None,
         )
 
         assert episode.config.task_config == mock_cube_task_config
@@ -51,7 +50,6 @@ class TestCubeEpisode:
             max_steps=5,
             storage=None,
             runtime_context=None,
-            container_backend=None,
         )
 
         with warnings.catch_warnings():
@@ -88,7 +86,6 @@ class TestCubeEpisode:
             max_steps=5,
             storage=None,
             runtime_context=None,
-            container_backend=None,
         )
         episode.storage.save_episode_config(episode.config)
 

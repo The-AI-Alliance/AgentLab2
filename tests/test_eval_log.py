@@ -1,6 +1,7 @@
 """Tests for cube_harness.eval_log — Atlas EvalLog system."""
 
 import json
+import re
 import tempfile
 from pathlib import Path
 
@@ -15,8 +16,8 @@ from cube_harness.eval_log import (
     EvalLibrary,
     EvalLog,
     ExperimentRecord,
-    JudgeConfig,
-    JudgeOutput,
+    Findings,
+    InvestigatorLLMConfig,
     UsageSummary,
     Verifier,
     _extract_error_type,
@@ -243,6 +244,19 @@ def test_agent_info_from_agent_config_basic(mock_agent_config) -> None:
     assert isinstance(info.framework_version, str)
 
 
+def test_agent_info_captures_cube_standard_git(mock_agent_config) -> None:
+    info = AgentInfo.from_agent_config(mock_agent_config)
+    # Populated only for an editable/source cube-standard checkout; None for a
+    # released wheel. Either way the field exists and the (commit, dirty) pair
+    # is internally consistent with the _get_git_info contract.
+    assert hasattr(info, "cube_standard_git_commit")
+    if info.cube_standard_git_commit is None:
+        assert info.cube_standard_git_is_dirty is None
+    else:
+        assert re.fullmatch(r"[0-9a-f]{40}", info.cube_standard_git_commit)
+        assert isinstance(info.cube_standard_git_is_dirty, bool)
+
+
 def test_agent_info_agent_id_is_stable(mock_agent_config) -> None:
     info1 = AgentInfo.from_agent_config(mock_agent_config)
     info2 = AgentInfo.from_agent_config(mock_agent_config)
@@ -302,7 +316,7 @@ def test_experiment_record_fields(mock_agent_config, mock_cube_benchmark_config,
     assert rec.benchmark_name == "mock-cube"
     assert rec.benchmark_version == "0.1.0"
     assert rec.benchmark_subset.n_tasks == 2
-    assert rec.judge_config is None
+    assert rec.investigator_llm_config is None
     assert rec.eval_library.name == "cube-harness"
 
 
@@ -375,7 +389,7 @@ def test_episode_record_with_task_config(mock_tool_config) -> None:
     from cube.task import TaskConfig
 
     class MockTaskConfig(TaskConfig):
-        def make(self, runtime_context=None, container_backend=None):  # type: ignore[override]
+        def make(self, runtime_context=None):  # type: ignore[override]
             raise NotImplementedError
 
     traj = _trajectory(task_id="t1")
@@ -388,27 +402,34 @@ def test_episode_record_with_task_config(mock_tool_config) -> None:
     assert len(record.sample_hash) == 64
 
 
-def test_episode_record_judge_output_optional() -> None:
+def test_episode_record_findings_optional() -> None:
     traj = _trajectory(reward=1.0)
     record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
-    assert record.judge_output is None
+    assert record.findings is None
     assert record.verifier is None
 
 
-def test_episode_record_with_judge_output() -> None:
+def test_episode_record_with_findings() -> None:
     traj = _trajectory(reward=0.0)
     record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
     record = record.model_copy(
         update={
-            "judge_output": JudgeOutput(
-                difficulty="hard",
-                feasible=True,
-                failure_root_cause="Agent did not find the submit button",
+            "findings": Findings(
+                analysis="Agent located the submit button at step 6 but never clicked it.",
+                outcome="failure",
+                summary="Agent identified the target but failed to submit.",
+                primary_blame="agent_scaffolding",
+                primary_blame_confidence=4,
+                other_blames=[],
+                evidence=[{"step": 6, "quote": "submit button visible at coords (412, 80)"}],
+                hypothesis="Adding an explicit 'submit when ready' clause to the system prompt would close this gap.",
+                hypothesis_confidence=3,
             )
         }
     )
-    assert record.judge_output.difficulty == "hard"
-    assert record.judge_output.feasible is True
+    assert record.findings.outcome.value == "failure"
+    assert record.findings.primary_blame.value == "agent_scaffolding"
+    assert record.findings.primary_blame_confidence == 4
 
 
 # ---------------------------------------------------------------------------
@@ -496,11 +517,11 @@ def test_eval_log_evaluation_id_fk_consistent(mock_agent_config, mock_cube_bench
 # ---------------------------------------------------------------------------
 
 
-def test_judge_config_roundtrip() -> None:
-    cfg = JudgeConfig(model="claude-opus-4-7", prompt_version="v1.2", judged_at="2026-04-28T12:00:00Z")
-    restored = JudgeConfig.model_validate_json(cfg.model_dump_json())
+def test_investigator_llm_config_roundtrip() -> None:
+    cfg = InvestigatorLLMConfig(model="claude-opus-4-7", prompt_version="v1.2", investigated_at="2026-04-28T12:00:00Z")
+    restored = InvestigatorLLMConfig.model_validate_json(cfg.model_dump_json())
     assert restored.model == "claude-opus-4-7"
-    assert restored.judged_at == "2026-04-28T12:00:00Z"
+    assert restored.investigated_at == "2026-04-28T12:00:00Z"
 
 
 def test_verifier_roundtrip() -> None:

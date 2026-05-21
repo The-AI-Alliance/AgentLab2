@@ -20,6 +20,8 @@ from pathlib import Path
 from typing import Any, Union
 
 import requests
+from playwright.sync_api import TimeoutError as PlaywrightTimeout
+from playwright.sync_api import sync_playwright
 from requests_toolbelt.multipart.encoder import MultipartEncoder
 
 from cube_computer_tool.guest_agent import GuestAgent
@@ -27,6 +29,7 @@ from cube_computer_tool.guest_agent import GuestAgent
 logger = logging.getLogger(__name__)
 
 MAX_RETRIES = 20
+CHROMIUM_REMOTE_DEBUGGING_PORT = 9222
 
 
 class SetupController:
@@ -64,9 +67,11 @@ class SetupController:
         client_password: str = "password",
         screen_width: int = 1920,
         screen_height: int = 1080,
+        guest_chromium_port: int = CHROMIUM_REMOTE_DEBUGGING_PORT,
     ) -> None:
         self.guest = guest
         self.chromium_port = chromium_port
+        self.guest_chromium_port = guest_chromium_port
         self.vlc_port = vlc_port
         self.http_server = guest._base_url
         self.http_server_setup_root = guest._base_url + "/setup"
@@ -120,6 +125,8 @@ class SetupController:
             try:
                 logger.info("Setup step %d/%d: %s", i + 1, len(config), setup_fn_name)
                 getattr(self, setup_fn_name)(**parameters)
+                if setup_fn_name == "_launch_setup":
+                    time.sleep(2)
                 logger.info("Setup completed: %s", setup_fn_name)
             except Exception as exc:
                 logger.error("Setup failed at step %d/%d: %s — %s", i + 1, len(config), setup_fn_name, exc)
@@ -131,6 +138,22 @@ class SetupController:
     # ------------------------------------------------------------------
     # Setup step handlers (alphabetical)
     # ------------------------------------------------------------------
+
+    def _connect_to_chrome(self, playwright: Any, remote_debugging_url: str, attempts: int = 30) -> Any:
+        last_exc: Exception | None = None
+        for attempt in range(attempts):
+            if attempt > 0:
+                time.sleep(5)
+
+            try:
+                return playwright.chromium.connect_over_cdp(remote_debugging_url)
+            except Exception as exc:
+                last_exc = exc
+                logger.warning("Chrome CDP attempt %d/%d failed: %s", attempt + 1, attempts, exc)
+
+        if last_exc is not None:
+            raise last_exc
+        raise RuntimeError(f"Could not connect to Chrome CDP at {remote_debugging_url}")
 
     def _activate_window_setup(self, window_name: str, strict: bool = False, by_class: bool = False) -> None:
         payload = json.dumps({"window_name": window_name, "strict": strict, "by_class": by_class})
@@ -163,29 +186,13 @@ class SetupController:
             logger.error("change_wallpaper error: %s", exc)
 
     def _chrome_close_tabs_setup(self, urls_to_close: list[str]) -> None:
-        from playwright.sync_api import sync_playwright
-
         from osworld_cube.vm_backend.metrics.utils import compare_urls
 
         time.sleep(5)
         remote_debugging_url = f"http://{self.guest.host}:{self.chromium_port}"
 
         with sync_playwright() as p:
-            browser = None
-            for attempt in range(15):
-                try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
-                    break
-                except Exception as exc:
-                    if attempt < 14:
-                        logger.error("Chrome CDP connect attempt %d failed: %s", attempt + 1, exc)
-                        time.sleep(5)
-                    else:
-                        raise
-
-            if not browser:
-                return
-
+            browser = self._connect_to_chrome(p, remote_debugging_url)
             context = browser.contexts[0]
             for i, url in enumerate(urls_to_close):
                 for page in context.pages:
@@ -195,40 +202,22 @@ class SetupController:
                         break
 
     def _chrome_open_tabs_setup(self, urls_to_open: list[str]) -> None:
-        from playwright.sync_api import sync_playwright
-
         remote_debugging_url = f"http://{self.guest.host}:{self.chromium_port}"
         logger.info("Connecting to Chrome @ %s", remote_debugging_url)
 
-        for attempt in range(15):
-            if attempt > 0:
-                time.sleep(5)
-
-            with sync_playwright() as p:
+        with sync_playwright() as p:
+            browser = self._connect_to_chrome(p, remote_debugging_url)
+            for i, url in enumerate(urls_to_open):
+                context = browser.contexts[0]
+                page = context.new_page()
                 try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
-                except Exception as exc:
-                    if attempt < 14:
-                        logger.error("Chrome CDP attempt %d failed: %s", attempt + 1, exc)
-                        continue
-                    raise
+                    page.goto(url, timeout=60000)
+                except Exception:
+                    logger.warning("Opening %s exceeded time limit", url)
+                logger.info("Opened tab %d: %s", i + 1, url)
 
-                if not browser:
-                    return
-
-                for i, url in enumerate(urls_to_open):
-                    context = browser.contexts[0]
-                    page = context.new_page()
-                    try:
-                        page.goto(url, timeout=60000)
-                    except Exception:
-                        logger.warning("Opening %s exceeded time limit", url)
-                    logger.info("Opened tab %d: %s", i + 1, url)
-
-                    if i == 0:
-                        context.pages[0].close()
-
-                return
+                if i == 0:
+                    context.pages[0].close()
 
     def _close_window_setup(self, window_name: str, strict: bool = False, by_class: bool = False) -> None:
         payload = json.dumps({"window_name": window_name, "strict": strict, "by_class": by_class})
@@ -455,25 +444,9 @@ class SetupController:
 
     def _login_setup(self, **config: Any) -> None:
         """Login to a website (currently only Google Drive supported)."""
-        from playwright.sync_api import TimeoutError as PlaywrightTimeout
-        from playwright.sync_api import sync_playwright
-
         remote_debugging_url = f"http://{self.guest.host}:{self.chromium_port}"
         with sync_playwright() as p:
-            browser = None
-            for attempt in range(15):
-                try:
-                    browser = p.chromium.connect_over_cdp(remote_debugging_url)
-                    break
-                except Exception:
-                    if attempt < 14:
-                        time.sleep(5)
-                    else:
-                        raise
-
-            if not browser:
-                return
-
+            browser = self._connect_to_chrome(p, remote_debugging_url)
             context = browser.contexts[0]
             plat = config["platform"]
 

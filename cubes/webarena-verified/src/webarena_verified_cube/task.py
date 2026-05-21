@@ -2,7 +2,6 @@ import logging
 from typing import Any, overload
 
 from cube.benchmark import RuntimeContext
-from cube.container import ContainerBackend
 from cube.core import Observation
 from cube.task import Task, TaskConfig, TaskMetadata
 from cube.tools.browser import BrowserTool
@@ -126,9 +125,8 @@ class WebArenaVerifiedTaskConfig(TaskConfig[WebArenaVerifiedTaskMetadata]):
     def make(
         self,
         runtime_context: RuntimeContext | None = None,
-        container_backend: ContainerBackend | None = None,
     ) -> WebArenaVerifiedTask:
-        _ = runtime_context, container_backend
+        _ = runtime_context
         wav = WebArenaVerified(config=self.wav_config)
         wav_task = wav.get_task(int(self.task_id))
         return WebArenaVerifiedTask(

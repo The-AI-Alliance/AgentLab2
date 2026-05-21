@@ -28,7 +28,7 @@ class McpServerConfig(TypedBaseModel):
 class McpServer:
     """Adapts an cube-harness tool to serve its actions as MCP tools.
 
-    Wraps any AbstractTool | AbstractAsyncTool (PlaywrightTool, BrowsergymTool, Toolbox, etc.)
+    Wraps any AbstractTool | AbstractAsyncTool (PlaywrightTool, BgymTool, Toolbox, etc.)
     and exposes its action_set as MCP tools using FastMCP.
 
     Usage:
