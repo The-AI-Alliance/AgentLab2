@@ -3,6 +3,7 @@
 install:
 	bash scripts/install_qemu.sh
 	uv sync --all-extras
+	uv pip install -e .
 	uv run python scripts/create_task_metadata.py
 	uv run playwright install chromium
 
