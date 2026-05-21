@@ -41,7 +41,9 @@ jobs:
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
-          python-version: '3.13'
+          # TODO: bump to 3.13 once cube-browser-tool[bgym] ships playwright>=1.46
+          # (current 1.44 pulls greenlet 3.0.3 which fails to build on 3.13).
+          python-version: '3.12'
 
       - name: Install
         working-directory: cubes/${{ matrix.cube }}
