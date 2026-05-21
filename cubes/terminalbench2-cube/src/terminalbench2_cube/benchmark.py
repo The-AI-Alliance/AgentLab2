@@ -51,8 +51,6 @@ class TerminalBench2Benchmark(Benchmark["TerminalBench2BenchmarkConfig"]):
     def _setup(self) -> None:
         """Publish the shared InfraConfig to runtime_context; per-task containers are launched per-task in make()."""
         if self._infra is not None:
-            # GC orphans from earlier crashed runs so stale containers don't pile up.
-            self._infra.cleanup_stale()
             self._runtime_context["infra"] = self._infra
         logger.info(
             "TerminalBench2Benchmark ready with %d tasks (infra=%s)",

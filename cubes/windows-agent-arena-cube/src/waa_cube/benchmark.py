@@ -111,7 +111,7 @@ class WAABenchmarkRuntime(Benchmark):
 
     def _setup(self) -> None:
         """Populate per-task execution cache from the shipped
-        ``task_execution_info.json`` and sweep any stale VMs from previous runs.
+        ``task_execution_info.json``.
 
         Reads ``src/waa_cube/task_execution_info.json`` (a dict mapping
         ``task_id`` → execution-info fields) and writes one JSON file per task
@@ -119,9 +119,6 @@ class WAABenchmarkRuntime(Benchmark):
         ``WAATaskExecutionInfo`` via ``load_task_execution_info(task_id)``.
         """
         from waa_cube import _benchmark_data_dir
-
-        if self._infra is not None:
-            self._infra.cleanup_stale()
 
         exec_info_file = _benchmark_data_dir() / "task_execution_info.json"
         if not exec_info_file.exists():

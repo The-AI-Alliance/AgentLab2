@@ -54,7 +54,6 @@ class SWEBenchVerifiedBenchmark(Benchmark["SWEBenchVerifiedBenchmarkConfig"]):
     def _setup(self) -> None:
         """Publish the shared InfraConfig to runtime_context; containers are launched per-task."""
         if self._infra is not None:
-            self._infra.cleanup_stale()
             self._runtime_context["infra"] = self._infra
         logger.info(
             "SWEBenchVerifiedBenchmark ready with %d tasks (infra=%s)",
