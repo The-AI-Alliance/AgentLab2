@@ -45,19 +45,19 @@ jobs:
 
       - name: Install
         working-directory: cubes/${{ matrix.cube }}
-        run: uv sync
+        run: uv sync --upgrade
 
       - name: Test
         working-directory: cubes/${{ matrix.cube }}
         run: |
-          cube_names=$(uv run python -c "
+          cube_names=$(uv run --no-sync python -c "
           import importlib.metadata, tomllib
           pkg = tomllib.load(open('pyproject.toml','rb'))['project']['name']
           eps = importlib.metadata.entry_points(group='cube.benchmarks')
           print('\n'.join(ep.name for ep in eps if ep.dist.name == pkg))
           ")
           for cube_name in $cube_names; do
-            uv run cube test "$cube_name"
+            uv run --no-sync cube test "$cube_name"
           done
         env:
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
