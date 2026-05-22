@@ -2,11 +2,34 @@
 
 import json
 
+import pytest
 from cube.core import Action, Content, Observation
 from PIL import Image
 
-from cube_harness.agent import Agent, AgentConfig
+from cube_harness.agent import Agent, AgentConfig, apply_description_overrides
 from cube_harness.core import AgentOutput
+
+
+def _encoded_tool(name: str, description: str) -> dict:
+    return {"type": "function", "function": {"name": name, "description": description, "parameters": {}}}
+
+
+class TestApplyDescriptionOverrides:
+    def test_replaces_matching_descriptions(self) -> None:
+        tools = [_encoded_tool("click", "Click."), _encoded_tool("type_text", "Type.")]
+        apply_description_overrides(tools, {"click": "Click an element by its id."})
+        assert tools[0]["function"]["description"] == "Click an element by its id."
+        assert tools[1]["function"]["description"] == "Type."  # untouched
+
+    def test_empty_overrides_is_noop(self) -> None:
+        tools = [_encoded_tool("click", "Click.")]
+        apply_description_overrides(tools, {})
+        assert tools[0]["function"]["description"] == "Click."
+
+    def test_unknown_key_raises(self) -> None:
+        tools = [_encoded_tool("click", "Click.")]
+        with pytest.raises(ValueError, match="unknown actions"):
+            apply_description_overrides(tools, {"clik": "typo"})
 
 
 class TestAgentConfig:

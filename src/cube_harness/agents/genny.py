@@ -34,13 +34,14 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from typing import cast
 
+from cube.benchmark import BenchmarkConfig
 from cube.core import Action, ActionSchema, Observation, ValidatedConfig
 from cube.task import STOP_ACTION
 from litellm import Message
 from pydantic import Field
 from termcolor import colored
 
-from cube_harness.agent import Agent, AgentConfig
+from cube_harness.agent import Agent, AgentConfig, apply_description_overrides
 from cube_harness.core import AgentOutput
 from cube_harness.llm import LLM, LLMCall, LLMConfig, Prompt, get_reasoning
 
@@ -268,6 +269,24 @@ class GennyConfig(AgentConfig):
             name += f"+{self.summarize_llm_config.model_name}".replace("/", "_")
         return name
 
+    def with_benchmark_clarifications(self, benchmark_config: BenchmarkConfig) -> "GennyConfig":
+        """Return a copy with this benchmark's prompt overlay folded in.
+
+        Pulls ``benchmark_config.load_benchmark_clarifications()`` (the sidecar
+        ``BENCHMARK_HINT`` + ``TASK_CLARIFICATION``) and merges it: the hint fills
+        ``benchmark_hint_prompt`` (kept if the overlay has none), and the per-task
+        clarifications are merged into ``task_clarification`` (overlay wins per
+        task id). Call it in a recipe when building the agent config; to run a
+        clean baseline, simply don't.
+        """
+        overlay = benchmark_config.load_benchmark_clarifications()
+        return self.model_copy(
+            update={
+                "benchmark_hint_prompt": overlay.benchmark_hint or self.benchmark_hint_prompt,
+                "task_clarification": {**self.task_clarification, **overlay.task_clarification},
+            }
+        )
+
     def make(self, action_set: list[ActionSchema] | None = None, task_id: str | None = None, **kwargs) -> "Genny":
         return Genny(config=self, action_schemas=action_set or [], task_id=task_id)
 
@@ -319,6 +338,9 @@ class Genny(Agent):
         self.summarize_llm: LLM = self._summarize_llm_config.make()
         self.token_counter = config.llm_config.make_counter()
         self.action_schemas: list[ActionSchema] = action_schemas
+        # Encode tools once; apply experiment-time description overrides (raises on unknown keys).
+        self._api_tools: list[dict] = _encode_tools(action_schemas)
+        apply_description_overrides(self._api_tools, config.description_overrides)
         self.goal: list[dict] = []
         self.summaries: list[str] = []  # Mode B: one summary per step (raw, no action suffix)
         self.summary_actions: list[str] = []  # Mode B: action taken per step, separate message for cache stability
@@ -472,8 +494,7 @@ class Genny(Agent):
         messages = self._build_base_prompt()
         messages.extend(self._latest_obs)
         messages.append({"role": "user", "content": self.config.summarize_prompt})
-        api_tools = _encode_tools(self.action_schemas)
-        prompt = Prompt(messages=messages, tools=api_tools)
+        prompt = Prompt(messages=messages, tools=self._api_tools)
         response = self.summarize_llm(prompt)
         llm_call = LLMCall(
             tag="summary",
@@ -571,8 +592,7 @@ class Genny(Agent):
     def _act(self, budget_msg: str | None = None) -> tuple[Message, list[LLMCall]]:
         """Build context, encode tools, call act LLM; retry up to max_format_errors times on no tool calls."""
         messages = self._choose_context(budget_msg)
-        api_tools = _encode_tools(self.action_schemas)
-        prompt = Prompt(messages=messages, tools=api_tools)
+        prompt = Prompt(messages=messages, tools=self._api_tools)
         logger.info(f"Act pass — estimated prompt tokens: {self.token_counter(messages=messages)}")
         try:
             response = self.llm(prompt)
@@ -602,7 +622,7 @@ class Genny(Agent):
                 response.message,
                 {"role": "user", "content": "No tool calls found. Every response MUST include at least one tool call."},
             ]
-            prompt = Prompt(messages=messages, tools=api_tools)
+            prompt = Prompt(messages=messages, tools=self._api_tools)
             response = self.llm(prompt)
             llm_calls.append(
                 LLMCall(

@@ -8,6 +8,7 @@ step) use MagicMock so the test suite stays fast.
 from unittest.mock import MagicMock
 
 import pytest
+from cube.benchmark import BenchmarkClarifications
 from cube.core import Action, ActionSchema, Observation
 
 from cube_harness.agents.genny import (
@@ -1022,3 +1023,35 @@ class TestCompaction:
         )
         content = system_msg.get("content") if isinstance(system_msg, dict) else getattr(system_msg, "content", "")
         assert "old work summary" in content
+
+
+class TestPromptOverlayWiring:
+    def test_description_overrides_applied_to_encoded_tools(self) -> None:
+        config = GennyConfig(llm_config=_llm_config(), description_overrides={"click": "Better click description."})
+        agent = Genny(config=config, action_schemas=[_make_schema(name="click")])
+        descriptions = [t["function"]["description"] for t in agent._api_tools]
+        assert "Better click description." in descriptions
+
+    def test_unknown_description_override_raises(self) -> None:
+        config = GennyConfig(llm_config=_llm_config(), description_overrides={"nope": "x"})
+        with pytest.raises(ValueError, match="unknown actions"):
+            Genny(config=config, action_schemas=[_make_schema(name="click")])
+
+    def test_with_benchmark_clarifications_folds_overlay(self) -> None:
+        class _StubBench:
+            def load_benchmark_clarifications(self) -> BenchmarkClarifications:
+                return BenchmarkClarifications(benchmark_hint="Use the filter UI.", task_clarification={"t1": "clar"})
+
+        cfg = GennyConfig(llm_config=_llm_config()).with_benchmark_clarifications(_StubBench())
+        assert cfg.benchmark_hint_prompt == "Use the filter UI."
+        assert cfg.task_clarification == {"t1": "clar"}
+
+    def test_with_benchmark_clarifications_empty_overlay_keeps_existing(self) -> None:
+        class _EmptyBench:
+            def load_benchmark_clarifications(self) -> BenchmarkClarifications:
+                return BenchmarkClarifications()
+
+        base = GennyConfig(llm_config=_llm_config(), benchmark_hint_prompt="keep", task_clarification={"t0": "x"})
+        cfg = base.with_benchmark_clarifications(_EmptyBench())
+        assert cfg.benchmark_hint_prompt == "keep"
+        assert cfg.task_clarification == {"t0": "x"}

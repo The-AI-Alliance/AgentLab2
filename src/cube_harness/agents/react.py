@@ -5,7 +5,7 @@ from cube.task import STOP_ACTION
 from litellm import Message
 from termcolor import colored
 
-from cube_harness.agent import Agent, AgentConfig
+from cube_harness.agent import Agent, AgentConfig, apply_description_overrides
 from cube_harness.core import AgentOutput, LLMCall
 from cube_harness.llm import LLMConfig, Prompt
 from cube_harness.utils import parse_actions
@@ -69,6 +69,7 @@ class ReactAgent(Agent):
             if not stop_tool["function"]["parameters"].get("type"):
                 stop_tool["function"]["parameters"] = {"type": "object", "properties": {}}
             self.tools.append(stop_tool)
+        apply_description_overrides(self.tools, config.description_overrides)
 
         self.history: list[dict | Message] = []
         self._actions_cnt = 0

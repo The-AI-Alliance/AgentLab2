@@ -14,12 +14,21 @@ factory.
 ### `AgentConfig` (abstract, serializable)
 ```python
 class AgentConfig(TypedBaseModel, ABC):
+    description_overrides: dict[str, str] = {}   # action_name -> replacement description
+
     @abstractmethod
     def make(self, action_set: list[ActionSchema] | None = None, **kwargs) -> Agent
 ```
 
 Workers receive the config, deserialize, and call `.make(action_set)` with the task's
 filtered action set.
+
+`description_overrides` is an experiment-time knob for testing better action wording
+without editing the tool: an agent applies `apply_description_overrides(...)` to its
+encoded tool schemas, replacing the docstring-derived description for each named action
+before the schema reaches the LLM. Keys must match an action in the current action set
+(it raises otherwise — catching typos and stale keys after a rename). A proven override
+graduates into the tool's docstring at the source via a PR.
 
 ### `Agent` (abstract)
 ```python

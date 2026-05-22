@@ -3,12 +3,43 @@
 from abc import ABC, abstractmethod
 
 from cube.core import ActionSchema, Observation, ValidatedConfig
+from pydantic import Field
 
 from cube_harness.core import AgentOutput
 
 
+def apply_description_overrides(encoded_tools: list[dict], overrides: dict[str, str]) -> None:
+    """Replace tool-schema descriptions in place from ``{action_name: description}``.
+
+    ``encoded_tools`` are dicts in LLM tool-schema form (``ActionSchema.as_dict()``).
+    Raises ``ValueError`` on a key that matches no tool in ``encoded_tools`` — this
+    catches typos and keys left stale after an action was renamed. No-op when empty.
+    """
+    if not overrides:
+        return
+    by_name = {t["function"]["name"]: t for t in encoded_tools}
+    unknown = set(overrides) - set(by_name)
+    if unknown:
+        raise ValueError(
+            f"description_overrides target unknown actions {sorted(unknown)}; the action space has {sorted(by_name)}"
+        )
+    for name, description in overrides.items():
+        by_name[name]["function"]["description"] = description
+
+
 class AgentConfig(ValidatedConfig, ABC):
     """Configuration for creating an Agent."""
+
+    description_overrides: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Experiment-time overrides for action descriptions, keyed by action name "
+            "(the unique name the LLM sees). Replaces the docstring-derived description "
+            "before the tool schema is built — a toggleable knob for testing better "
+            "wording without editing the tool. A proven override graduates into the "
+            "tool's docstring at the source via a PR."
+        ),
+    )
 
     @property
     def agent_name(self) -> str:
