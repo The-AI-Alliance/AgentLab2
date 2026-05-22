@@ -234,6 +234,10 @@ Auto-CUBE agent's system prompt) and an optional `investigator_extra.md`
 - **`debug`** — default. Curious-scientist methodology, sparse coverage
   across `task × infra × tool × model × agent-config`, ships Fix Report
   PRs. Invoked as `/auto-cube` (alias) or `/auto-cube-debug`.
+- **`hinter`** — raises benchmark performance by adding knowledge at the
+  right regularization level (low-reg task-hint cheat → promoted task
+  clarification / benchmark prompt / action description / new action /
+  system prompt). Invoked as `/auto-cube-hinter`.
 
 `scripts/sync_auto_cube_skills.py` symlinks each SKILL.md into
 `.claude/skills/auto-cube-<name>/` and creates the `auto-cube → debug`

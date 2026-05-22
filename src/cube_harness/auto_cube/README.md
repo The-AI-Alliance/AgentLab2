@@ -22,6 +22,7 @@ touch the benchmark.
 |---|---|---|
 | `/auto-cube` (alias) | → debug | Defaults to the debug use-case |
 | `/auto-cube-debug` | debug | Curious-scientist sparse-coverage investigation; ships Fix Report PRs |
+| `/auto-cube-hinter` | hinter | Raises benchmark performance by adding knowledge at the right regularization level (task-hint cheat → promoted clarification / benchmark prompt / action description / new action / system prompt); ships promotion PRs |
 | (future) | profile / optimization / capability | Plug into the same skeleton with different goals |
 
 Each use-case lives at `src/cube_harness/auto_cube/use_cases/<name>/` and
