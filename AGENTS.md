@@ -219,8 +219,9 @@ Each use_case has a `recipe.py` (Pydantic `InvestigatorRecipe`) and a `SKILL.md`
 `.claude/skills/investigator-<name>` so Claude Code picks them up.
 
 Per-batch synthesis (`meta_analysis.json` + `.md`) is mirrored into
-`~/cube_auto_cube_journal/<experiment>/` for cross-iteration narrative —
-the only artefact the Investigator writes outside the experiment dir.
+`<journal-dir>/<experiment>/` (default `~/auto_cube/`; Auto-CUBE points it at
+the per-session `~/auto_cube/<session-id>/journal/`) for cross-iteration
+narrative — the only artefact the Investigator writes outside the experiment dir.
 
 ## Auto-CUBE use cases
 

@@ -345,7 +345,7 @@ def main(
         typer.echo(f"Calling investigate_experiment(...) with recipe={recipe.name} synthesize={synthesize} ...")
         # `synthesis_model=""` is the programmatic skip-synthesis hatch; the
         # smoke uses a per-run tempdir for journaling so it never pollutes
-        # the user's real `~/cube_auto_cube_journal/`.
+        # the user's real `~/auto_cube/`.
         config = InvestigationConfig(
             recipe=recipe,
             driver=chosen,

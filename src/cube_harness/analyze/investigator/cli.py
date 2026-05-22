@@ -116,7 +116,7 @@ def run_cmd(
             "--journal-dir",
             help="Mirror meta_analysis.{json,md} into <journal-dir>/<experiment>/.",
         ),
-    ] = Path("~/cube_auto_cube_journal").expanduser(),
+    ] = Path("~/auto_cube").expanduser(),
     extra_prompt: Annotated[
         str | None,
         typer.Option(
@@ -145,7 +145,8 @@ def run_cmd(
     """Batch-investigate episodes in an experiment directory.
 
     By default investigates every eligible (uninvestigated) episode, runs the post-batch
-    meta-analysis, and mirrors the synthesis into ~/cube_auto_cube_journal/.
+    meta-analysis, and mirrors the synthesis into ~/auto_cube/ (Auto-CUBE points
+    --journal-dir at the per-session ~/auto_cube/<session-id>/journal).
     """
     logging.basicConfig(
         level=logging.DEBUG if verbose else logging.INFO,

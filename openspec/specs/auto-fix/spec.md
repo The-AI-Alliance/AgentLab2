@@ -220,8 +220,8 @@ for pr in $(open_prs_by_auto_cube):
 
 The integration worktree is **per session**, not machine-wide: multiple
 Auto-CUBE sessions can run concurrently on one machine, each owning its
-worktree + `.venv` + journal subdir
-(`~/cube_auto_cube_journal/<session-slug>/`). Cross-session isolation is
+worktree + `.venv` + session dir
+(`~/auto_cube/<session-id>/`). Cross-session isolation is
 preserved by picking **orthogonal scopes** — different cubes by default
 (one session on tbench2, one on swe-bench, etc.). Sessions may still file
 fixes against shared layers (infra, tool, LLM wrapper); those PRs land in

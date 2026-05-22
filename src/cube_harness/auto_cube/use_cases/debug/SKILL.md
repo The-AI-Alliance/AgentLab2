@@ -37,7 +37,7 @@ confidence that systemic issues won't go undetected.
 ## Cross-session ledger
 
 The source of truth across sessions is
-**`~/cube_auto_cube_journal/coverage.json`** (loose schema; evolve as
+**`~/auto_cube/coverage.json`** (loose schema; evolve as
 you learn):
 
 ```json
@@ -74,8 +74,13 @@ for this model as a pass.
 - **Set up the session worktree** off `origin/dev` with its own
   `.venv` (per §6 of
   [`openspec/specs/auto-fix/spec.md`](../../../../../openspec/specs/auto-fix/spec.md)).
-  The session journal lives at `~/cube_auto_cube_journal/<slug>/` —
-  pick a unique slug (e.g. `swebench-verified-daytona-r0`).
+  The session lives at `~/auto_cube/<session-id>/` — pick a unique
+  session id (e.g. `swebench-verified-daytona-r0`) — holding both the
+  journal (`session.md`, `round_<N>/`, `REPORT.md`) under `journal/`
+  and all trajectory output under `experiments/`. **Export
+  `CH_EXP_DIR=~/auto_cube/<session-id>/experiments`** at session start
+  so every run in this session lands there instead of polluting
+  `~/cube_harness_results/`.
 - **Copy `session.md`** from
   [`src/cube_harness/auto_cube/templates/session.md`](../../templates/session.md)
   and fill in scope, target axes, ledger gaps you intend to fill.
@@ -101,13 +106,14 @@ fast and cheaply, then narrow.
   Use judgment: ~20–100 tasks for a typical cube is the right order
   of magnitude, but adapt. Wider when the cube is large and cheap;
   narrower when each task burns budget.
-- **Override the experiment output dir** so it lands inside the
-  session: `~/cube_auto_cube_journal/<slug>/round_<N>/results/`.
-  Self-contained sessions don't pollute `~/cube_harness_results/` and
-  are easy to archive or delete as one unit.
+- Experiments land under `~/auto_cube/<session-id>/experiments/`
+  automatically (the `CH_EXP_DIR` exported at session start), so a
+  session is self-contained — easy to archive or delete as one unit —
+  and never pollutes `~/cube_harness_results/`.
 - Run the experiment, then dispatch the Investigator on the output
-  directory. **Point `ch-investigate --context-dir` at the session
-  dir** (`~/cube_auto_cube_journal/<slug>/`) so the Opus codebase-map
+  directory with **`--journal-dir ~/auto_cube/<session-id>/journal`**
+  so its synthesis mirrors into the session. **Point `ch-investigate
+  --context-dir` at the session dir** (`~/auto_cube/<session-id>/`) so the Opus codebase-map
   agent runs **once per (session, benchmark)** and the map is reused
   across all rounds — per-session keying keeps the map matched to this
   worktree's installed code. The Investigator emits `BaseFindings` per

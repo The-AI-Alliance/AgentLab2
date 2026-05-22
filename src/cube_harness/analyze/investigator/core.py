@@ -112,8 +112,9 @@ class InvestigationConfig(TypedBaseModel):
 
     # Journal mirror — `meta_analysis.{json,md}` is copied into
     # `<journal_dir>/<experiment_basename>/`. Default is the conventional
-    # machine-local journal dir; override or point at a tempdir to redirect.
-    journal_dir: Path = Field(default_factory=lambda: Path("~/cube_auto_cube_journal").expanduser())
+    # machine-local journal dir; Auto-CUBE points it at the per-session
+    # `~/auto_cube/<session-id>/journal`. Override or point at a tempdir to redirect.
+    journal_dir: Path = Field(default_factory=lambda: Path("~/auto_cube").expanduser())
 
     # Optional biasing fragment appended to every per-episode user prompt.
     # Lets an Auto-CUBE use-case (or any caller) add use-case-specific

@@ -85,8 +85,8 @@ N rounds, etc.).>
 ## Cross-session state
 
 <TODO: Does this use-case read/write the shared
-`~/cube_auto_cube_journal/coverage.json` ledger? Does it have its own
-ledger (e.g. `~/cube_auto_cube_journal/capability.json`)? Or is it
+`~/auto_cube/coverage.json` ledger? Does it have its own
+ledger (e.g. `~/auto_cube/capability.json`)? Or is it
 purely single-session? Document the format here so future sessions
 can interoperate.>
 

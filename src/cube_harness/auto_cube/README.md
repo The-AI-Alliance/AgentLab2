@@ -59,11 +59,14 @@ directory:
    - `ANTHROPIC_API_KEY` — Investigator + Genny when using `claude-*` models
    - `AZURE_OPENAI_API_KEY` + `AZURE_OPENAI_ENDPOINT` — for `azure/gpt-*`
    - Cube-specific infra: `DAYTONA_API_KEY`, `EAI_PROFILE`, AWS, etc.
-3. **Journal path**: `~/cube_auto_cube_journal/` is created on first
-   run; sessions live in `<journal>/<session-slug>/`. The
-   cross-session ledger lives at `<journal>/coverage.json`.
+3. **Session path**: each session lives at `~/auto_cube/<session-id>/`,
+   created on first run, holding the journal (`session.md`,
+   `round_<N>/`, `REPORT.md`) under `journal/` and trajectory output
+   under `experiments/` (export
+   `CH_EXP_DIR=~/auto_cube/<session-id>/experiments` at session start).
+   The cross-session ledger lives at `~/auto_cube/coverage.json`.
 4. **Parallel sessions on the same machine**: each session needs its
-   own integration worktree + `.venv` + journal subdir. See
+   own integration worktree + `.venv` + session dir. See
    [§6 of the methodology spec](../../../openspec/specs/auto-fix/spec.md).
 
 ## Prompt template (debug use-case)
@@ -72,9 +75,10 @@ Drop this into a fresh Claude Code session (cube-harness as cwd; the
 `auto-cube-debug` skill auto-loads). Fill the angle-bracket slots:
 
 > Use the Auto-CUBE debug use-case to **<objective>** on `<cube-name>`.
-> Start a session in `~/cube_auto_cube_journal/` with slug
-> `<cube>-<focus>-r0`. Set up an integration worktree off `origin/dev`
-> with its own `.venv`. Read `~/cube_auto_cube_journal/coverage.json`
+> Start a session at `~/auto_cube/<cube>-<focus>-r0/`. Set up an
+> integration worktree off `origin/dev` with its own `.venv`, and
+> export `CH_EXP_DIR=~/auto_cube/<cube>-<focus>-r0/experiments`. Read
+> `~/auto_cube/coverage.json`
 > to identify the highest-value gap relevant to my focus, and scan
 > `~/cube_harness_results/` for reusable experiments the Investigator
 > hasn't seen yet.
@@ -89,8 +93,9 @@ Drop this into a fresh Claude Code session (cube-harness as cwd; the
 > Reports per `openspec/specs/auto-fix/spec.md` for confirmed root
 > causes; update `coverage.json` as cells get classified.
 >
-> Land experiment outputs inside the session dir, not the default
-> `~/cube_harness_results/`. Per-round budget ≈ `$<X>`. Stop when the
+> Experiment outputs land under the session's `experiments/` (via
+> `CH_EXP_DIR`), not the default `~/cube_harness_results/`. Per-round
+> budget ≈ `$<X>`. Stop when the
 > ledger gap is closed or independent failure modes are exhausted.
 > Final deliverable: `REPORT.md`.
 
@@ -102,12 +107,12 @@ agent's SKILL.md describes the discipline; you set the focus.
 
 | Artefact | Where | Purpose |
 |---|---|---|
-| `REPORT.md` | `~/cube_auto_cube_journal/<slug>/REPORT.md` | Single human-readable rollup: scope, arc, findings ledger, shipped/open PRs, design signals, cost |
-| `session.md` | same dir | Live scope + tracker (lighter than REPORT.md) |
-| `round_<N>/notes.md` | same dir | Per-round hypothesis → result trail |
-| `round_<N>/results/` | same dir | Experiment output (overrides default `~/cube_harness_results/`) |
-| `done.json` | same dir | Per-task dispositions for this session |
-| `coverage.json` | `~/cube_auto_cube_journal/coverage.json` | **Cross-session** sparse coverage ledger across `task × infra × tool × model × agent-config` |
+| `REPORT.md` | `~/auto_cube/<session-id>/journal/REPORT.md` | Single human-readable rollup: scope, arc, findings ledger, shipped/open PRs, design signals, cost |
+| `session.md` | same `journal/` dir | Live scope + tracker (lighter than REPORT.md) |
+| `round_<N>/notes.md` | same `journal/` dir | Per-round hypothesis → result trail |
+| experiment output | `~/auto_cube/<session-id>/experiments/` | Trajectories (via `CH_EXP_DIR`; overrides default `~/cube_harness_results/`) |
+| `done.json` | same `journal/` dir | Per-task dispositions for this session |
+| `coverage.json` | `~/auto_cube/coverage.json` | **Cross-session** sparse coverage ledger across `task × infra × tool × model × agent-config` |
 | Fix Report PRs | cube-harness (or cube-standard) | One PR per fix; body matches `templates/fix_report.md` |
 | `design-debt` issues | cube-harness | L2/L3 fixes that need refactoring; stay open across PRs |
 | `meta_analysis.{json,md}` | each experiment dir + journal mirror | Investigator's structured per-batch synthesis |
