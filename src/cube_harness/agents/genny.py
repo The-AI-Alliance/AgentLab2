@@ -235,6 +235,11 @@ class GennyConfig(AgentConfig):
     # the goal — not as a separate hint section.
     task_clarification: dict[str, str] = Field(default_factory=dict)
 
+    # Benchmark-wide orientation prompt, folded into the system message. Sourced at experiment
+    # design time from the benchmark (see BenchmarkConfig.load_benchmark_clarifications). Generic
+    # by design — a generalist agent should remain competitive without it.
+    benchmark_hint_prompt: str | None = None
+
     # Observation format for tool results (role="tool" messages).
     # "raw"        = send content unchanged (default).
     # "output_tag" = wrap content in <output>...</output>, matching mini-swe-agent format.
@@ -433,6 +438,8 @@ class Genny(Agent):
         enabling Anthropic's longest-prefix cache matching.
         """
         system_content = self.config.system_prompt
+        if self.config.benchmark_hint_prompt:
+            system_content += f"\n\n{self.config.benchmark_hint_prompt}"
         if self._compacted_summary:
             system_content += f"\n\n## Summary of earlier work\n{self._compacted_summary}"
         messages: list[dict | Message] = [{"role": "system", "content": system_content}]

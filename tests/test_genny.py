@@ -569,6 +569,25 @@ class TestHintResolution:
         assert "Task Hint" not in contents
         assert "Additional task details" not in contents
 
+    def test_benchmark_hint_folded_into_system_message(self) -> None:
+        config = GennyConfig(
+            llm_config=_llm_config(),
+            benchmark_hint_prompt="Submit your final answer with final_step.",
+        )
+        agent = Genny(config=config, action_schemas=[], task_id="t1")
+        agent.goal = [{"role": "user", "content": "do the task"}]
+        messages = agent._build_base_prompt()
+        system = next(m for m in messages if isinstance(m, dict) and m.get("role") == "system")
+        assert "Submit your final answer with final_step." in system["content"]
+
+    def test_no_benchmark_hint_leaves_system_message_unchanged(self) -> None:
+        config = GennyConfig(llm_config=_llm_config())
+        agent = Genny(config=config, action_schemas=[], task_id="t1")
+        agent.goal = [{"role": "user", "content": "do the task"}]
+        messages = agent._build_base_prompt()
+        system = next(m for m in messages if isinstance(m, dict) and m.get("role") == "system")
+        assert system["content"] == config.system_prompt
+
     def test_make_wires_task_id(self) -> None:
         config = GennyConfig(llm_config=_llm_config(), task_hints={"t1": "my hint"})
         agent = config.make(task_id="t1")
