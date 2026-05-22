@@ -32,7 +32,7 @@ from pathlib import Path
 # Make the package importable when executed from the cube root without venv activation.
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
-from cube.container import ContainerConfig
+from cube.resource import ContainerConfig
 
 from terminalbench2_cube.benchmark import REPO_URL, TerminalBench2BenchmarkConfig
 from terminalbench2_cube.task import TerminalBench2TaskMetadata

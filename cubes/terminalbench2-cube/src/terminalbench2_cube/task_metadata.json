@@ -11,7 +11,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "scientific-computing",
@@ -36,7 +36,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "scientific-computing",
@@ -59,7 +59,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "security",
@@ -81,7 +81,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "debugging",
@@ -105,7 +105,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "software-engineering",
@@ -132,7 +132,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "software-engineering",
@@ -159,7 +159,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "machine-learning",
@@ -182,7 +182,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
@@ -206,7 +206,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "games",
@@ -226,7 +226,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
@@ -248,7 +248,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "easy",
     "category": "software-engineering",
@@ -270,7 +270,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "software-engineering",
@@ -292,7 +292,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "system-administration",
@@ -315,7 +315,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "system-administration",
@@ -339,7 +339,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "personal-assistant",
@@ -365,7 +365,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "model-training",
@@ -391,7 +391,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "security",
@@ -415,7 +415,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "debugging",
@@ -439,7 +439,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "file-operations",
@@ -463,7 +463,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "machine-learning",
@@ -487,7 +487,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "scientific-computing",
@@ -510,7 +510,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "scientific-computing",
@@ -533,7 +533,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "file-operations",
@@ -553,7 +553,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "file-operations",
@@ -577,7 +577,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "mathematics",
@@ -599,7 +599,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "mathematics",
@@ -621,7 +621,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "security",
@@ -643,7 +643,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "data-processing",
@@ -668,7 +668,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "security",
@@ -692,7 +692,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "easy",
     "category": "software-engineering",
@@ -715,7 +715,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
@@ -737,7 +737,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "file-operations",
@@ -759,7 +759,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "software-engineering",
@@ -782,7 +782,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "system-administration",
@@ -806,7 +806,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
@@ -826,7 +826,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "software-engineering",
@@ -849,7 +849,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "data-science",
@@ -874,7 +874,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "system-administration",
@@ -901,7 +901,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "software-engineering",
@@ -925,7 +925,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "file-operations",
@@ -950,7 +950,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "mathematics",
@@ -975,7 +975,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "machine-learning",
@@ -1000,7 +1000,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "data-processing",
@@ -1024,7 +1024,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "system-administration",
@@ -1047,7 +1047,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
@@ -1069,7 +1069,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
@@ -1091,7 +1091,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "data-science",
@@ -1116,7 +1116,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "debugging",
@@ -1139,7 +1139,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "mathematics",
@@ -1161,7 +1161,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "scientific-computing",
@@ -1187,7 +1187,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "data-science",
@@ -1210,7 +1210,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "data-science",
@@ -1234,7 +1234,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "data-processing",
@@ -1261,7 +1261,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "system-administration",
@@ -1283,7 +1283,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "security",
@@ -1308,7 +1308,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "easy",
     "category": "debugging",
@@ -1332,7 +1332,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "security",
@@ -1356,7 +1356,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
@@ -1378,7 +1378,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
@@ -1400,7 +1400,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "software-engineering",
@@ -1422,7 +1422,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
@@ -1445,7 +1445,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "optimization",
@@ -1469,7 +1469,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "scientific-computing",
@@ -1493,7 +1493,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "easy",
     "category": "software-engineering",
@@ -1515,7 +1515,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "software-engineering",
@@ -1538,7 +1538,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "model-training",
@@ -1562,7 +1562,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "model-training",
@@ -1586,7 +1586,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "system-administration",
@@ -1608,7 +1608,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "system-administration",
@@ -1630,7 +1630,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "data-science",
@@ -1653,7 +1653,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "scientific-computing",
@@ -1678,7 +1678,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
@@ -1700,7 +1700,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "data-processing",
@@ -1724,7 +1724,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "data-science",
@@ -1748,7 +1748,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "data-science",
@@ -1772,7 +1772,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "data-science",
@@ -1796,7 +1796,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "security",
@@ -1820,7 +1820,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "software-engineering",
@@ -1842,7 +1842,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "data-querying",
@@ -1866,7 +1866,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "debugging",
@@ -1888,7 +1888,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "system-administration",
@@ -1911,7 +1911,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
@@ -1933,7 +1933,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
@@ -1955,7 +1955,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "model-training",
@@ -1978,7 +1978,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "scientific-computing",
@@ -2003,7 +2003,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "video-processing",
@@ -2025,7 +2025,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "security",
@@ -2048,7 +2048,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
     "category": "software-engineering",
@@ -2072,7 +2072,7 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
-      "_type": "cube.container.ContainerConfig"
+      "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
     "category": "software-engineering",
