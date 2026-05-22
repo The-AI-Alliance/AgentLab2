@@ -80,6 +80,15 @@ is governed by cube-standard's specs. Don't subclass those here — consume them
 - **Lean diffs.** Make the minimal change that solves the problem. Avoid verbose additions, unnecessary abstractions, and duplicated logic that already exists elsewhere. If existing code can be reused or consolidated, do it. A hard-to-review diff is a liability.
 - **Think long-term.** Every change should age well. Ask whether today's shortcut becomes tomorrow's debt — and whether the design could evolve cleanly if requirements change.
 
+## Explore before you plan or decide
+
+CUBE spans several repos, so a local view rarely tells the whole story. Build the wider picture before planning a change or making a call:
+
+- **Trace real usage**, not just the definition — `Grep` call sites, subclasses, and tests across the repo (incl. `cubes/*`, `recipes/*`).
+- **Read the spec and the code together** — the spec is intent (can be stale); the code is what runs.
+- **Mind the repo boundary** — cube-harness consumes cube-standard's `cube.*` contracts, so their signature changes belong upstream; core changes (`core.py`/`agent.py`/`llm.py`) ripple into every cube and recipe.
+- **Fan out with subagents** (`Explore`, `general-purpose`) for broad searches — keep the conclusion without burning context.
+
 ## Code review
 
 **Default branch is `dev`** — base all PRs off it, not `main`.
