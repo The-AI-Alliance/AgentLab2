@@ -11,6 +11,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -36,6 +39,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -59,6 +65,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -81,6 +90,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -105,6 +117,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -132,6 +147,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -159,6 +177,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -182,6 +203,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -206,6 +230,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -226,6 +253,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -248,6 +278,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "easy",
@@ -270,6 +303,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -292,6 +328,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -315,6 +354,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -339,6 +381,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -365,6 +410,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -391,6 +439,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -415,6 +466,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -439,6 +493,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -463,6 +520,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -487,6 +547,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -510,6 +573,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -533,6 +599,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -553,6 +622,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -577,6 +649,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -599,6 +674,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -621,6 +699,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -643,6 +724,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -668,6 +752,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -692,6 +779,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "easy",
@@ -715,6 +805,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -737,6 +830,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -759,6 +855,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -782,6 +881,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -806,6 +908,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -826,6 +931,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -849,6 +957,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -874,6 +985,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -901,6 +1015,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -925,6 +1042,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -950,6 +1070,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -975,6 +1098,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1000,6 +1126,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1024,6 +1153,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1047,6 +1179,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1069,6 +1204,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1091,6 +1229,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1116,6 +1257,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1139,6 +1283,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1161,6 +1308,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1187,6 +1337,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1210,6 +1363,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1234,6 +1390,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1261,6 +1420,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1283,6 +1445,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1308,6 +1473,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "easy",
@@ -1332,6 +1500,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1356,6 +1527,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1378,6 +1552,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1400,6 +1577,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1422,6 +1602,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1445,6 +1628,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1469,6 +1655,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1493,6 +1682,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "easy",
@@ -1515,6 +1707,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1538,6 +1733,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1562,6 +1760,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1586,6 +1787,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1608,6 +1812,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1630,6 +1837,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1653,6 +1863,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1678,6 +1891,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1700,6 +1916,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1724,6 +1943,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1748,6 +1970,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1772,6 +1997,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1796,6 +2024,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1820,6 +2051,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1842,6 +2076,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1866,6 +2103,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1888,6 +2128,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -1911,6 +2154,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1933,6 +2179,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1955,6 +2204,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -1978,6 +2230,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -2003,6 +2258,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",
@@ -2025,6 +2283,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -2048,6 +2309,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "medium",
@@ -2072,6 +2336,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "difficulty": "hard",

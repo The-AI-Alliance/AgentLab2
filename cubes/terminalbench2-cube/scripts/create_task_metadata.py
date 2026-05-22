@@ -77,6 +77,11 @@ def _build_task_metadata(tasks: list[dict]) -> dict[str, TerminalBench2TaskMetad
                 cpu_cores=float(t.get("cpus", 1)),
                 ram_gb=_parse_gb(t.get("memory", "4G")),
                 disk_gb=_parse_gb(t.get("storage", "10G")),
+                # tbench2 task images apt-install and write to /etc, /var, so they need a
+                # root container. Stamped on every task (blanket) — per-task triage is too
+                # costly and only a handful would not need it. Infras that pin a non-root
+                # uid (e.g. EAI Toolkit) are then reported incompatible at make() time.
+                requires={"container:root"},
             ),
             difficulty=t.get("difficulty", "unknown"),
             category=t.get("category", ""),
