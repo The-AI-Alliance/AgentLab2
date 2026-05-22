@@ -106,9 +106,10 @@ default is `debug`, invoked as `/auto-cube` or `/auto-cube-debug`).
 1. **Find the relevant spec** — which layer? Start there.
 2. **Check "Invariants" and "Gotchas"** — these are the traps.
 3. **Check `openspec/changes/`** — someone may already be proposing your change.
-4. **For substantive contract changes**, write a delta spec
-   (`openspec/changes/<name>/deltas.md` with ADDED / MODIFIED / REMOVED sections)
-   before coding. Archive to `openspec/changes/archive/YYYY-MM-DD-<name>/` when done.
+4. **For breaking or multi-invariant contract changes**, open `openspec/changes/<name>/`
+   (`proposal.md` + `deltas.md`, ADDED / MODIFIED / REMOVED) before coding; additive changes
+   just edit the spec. Keep proposals concise — see [openspec/README.md](openspec/README.md).
+   Archive to `openspec/changes/archive/YYYY-MM-DD-<name>/` when done.
 5. **Constitution alignment:** every change is reviewed against the
    [constitution](.claude/rules/constitution.md) and [review rules](.claude/rules/review-rules.md).
 

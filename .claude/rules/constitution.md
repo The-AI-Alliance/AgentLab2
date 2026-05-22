@@ -37,11 +37,11 @@ This constitution is reviewed against actual code patterns. Anything listed here
 
 **Process**:
 1. Create a folder in `openspec/changes/<short-name>/`.
-2. Write `proposal.md` (rationale, scope, alternatives considered).
-3. Write `deltas.md` with ADDED / MODIFIED / REMOVED requirements against the affected spec.
-4. Optional: `design.md` for deeper design notes, `tasks.md` for implementation breakdown.
-5. Post to the team channel, tag relevant owners, async review, decision.
-6. On merge: apply deltas to `openspec/specs/`, move the folder to `openspec/changes/archive/YYYY-MM-DD-<name>/`.
+2. Write `proposal.md` (problem, change, alternatives) and `deltas.md` (ADDED / MODIFIED / REMOVED requirements against the affected spec). Keep both concise and skimmable — favor schemas/signatures over prose, show each thing once; see the proposal-writing guidance in `openspec/README.md`.
+3. Post to the team channel, tag relevant owners, async review, decision.
+4. On merge: apply deltas to `openspec/specs/`, move the folder to `openspec/changes/archive/YYYY-MM-DD-<name>/`.
+
+Additive, backward-compatible changes (a new method, a new optional field) skip this — just keep the living spec accurate and describe the change in the PR.
 
 Cross-repo changes (cube-standard ↔ cube-harness) require a proposal in the **upstream** repo first. cube-harness is a consumer of cube-standard's contracts.
 

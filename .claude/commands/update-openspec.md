@@ -36,12 +36,15 @@ Focus on layers relevant to the current change, or all layers for a full audit.
 
 ## Decision rule
 
-**Minor drift** (1–3 spec lines, no contract change): edit the spec directly.
+**Default: edit the spec directly** and describe the change in the PR. Additive,
+backward-compatible drift (a new method, a new optional field, a corrected invariant)
+needs no proposal folder — just keep the living spec accurate.
 
-**Substantive drift** (new capability, breaking change, or multiple invariants affected):
-create `openspec/changes/<name>/` with `proposal.md` + `deltas.md` (ADDED / MODIFIED / REMOVED
-sections in target-state language) before editing the spec. This signals to the team that
-a real contract change is in flight.
+**Open a `changes/<name>/` folder only for breaking or multi-invariant contract
+changes** — a changed/removed signature, a new required field, behavior the team needs
+to see before code lands. It carries `proposal.md` + `deltas.md` (ADDED / MODIFIED /
+REMOVED, target-state language). Keep the proposal proportional to the change and
+skimmable — see the proposal-writing guidance in `openspec/README.md`.
 
 ## Output
 
