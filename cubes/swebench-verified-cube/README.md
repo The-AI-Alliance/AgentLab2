@@ -94,6 +94,32 @@ Two oracle tasks exercise the full pipeline end-to-end via `cube test swebench-v
 
 Both apply the gold patch and assert `reward == 1.0`.
 
+## Gold-patch baseline
+
+[`swebench_verified_cube.gold_patch`](src/swebench_verified_cube/gold_patch/) provides an oracle baseline that applies the gold patch (written to `/tmp/gold_patch.diff` by `reset()` under `oracle_mode`) and calls `final_step`. Unlike the 2-task debug suite, it runs **all 500 tasks** (or any subset) to sanity-check the evaluation pipeline and identify which tasks the environment can actually resolve. Requires `cube-harness` on the path.
+
+[`recipe.py`](src/swebench_verified_cube/gold_patch/recipe.py) is a standard declarative recipe — `run()` ships the generic CLI (`--experiment` picks infra, `--ray`/`--limit` control execution). Pick infra with `--experiment` (`default` = local Docker; `toolkit`/`daytona` if configured in `~/.cube/infra.py`). For a task subset, edit `bench = ...subset_from_list([...])` in the file.
+
+```bash
+# All 500 tasks on local Docker (default), 8 Ray workers:
+.venv/bin/python -m swebench_verified_cube.gold_patch.recipe
+
+# On EAI Toolkit with 50 workers:
+.venv/bin/python -m swebench_verified_cube.gold_patch.recipe --experiment toolkit --ray 50
+
+# Quick smoke — first 3 tasks, in-process:
+.venv/bin/python -m swebench_verified_cube.gold_patch.recipe --experiment toolkit --limit 3
+```
+
+List which tasks resolved after a run (reward == 1.0):
+
+```python
+from swebench_verified_cube.gold_patch import extract_solvable, intersect_solvable
+
+extract_solvable(run_dir)              # resolved task IDs from one run
+intersect_solvable([dir1, dir2, dir3]) # (stable, flaky) across repeated runs
+```
+
 ## References
 
 - Upstream: [github.com/princeton-nlp/SWE-bench](https://github.com/princeton-nlp/SWE-bench)
