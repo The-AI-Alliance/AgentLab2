@@ -2,6 +2,7 @@
 
 import base64
 import io
+import json
 import logging
 import re
 import shlex
@@ -19,6 +20,10 @@ from cube.tools.terminal import ContainerTerminalTool, TerminalToolConfig
 from terminalbench2_cube.pytest_parser import PytestParser
 
 logger = logging.getLogger(__name__)
+
+# CTRF statuses that count as a pass, mirroring PytestParser's mapping
+# (skipped / xfail are treated as passed).
+_CTRF_PASS_STATUSES = frozenset({"passed", "skipped", "xfail"})
 
 
 class TerminalBench2TaskMetadata(TaskMetadata):
@@ -214,7 +219,14 @@ class TerminalBench2Task(Task[TerminalBench2TaskMetadata, ContainerTerminalTool]
             timeout=self._exec.max_test_timeout_sec,
         )
         # /auto-fix(447)
-        test_results = self._parse_pytest_output(output)
+
+        # Prefer the structured CTRF report the upstream test.sh writes
+        # (`pytest --ctrf <verifier>/ctrf.json`) over regex-parsing stdout: the
+        # report survives the heavy eval-time `apt`/`uvx` install logs that
+        # routinely truncate pytest's summary out of the captured stdout, and it
+        # is immune to pytest text-format drift.
+        ctrf_raw = self.tool.bash(f"cat {self._logs_verifier_dir}/ctrf.json 2>/dev/null || true")
+        test_results, verifier_ran = self._parse_verifier_results(ctrf_raw, output)
 
         # Read reward written by test.sh
         reward_output = self.tool.bash(f"cat {self._logs_verifier_dir}/reward.txt 2>/dev/null || echo 0")
@@ -224,12 +236,25 @@ class TerminalBench2Task(Task[TerminalBench2TaskMetadata, ContainerTerminalTool]
             reward = 0.0
 
         n_passed = sum(1 for r in test_results.values() if r == "passed")
+        total = len(test_results)
+        if not verifier_ran:
+            logger.warning(
+                "%s: verifier produced no gradeable result (deps/collection failed); "
+                "reward=%s is an eval artifact, not a graded failure",
+                self.metadata.id,
+                reward,
+            )
         return reward, {
             "done": True,
             "passed": n_passed,
-            "total": len(test_results),
-            "all_passed": len(test_results) > 0 and n_passed == len(test_results),
+            "total": total,
+            "all_passed": total > 0 and n_passed == total,
             "test_results": test_results,
+            # False => the verifier itself produced no gradeable result (deps
+            # wouldn't install / tests didn't collect). reward=0 is then an
+            # infra/eval artifact, NOT evidence the solution is wrong — callers
+            # should separate it from a genuine graded 0 (don't count against the model).
+            "verifier_ran": verifier_ran,
             "output_preview": output[:1000] if output else "",
         }
 
@@ -461,8 +486,45 @@ class TerminalBench2Task(Task[TerminalBench2TaskMetadata, ContainerTerminalTool]
             self._task_path = None
         super().close()
 
+    # auto-fix(444)↓
+    def _parse_verifier_results(self, ctrf_raw: str, stdout: str) -> tuple[dict[str, str], bool]:
+        """Resolve per-test results and whether the verifier actually graded.
+
+        Returns ``(test_results, verifier_ran)``. Prefers the structured CTRF
+        JSON report (``pytest --ctrf``); falls back to stdout heuristics only
+        when no report was written.
+
+        ``verifier_ran`` is **False** when the verifier produced no gradeable
+        result: no CTRF file *and* no parseable stdout, or a CTRF report with
+        zero collected tests. That means the verifier's own setup/collection
+        failed (eval-time deps wouldn't install, test import error) rather than
+        the agent's solution being wrong — a `reward=0` in that case is an
+        infra/eval artifact, not a graded failure.
+        """
+        ctrf_raw = (ctrf_raw or "").strip()
+        if ctrf_raw:
+            try:
+                tests = json.loads(ctrf_raw).get("results", {}).get("tests", [])
+            except (ValueError, TypeError, AttributeError):
+                logger.warning("Could not parse CTRF report; falling back to stdout parsing")
+            else:
+                results = {
+                    (t.get("name") or f"test_{i}"): ("passed" if t.get("status") in _CTRF_PASS_STATUSES else "failed")
+                    for i, t in enumerate(tests)
+                }
+                # CTRF written with >=1 collected test => a real graded result.
+                # CTRF written with 0 tests => pytest ran but collected nothing
+                # (collection/setup failure) => not gradeable.
+                return results, bool(results)
+
+        results = self._parse_pytest_output(stdout)
+        return results, bool(results)
+
+    # /auto-fix(444)
+
     def _parse_pytest_output(self, output: str) -> dict[str, str]:
-        """Parse pytest output, falling back to regex heuristics."""
+        """Parse pytest stdout, falling back to regex heuristics. Used only when
+        no CTRF report is available (see _parse_verifier_results)."""
         try:
             return {name: status.value for name, status in PytestParser().parse(output).items()}
         except ValueError:
@@ -526,3 +588,4 @@ class TerminalBench2TaskConfig(TaskConfig[TerminalBench2TaskMetadata]):
 # auto-fix-note(418) {class=L1 anchor=PR#418 hash=PENDING ctx=toolkit/eai-yul101/runtime-uid-13011/tbench2:configure-git-webserver+nginx-request-logging+sqlite-with-gcov/cube-harness@1e67efdb}
 # auto-fix-note(420) {class=L1 anchor=PR#420 hash=PENDING ctx=toolkit/eai-yul101/cube_assets:stale-uv<0.4/tbench2:fix-git+nginx-request-logging+sqlite-with-gcov/cube-harness@1e67efdb}
 # auto-fix-note(447) {class=L1 anchor=PR#447 hash=PENDING ctx=daytona+all-infra/verifier-clamped-to-agent-max_timeout-900/tbench2:reshard-c4-data+sam-cell-seg+20-tasks-over-900s/cube-harness@0c3861ca}
+# auto-fix-note(444) {class=L1 anchor=PR#444 hash=PENDING ctx=daytona/heavy-eval-deps/tbench2:pytorch-model-cli+sam-cell-seg+mcmc-sampling-stan/cube-harness@0c3861ca}
