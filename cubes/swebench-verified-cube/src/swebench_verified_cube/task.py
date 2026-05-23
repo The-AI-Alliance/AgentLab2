@@ -170,12 +170,30 @@ class SWEBenchVerifiedTask(Task[SWEBenchVerifiedTaskMetadata, ContainerTerminalT
             f" 2>/dev/null || true",
             timeout=120,
         )
+        # auto-fix(443)↓ root-owned non-writable SUBDIRS defeat the in-place cp/mv
+        # (it needs a writable parent) and the top-dir `test -w` probe misses them.
+        # The cp/mv ownership trick above only fixes files whose PARENT dir is
+        # writable (mv unlinks the original via the writable parent). Images that
+        # ship root-owned, non-writable SUBDIRECTORIES (e.g. psf/requests'
+        # /testbed/requests/) leave .py files unpatchable on a non-root runtime —
+        # and `test -w /testbed` (top dir only) misses it, so relocate never fires
+        # and every patch/edit dies with "Permission denied". Detect any leftover
+        # non-writable .py file and force a relocate to a fully runtime-user-owned
+        # /tmp/testbed copy. Root-running infras leave nothing non-writable here, so
+        # this never triggers for them.
+        leftover = self._container.exec(
+            f"find {self.tool_config.working_dir} -not -path '*/.git/*' -name '*.py' ! -writable -print -quit 2>/dev/null || true",
+            timeout=60,
+        )
+        force_relocate = bool(leftover.stdout.strip())
         new_wd = relocate_if_readonly(
             self._container,
             self.tool_config.working_dir,
             "/tmp/testbed",
             extra_setup="git config --global --add safe.directory /tmp/testbed",
+            force=force_relocate,
         )
+        # /auto-fix(443)
         self._tool = self.tool_config.model_copy(update={"working_dir": new_wd}).make(container=self._container)
 
     def reset(self) -> tuple[Observation, dict[str, Any]]:
@@ -450,3 +468,13 @@ class SWEBenchVerifiedTaskConfig(TaskConfig[SWEBenchVerifiedTaskMetadata]):
 # === auto-fix notes ===
 # auto-fix-note(423) {class=L1 anchor=PR#423 hash=00588ac5 ctx=daytona+toolkit/swebench-verified/sphinx-doc__sphinx-8475}
 # auto-fix-note(430) {class=L1 anchor=PR#430 hash=6a2bbc39 ctx=daytona/swebench-verified/sphinx-doc__sphinx-8475/test_build_linkcheck}
+# auto-fix-note(443) {class=L1 anchor=PR#443 hash=PENDING ctx=toolkit/uid-13011/swebench-verified/psf__requests-1142}
+#   symptoms:  non-root toolkit — root-owned /testbed/requests/ subdir; in-place
+#              cp/mv can't reparent files in a dir it doesn't own, top-dir `test -w`
+#              probe misses it, so gold patch + agent edits hit Permission denied.
+#   invariant: every .py the agent/eval must patch is writable before tool build.
+#   why:       relocate to a fully runtime-user-owned /tmp/testbed (cube-standard
+#              relocate_if_readonly force=, PR#205); only fires when non-writable
+#              .py remain, so writable-tree tasks are unchanged (no regression).
+#   tested:    psf/requests gold patch 0/6 -> 6/6 on toolkit; 1142/1724 verified 0->1.
+#   hash=PENDING: stamped by scripts/auto_fix_lint.py (Tier-1) on first run.
