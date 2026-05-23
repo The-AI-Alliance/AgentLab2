@@ -968,3 +968,129 @@ class TestKillStaleWorkersRaceGuard:
         # Recorded as a failure.
         assert traj_id in results.failures
         assert fake_ref not in episodes_in_progress
+
+
+class TestKillStaleWorkersQueuedOrphan:
+    """Unit tests for the QUEUED-orphan timeout in _kill_stale_workers.
+
+    A driver-pre-claimed episode that Ray never picks up (worker died /
+    unschedulable) has no heartbeat to age; it is failed after `orphan_threshold_s`
+    from `started_at` so a stuck-QUEUED ref can't keep the poll loop alive forever.
+    Regression for the prove-plus-comm stall (dead Ray worker stranded its task).
+    """
+
+    def _queued_status(self, task_id: str, started_age: float) -> EpisodeStatus:
+        return EpisodeStatus(
+            status="QUEUED",
+            task_id=task_id,
+            episode_id=0,
+            started_at=time.time() - started_age,
+            last_heartbeat_at=None,  # never picked up by a worker
+            current_step=0,
+            retry_count=0,
+        )
+
+    def test_orphaned_queued_past_threshold_is_cancelled(self, tmp_dir) -> None:
+        storage = FileStorage(tmp_dir)
+        traj_id = "task_orphan_ep0"
+        queued = self._queued_status("task_orphan", started_age=7200)  # 2h in QUEUED
+
+        fake_ref = MagicMock()
+        ref_to_traj_id = {fake_ref: traj_id}
+        results = ExpResult(exp_id="test", tasks_num=1)
+        episodes_in_progress = [fake_ref]
+
+        with (
+            patch("cube_harness.exp_runner.ray.cancel") as mock_cancel,
+            patch.object(storage, "read_episode_status", side_effect=[queued, queued]),
+            patch.object(storage, "write_episode_status") as mock_write,
+        ):
+            _kill_stale_workers(
+                episodes_in_progress,
+                ref_to_traj_id,
+                storage,
+                results,
+                step_timeout_s=1.0,
+                setup_timeout_s=1.0,
+                cancel_grace_s=1.0,
+                orphan_threshold_s=3600.0,
+            )
+
+        mock_cancel.assert_called_once_with(fake_ref, force=True)
+        assert mock_write.call_count == 1
+        written: EpisodeStatus = mock_write.call_args[0][1]
+        assert written.status == "CANCELLED"
+        assert written.error_type == "OrphanedInQueue"
+        assert traj_id in results.failures
+        assert fake_ref not in episodes_in_progress
+
+    def test_fresh_queued_is_left_alone(self, tmp_dir) -> None:
+        storage = FileStorage(tmp_dir)
+        traj_id = "task_fresh_ep0"
+        queued = self._queued_status("task_fresh", started_age=30)  # only 30s in QUEUED
+
+        fake_ref = MagicMock()
+        ref_to_traj_id = {fake_ref: traj_id}
+        results = ExpResult(exp_id="test", tasks_num=1)
+        episodes_in_progress = [fake_ref]
+
+        with (
+            patch("cube_harness.exp_runner.ray.cancel") as mock_cancel,
+            patch.object(storage, "read_episode_status", side_effect=[queued]),
+            patch.object(storage, "write_episode_status") as mock_write,
+        ):
+            _kill_stale_workers(
+                episodes_in_progress,
+                ref_to_traj_id,
+                storage,
+                results,
+                step_timeout_s=1.0,
+                setup_timeout_s=1.0,
+                cancel_grace_s=1.0,
+                orphan_threshold_s=3600.0,
+            )
+
+        mock_cancel.assert_not_called()
+        mock_write.assert_not_called()
+        assert traj_id not in results.failures
+        assert fake_ref in episodes_in_progress
+
+    def test_queued_picked_up_during_race_not_clobbered(self, tmp_dir) -> None:
+        """QUEUED (orphan) → worker grabs it (RUNNING) between read and cancel → no clobber."""
+        storage = FileStorage(tmp_dir)
+        traj_id = "task_race_ep0"
+        queued = self._queued_status("task_race", started_age=7200)
+        running = EpisodeStatus(
+            status="RUNNING",
+            task_id="task_race",
+            episode_id=0,
+            started_at=time.time() - 7200,
+            last_heartbeat_at=time.time(),
+            current_step=1,
+        )
+
+        fake_ref = MagicMock()
+        ref_to_traj_id = {fake_ref: traj_id}
+        results = ExpResult(exp_id="test", tasks_num=1)
+        episodes_in_progress = [fake_ref]
+
+        with (
+            patch("cube_harness.exp_runner.ray.cancel"),
+            patch.object(storage, "read_episode_status", side_effect=[queued, running]),
+            patch.object(storage, "write_episode_status") as mock_write,
+        ):
+            _kill_stale_workers(
+                episodes_in_progress,
+                ref_to_traj_id,
+                storage,
+                results,
+                step_timeout_s=1.0,
+                setup_timeout_s=1.0,
+                cancel_grace_s=1.0,
+                orphan_threshold_s=3600.0,
+            )
+
+        # Did not clobber the now-RUNNING status.
+        mock_write.assert_not_called()
+        assert traj_id not in results.failures
+        assert fake_ref not in episodes_in_progress
