@@ -620,7 +620,23 @@ class Genny(Agent):
             )
             messages = list(messages) + [
                 response.message,
-                {"role": "user", "content": "No tool calls found. Every response MUST include at least one tool call."},
+                # auto-fix(448)↓
+                # A model that believes it is finished emits a no-tool-call (text)
+                # response. The old correction ("every response MUST include a tool
+                # call") drove it to satisfy the rule with a no-op (e.g. `echo 'tool
+                # call included'`) instead of ending — burning the rest of the budget
+                # in a degenerate echo loop (observed on filter-js-from-html,
+                # schemelike-metacircular-eval, sam-cell-seg, reshard-c4-data). Route a
+                # finished model to the STOP action instead, and discourage no-ops.
+                {
+                    "role": "user",
+                    "content": (
+                        f"No tool calls found. If the task is already complete, call "
+                        f"`{STOP_ACTION.name}` to finish. Otherwise every response must include at "
+                        f"least one tool call that makes real progress — do not emit no-op commands."
+                    ),
+                },
+                # /auto-fix(448)
             ]
             prompt = Prompt(messages=messages, tools=self._api_tools)
             response = self.llm(prompt)
@@ -669,3 +685,7 @@ class Genny(Agent):
         if final_prompt:
             messages.append({"role": "user", "content": final_prompt})
         return messages
+
+
+# === auto-fix notes ===  (spec: openspec/specs/auto-fix/spec.md)
+# auto-fix-note(448) {class=L1 anchor=PR#448 hash=PENDING ctx=daytona/azure-gpt-5.4-mini/genny-swe/tbench2:filter-js-from-html+schemelike-metacircular-eval+sam-cell-seg+reshard-c4-data:format-error-correction-drove-degenerate-echo-loop/cube-harness@0c3861ca}

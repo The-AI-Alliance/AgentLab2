@@ -692,6 +692,22 @@ class TestFormatErrorPromptShape:
         assert _role(retry_msgs[-1]) == "user"
         assert "No tool calls found" in _content(retry_msgs[-1])
 
+    def test_correction_routes_finished_model_to_stop_action(self) -> None:
+        """A finished model emits a no-tool-call response; the correction must route it
+        to the STOP action (final_step) and discourage no-ops — otherwise the model
+        satisfies 'must include a tool call' with echo no-ops and burns the budget in a
+        degenerate loop (filter-js-from-html, schemelike-metacircular-eval, ...)."""
+        from cube.task import STOP_ACTION
+
+        agent = _make_agent(max_format_errors=1)
+        cap = CapturingLLM(responses=[_text_response("the task is complete"), _tool_response()])
+        agent.llm = cap
+        agent.step(Observation.from_text("goal"))
+
+        correction = _content(cap.calls[1].messages[-1])
+        assert STOP_ACTION.name in correction  # tells a finished model how to end
+        assert "no-op" in correction.lower()  # discourages the echo loop
+
     def test_retry_prompt_has_original_response_before_correction(self) -> None:
         """The empty response is inserted before the correction message."""
         no_tool = _text_response("I will think about it")
