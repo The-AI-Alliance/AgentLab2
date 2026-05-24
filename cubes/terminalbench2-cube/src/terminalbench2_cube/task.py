@@ -202,10 +202,18 @@ class TerminalBench2Task(Task[TerminalBench2TaskMetadata, ContainerTerminalTool]
 
         # Run test.sh → pytest → writes reward.txt in the logs-verifier dir.
         # Tool's working_dir is already set (may be /tmp/app after relocation).
-        output = self.tool.bash(
+        # auto-fix(447)↓
+        # Use bash_unlimited (not the agent-facing bash): the trusted verifier must
+        # run with its full `max_test_timeout_sec` (up to 7200s for some tasks) and
+        # un-truncated output. The agent-facing bash clamps every call to the tool's
+        # `max_timeout` (900s, an abuse guard for the *agent*) and truncates output —
+        # which silently killed the verifier at 900s for the 20 tasks whose
+        # max_test_timeout_sec exceeds 900 (e.g. reshard-c4-data=3600, sam-cell-seg=7200).
+        output = self.tool.bash_unlimited(
             f"export HOME=/tmp/fakehome && bash {self._tests_dir}/test.sh",
             timeout=self._exec.max_test_timeout_sec,
         )
+        # /auto-fix(447)
         test_results = self._parse_pytest_output(output)
 
         # Read reward written by test.sh
@@ -517,3 +525,4 @@ class TerminalBench2TaskConfig(TaskConfig[TerminalBench2TaskMetadata]):
 # === auto-fix notes ===  (spec: openspec/specs/auto-fix/spec.md)
 # auto-fix-note(418) {class=L1 anchor=PR#418 hash=PENDING ctx=toolkit/eai-yul101/runtime-uid-13011/tbench2:configure-git-webserver+nginx-request-logging+sqlite-with-gcov/cube-harness@1e67efdb}
 # auto-fix-note(420) {class=L1 anchor=PR#420 hash=PENDING ctx=toolkit/eai-yul101/cube_assets:stale-uv<0.4/tbench2:fix-git+nginx-request-logging+sqlite-with-gcov/cube-harness@1e67efdb}
+# auto-fix-note(447) {class=L1 anchor=PR#447 hash=PENDING ctx=daytona+all-infra/verifier-clamped-to-agent-max_timeout-900/tbench2:reshard-c4-data+sam-cell-seg+20-tasks-over-900s/cube-harness@0c3861ca}
