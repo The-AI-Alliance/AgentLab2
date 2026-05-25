@@ -33,6 +33,19 @@ run) can see what was patched, why, and where it may not generalize.
 **Nothing blocks the loop.** L2/L3 still ship a temporary PR. The human's
 queue is the `design-debt` backlog, not individual patches.
 
+**Exception — no viable band-aid (diagnosis-only).** "Ship a temp PR" assumes a
+band-aid *exists and helps*. When every candidate fix is **validated net-negative**
+(it regresses other tasks — confirm with a regression run, don't guess) or
+**infeasible** (the constraint can't be worked around at this layer), do **not**
+ship a harmful patch just to satisfy "ship something" — the `design-debt` issue is
+the sole deliverable. The issue MUST carry (a) the evidence the band-aid was tried
+and regressed / is infeasible, and (b) whether a **narrower, strictly-safe guard**
+was shippable instead — most often *fail-loud-not-silent* (surface the defect as an
+explicit error rather than a silently-wrong result); if so, ship that guard as the
+band-aid PR. "Fail loud" is almost always safe and almost always available, so true
+diagnosis-only (issue and nothing else) should be rare — reach for it only after
+ruling the safe guard out.
+
 ### When NOT to mark (proportionality)
 
 Markers exist for code that can silently rot. **Skip in-code markers** when
@@ -152,9 +165,13 @@ Degraded mode: if `gh` is unavailable when writing the marker, leave
    long-form *design* context (what makes this L2/L3; the openspec stub
    link).
 2. Write `auto-fix(N)` markers (N = issue number); open PR referencing
-   `N`. PR body has the Fix Report (same shape as L0/L1).
+   `N`. PR body has the Fix Report (same shape as L0/L1). **Skip this step
+   in the no-viable-band-aid case** (§1 exception): if every candidate fix is
+   validated net-negative or infeasible and no strictly-safe guard exists, the
+   issue alone is the deliverable — there is no PR to open.
 3. On merge: **issue stays open** (`design-debt` label). It's the backlog
-   item the human reviews. Only the PR closes.
+   item the human reviews. Only the PR closes. (No-band-aid issues simply stay
+   open with no associated PR until the design decision is made.)
 4. **Consolidation:** when a refactor promotes band-aids to permanent
    design, it deletes the marked regions + footnotes and the refactor
    PR/openspec cites `supersedes auto-fix N, M, …`; the design-debt
