@@ -5811,6 +5811,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "repo": "psf/requests",
@@ -5851,6 +5854,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "repo": "psf/requests",
@@ -5871,6 +5877,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "repo": "psf/requests",
@@ -5911,6 +5920,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "repo": "psf/requests",
@@ -5931,6 +5943,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "repo": "psf/requests",
@@ -5951,6 +5966,9 @@
       "gpu": false,
       "disk_gb": 10.0,
       "ports": null,
+      "requires": [
+        "container:root"
+      ],
       "_type": "cube.resource.ContainerConfig"
     },
     "repo": "psf/requests",
