@@ -1621,3 +1621,41 @@ class TestInjectEpisodeStatus:
         stubs = storage.load_missing_trajectory_stubs()
         stub = next(s for s in stubs if s.id == "task_1_ep0")
         assert stub.metadata.get("_episode_status") == "QUEUED"
+
+
+class TestExperimentSummaryVerifierRan:
+    """avg_reward must exclude completed-but-ungraded episodes (reward_info.verifier_ran
+    is False) instead of counting them as graded zeros — and stay backward-compatible
+    for cubes/episodes that never set the flag."""
+
+    def _traj(self, idx: int, reward: float, reward_info: dict) -> Trajectory:
+        return Trajectory(
+            id=f"task_{idx}_ep0",
+            metadata={"task_id": f"task_{idx}", "agent_name": "A"},
+            reward_info=reward_info,
+            summary_stats={"final_reward": reward},
+        )
+
+    def test_ungraded_excluded_from_avg_reward(self, tmp_dir: Path) -> None:
+        storage = FileStorage(tmp_dir)
+        # graded pass, graded fail, ungraded (verifier didn't run)
+        storage.update_experiment_summary(self._traj(1, 1.0, {"reward": 1.0, "verifier_ran": True}))
+        storage.update_experiment_summary(self._traj(2, 0.0, {"reward": 0.0, "verifier_ran": True}))
+        storage.update_experiment_summary(self._traj(3, 0.0, {"reward": 0.0, "verifier_ran": False}))
+
+        summary = json.loads((tmp_dir / "experiment_summary.json").read_text())
+        assert summary["n_episodes"] == 3
+        assert summary["n_completed"] == 3
+        assert summary["n_ungraded"] == 1
+        # mean over the 2 GRADED episodes (1.0, 0.0) == 0.5 — NOT 1/3 over all completed.
+        assert summary["avg_reward"] == 0.5
+
+    def test_absent_verifier_ran_defaults_to_graded(self, tmp_dir: Path) -> None:
+        storage = FileStorage(tmp_dir)
+        # No verifier_ran key (e.g. a cube that doesn't set it) → counted as graded.
+        storage.update_experiment_summary(self._traj(1, 1.0, {"reward": 1.0}))
+        storage.update_experiment_summary(self._traj(2, 0.0, {"reward": 0.0}))
+
+        summary = json.loads((tmp_dir / "experiment_summary.json").read_text())
+        assert summary["n_ungraded"] == 0
+        assert summary["avg_reward"] == 0.5

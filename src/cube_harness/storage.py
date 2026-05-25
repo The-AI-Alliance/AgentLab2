@@ -473,19 +473,33 @@ class FileStorage:
                     for step in trajectory.steps
                     if isinstance(step.output, AgentOutput)
                 )
+                # auto-fix(449)↓
+                # `verifier_ran is False` ⇒ the episode completed but the grader never
+                # produced a gradeable result (e.g. eval-time deps failed to install).
+                # Absent ⇒ assume graded, so cubes that don't set it are unaffected.
+                # Consumes the flag #444 added; previously `total_reward += final_reward`
+                # ran unconditionally, scoring an ungraded episode as a graded 0.
+                verifier_ran = (trajectory.reward_info or {}).get("verifier_ran", True)
 
                 summary.n_episodes += 1
                 if has_error:
                     summary.n_errored += 1
+                elif not verifier_ran:
+                    # Completed-but-ungraded: count completion, but keep it out of the
+                    # accuracy numerator/denominator rather than scoring it a graded 0.
+                    summary.n_completed += 1
+                    summary.n_ungraded += 1
                 else:
                     summary.n_completed += 1
-                summary.total_reward += stats.get("final_reward", 0.0)
+                    summary.total_reward += stats.get("final_reward", 0.0)
                 summary.total_prompt_tokens += stats.get("prompt_tokens", 0)
                 summary.total_completion_tokens += stats.get("completion_tokens", 0)
                 summary.total_cost += stats.get("cost", 0.0)
 
-                if summary.n_completed > 0:
-                    summary.avg_reward = round(summary.total_reward / summary.n_completed, 4)
+                n_graded = summary.n_completed - summary.n_ungraded
+                if n_graded > 0:
+                    summary.avg_reward = round(summary.total_reward / n_graded, 4)
+                # /auto-fix(449)
                 summary.updated_at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
                 tmp_path = summary_path.with_suffix(".tmp")
@@ -584,3 +598,7 @@ class FileStorage:
             if status is not None:
                 result[ep_dir.name] = status
         return result
+
+
+# === auto-fix notes ===  (spec: openspec/specs/auto-fix/spec.md)
+# auto-fix-note(449) {class=L1 anchor=PR#449 hash=PENDING ctx=summary/avg_reward-counted-verifier_ran=False-as-graded-0/consumes-444-flag/tbench2:pytorch-model-cli+sam-cell-seg/cube-harness@ccba968e}

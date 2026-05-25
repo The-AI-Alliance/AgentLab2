@@ -61,31 +61,39 @@ def _short_benchmark(name: str) -> str:
     return name.replace("swebench-verified-cube", "sweb-v").replace("swebench-live-cube", "sweb-live")
 
 
-def _scan_episodes(result: ExperimentResult) -> tuple[dict[str, int], list[float], float, int]:
-    """Aggregate per-status counts, rewards, cost, and context-window errors.
+def _scan_episodes(result: ExperimentResult) -> tuple[dict[str, int], list[float], float, int, int]:
+    """Aggregate per-status counts, rewards, cost, context-window errors, ungraded count.
 
     Walks via :meth:`ExperimentResult.iter_episode_statuses` so the episode set
-    (including in-flight) matches what the XRay viewer sees.
+    (including in-flight) matches what the XRay viewer sees. A completed episode
+    whose grader did not run (``reward_info.verifier_ran is False``) is excluded
+    from ``completed_rewards`` and counted in ``n_ungraded`` instead, so eval-infra
+    failures don't masquerade as graded zeros in the accuracy.
     """
     counts: dict[str, int] = {}
     completed_rewards: list[float] = []
     total_cost = 0.0
     ctx_errors = 0
+    n_ungraded = 0
 
     for es in result.iter_episode_statuses():
         counts[es.status] = counts.get(es.status, 0) + 1
         if es.error_type and "ContextWindow" in es.error_type:
             ctx_errors += 1
-        if es.status in _DONE_STATUSES and es.reward is not None:
-            completed_rewards.append(float(es.reward))
-        # Cost lives in episode_record.json, not status.json.
         ep_dir = result._dir / "episodes" / f"{es.task_id}_ep{es.episode_id}"
+        if es.status in _DONE_STATUSES and es.reward is not None:
+            reward_info = _load_json(ep_dir / "episode.metadata.json").get("reward_info", {})
+            if reward_info.get("verifier_ran", True) is False:
+                n_ungraded += 1
+            else:
+                completed_rewards.append(float(es.reward))
+        # Cost lives in episode_record.json, not status.json.
         total_cost += _load_json(ep_dir / "episode_record.json").get("usage", {}).get("total_cost_usd", 0.0)
 
-    return counts, completed_rewards, total_cost, ctx_errors
+    return counts, completed_rewards, total_cost, ctx_errors, n_ungraded
 
 
-def _format_episode_breakdown(counts: dict[str, int], ctx_errors: int) -> tuple[str, int]:
+def _format_episode_breakdown(counts: dict[str, int], ctx_errors: int, n_ungraded: int = 0) -> tuple[str, int]:
     """Return ("done/total status icons", n_total) for the table row.
 
     Uses ``STATUS_ICONS`` from ``episode_status`` — same canonical icon set the
@@ -105,6 +113,8 @@ def _format_episode_breakdown(counts: dict[str, int], ctx_errors: int) -> tuple[
         parts.append(" ".join(error_parts))
     if ctx_errors:
         parts.append(f"{ctx_errors}ctx")
+    if n_ungraded:
+        parts.append(f"{n_ungraded}ung")
     return " ".join(parts), n_total
 
 
@@ -127,12 +137,12 @@ def _parse_experiment(exp_dir: Path) -> dict | None:
         return None
 
     result = ExperimentResult(exp_dir)
-    counts, rewards, total_cost, ctx_errors = _scan_episodes(result)
+    counts, rewards, total_cost, ctx_errors, n_ungraded = _scan_episodes(result)
     if not counts:
         return None
 
     ts = record.get("evaluation_timestamp", 0)
-    breakdown, _ = _format_episode_breakdown(counts, ctx_errors)
+    breakdown, _ = _format_episode_breakdown(counts, ctx_errors, n_ungraded)
 
     return {
         "date": datetime.fromtimestamp(ts).strftime("%m-%d %H:%M") if ts else "?",

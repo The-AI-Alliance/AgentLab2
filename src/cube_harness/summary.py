@@ -43,6 +43,10 @@ class ExperimentSummary(BaseModel):
     n_episodes: int = 0
     n_completed: int = 0
     n_errored: int = 0
+    # Subset of n_completed whose grader did not run (reward_info.verifier_ran is False):
+    # the episode finished but produced no gradeable result, so it is excluded from
+    # avg_reward rather than counted as a graded 0.
+    n_ungraded: int = 0
     total_reward: float = 0.0
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
