@@ -600,6 +600,23 @@ async def _investigate_experiment_async(
     semaphore = asyncio.Semaphore(n_parallel)
     primary_results: dict[str, tuple[BaseFindings, InvestigationMetadata]] = {}
 
+    # auto-fix(451)↓
+    # Build the shared investigation-context map exactly once, before fanning
+    # out. `_ensure_context_file` is check-then-act; with a cold cache and
+    # n_parallel>1, every episode worker would otherwise see "not cached" and
+    # invoke the (Opus) benchmark-context-agent for the *same* file — N
+    # concurrent builds, N-1 wasted (the costliest call in the batch). A single
+    # awaited pre-build makes every per-episode call an idempotent cache hit.
+    # Best-effort: on failure, fall back to the per-episode build (status quo).
+    try:
+        _view = _load_experiment_view(experiment_dir / "experiment_config.json")
+        await _ensure_context_file(
+            experiment_dir, driver, context_dir=context_dir, benchmark_dotted=_view.benchmark_dotted
+        )
+    except Exception as e:  # noqa: BLE001 — pre-warm must never break the batch
+        logger.warning("Context-map pre-build skipped (%s); per-episode build will run.", e)
+    # /auto-fix(451)
+
     async def _one(ref: EpisodeRef, seed_index: int) -> None:
         async with semaphore:
             try:
@@ -816,4 +833,24 @@ def write_json_report(
 #   tested:    tests/test_investigator.py — a hanging fake driver is
 #              bounded; the batch records nothing for it and completes the
 #              rest (asserts the invariant, not a reproduction).
+#   hash=PENDING: stamped by scripts/auto_fix_lint.py (Tier-1) on first run.
+# auto-fix-note(451) {class=L1 issue=451 hash=PENDING ctx=macos-arm64/claude-sonnet-4-6/cube-harness@ccba968e}
+#   symptoms:  Auto-CUBE swebench-live-daytona-r0, Round 1 investigation
+#              (ch-investigate run --n-parallel 4, cold --context-dir cache):
+#              all 4 episode workers logged "investigation_context not cached
+#              — invoking benchmark-context-agent" for the *same* file and 4
+#              Opus context-map builds completed (4 "wrote" log lines),
+#              inflating batch cost ~4x (the map is the costliest single call).
+#   invariant: the benchmark-context-agent (Opus codebase map) runs at most
+#              once per (session, benchmark) per batch, regardless of
+#              n_parallel — never once-per-worker on a cold cache.
+#   why:       `_ensure_context_file` is check-then-act with no lock and was
+#              called only inside each parallel episode worker; cold cache +
+#              n_parallel>1 ⇒ all workers see "not cached" and each builds.
+#              Fix hoists one awaited pre-build above the semaphore fan-out in
+#              `_investigate_experiment_async` (right layer: the batch runner
+#              owns shared-resource init); per-episode calls become cache hits.
+#   tested:    tests/test_investigator.py::test_context_map_built_once_under_parallelism
+#              — cold cache + n_parallel=4 over 4 episodes ⇒ generate_context_file
+#              invoked exactly once (asserts the invariant, not a reproduction).
 #   hash=PENDING: stamped by scripts/auto_fix_lint.py (Tier-1) on first run.
