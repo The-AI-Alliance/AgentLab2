@@ -51,7 +51,9 @@ from cube_harness.core import Trajectory
 from cube_harness.eval_log import (
     FINDINGS_SCHEMA_VERSION,
     BaseFindings,
+    BlameCategory,
     InvestigationMetadata,
+    Outcome,
 )
 
 logger = logging.getLogger(__name__)
@@ -159,6 +161,106 @@ def _validate_invariants(obj: BaseFindings) -> None:
             obj.primary_blame.value,
         )
         obj.primary_blame = obj.primary_blame.__class__("none")
+
+
+# auto-fix(450)↓
+class _UnusableVerdict(Exception):
+    """The investigator finished its analysis but emitted no parseable/complete
+    structured verdict (no JSON block, malformed JSON, or missing required fields)."""
+
+
+def _parse_findings(output_text: str, recipe: InvestigatorRecipe) -> BaseFindings:
+    """Extract + validate the structured verdict, raising `_UnusableVerdict` on any
+    parse/validation failure so the caller can re-prompt for a repaired verdict."""
+    try:
+        obj = extract_json_block(output_text)
+        findings = recipe.output_model.model_validate(obj)
+        _validate_invariants(findings)
+        return findings
+    except (ValueError, json.JSONDecodeError, ValidationError) as e:
+        raise _UnusableVerdict(str(e)) from e
+
+
+def _verdict_repair_prompt(prior_output: str, error: str) -> str:
+    """Hand the model back its own analysis + the parse error and ask only for a
+    corrected verdict — no re-investigation (the retry run passes no tools)."""
+    return (
+        "Your investigation analysis is reproduced below, but it did not end with a "
+        f"valid structured verdict (parse/validation error: {error}).\n\n"
+        "Do NOT investigate further or call any tools. Using ONLY the analysis below, "
+        "output a single fenced ```json block that fully matches the schema in the "
+        "system prompt — every required field populated, especially `outcome` and "
+        "`primary_blame` (and `evidence` when `primary_blame` is not `none`).\n\n"
+        "--- YOUR PRIOR ANALYSIS ---\n"
+        f"{prior_output}"
+    )
+
+
+def _verdict_failure_sentinel(prior_output: str, error: str) -> BaseFindings:
+    """Loud fallback when the verdict can't be repaired: an unmistakable
+    investigation-failure finding (never a silent empty/clean record) that preserves
+    the prose analysis so the spent reasoning is not lost."""
+    return BaseFindings(
+        analysis=prior_output or "(investigator produced no output)",
+        evidence=[],
+        summary=f"INVESTIGATION FAILED: no usable structured verdict after retries ({error}).",
+        outcome=Outcome("failure"),
+        primary_blame=BlameCategory("none"),
+        primary_blame_confidence=0,
+        hypothesis="Re-run the investigator: it finished analysis but never emitted a parseable verdict.",
+        hypothesis_confidence=0,
+    )
+
+
+async def _run_with_verdict_retry(
+    driver: AgentDriver,
+    recipe: InvestigatorRecipe,
+    *,
+    base_run_kwargs: dict[str, Any],
+    episode_name: str,
+) -> tuple[BaseFindings, DriverResult]:
+    """Run the investigator, then guarantee a usable structured verdict.
+
+    The model sometimes finishes a full analysis but emits no parseable / complete
+    verdict (malformed JSON, or `outcome`/`primary_blame` missing). Previously that
+    raised and the batch runner wrote an empty sidecar finding, silently losing the
+    (expensive) analysis. Re-prompt — with **no tools**, handing back the prior
+    analysis — to repair just the verdict, bounded by `recipe.max_verdict_retries`;
+    fall back to a loud sentinel finding rather than an empty record.
+    """
+    result = await driver.run(**base_run_kwargs)
+    last_error = ""
+    for attempt in range(recipe.max_verdict_retries + 1):
+        try:
+            return _parse_findings(result.output_text, recipe), result
+        except _UnusableVerdict as e:
+            last_error = str(e)
+            if attempt >= recipe.max_verdict_retries:
+                break
+            logger.warning(
+                "Investigator verdict unusable for %s (attempt %d/%d): %s — re-prompting for repair",
+                episode_name,
+                attempt + 1,
+                recipe.max_verdict_retries + 1,
+                last_error,
+            )
+            repair_kwargs = {
+                **base_run_kwargs,
+                "user_prompt": _verdict_repair_prompt(result.output_text, last_error),
+                "allowed_tools": (),  # verdict-only repair: no re-investigation
+            }
+            result = await driver.run(**repair_kwargs)
+    logger.error(
+        "Investigator could not produce a usable verdict for %s after %d attempts (%s); "
+        "recording a sentinel failure finding.",
+        episode_name,
+        recipe.max_verdict_retries + 1,
+        last_error,
+    )
+    return _verdict_failure_sentinel(result.output_text, last_error), result
+
+
+# /auto-fix(450)
 
 
 def _resolve_recipe(recipe: InvestigatorRecipe | None, model_override: str | None) -> InvestigatorRecipe:
@@ -333,7 +435,7 @@ async def _investigate_episode_impl(
         recipe.model,
     )
 
-    result = await driver.run(
+    base_run_kwargs: dict[str, Any] = dict(
         system_prompt=recipe.system_prompt,
         user_prompt=user_prompt,
         cwd=episode_dir,
@@ -344,10 +446,9 @@ async def _investigate_episode_impl(
         verbose=verbose,
         trace_mode=trace_mode,
     )
-
-    obj = extract_json_block(result.output_text)
-    findings = recipe.output_model.model_validate(obj)
-    _validate_invariants(findings)
+    findings, result = await _run_with_verdict_retry(
+        driver, recipe, base_run_kwargs=base_run_kwargs, episode_name=episode_dir.name
+    )
 
     investigation_metadata = InvestigationMetadata(
         model=recipe.model,
@@ -854,3 +955,4 @@ def write_json_report(
 #              — cold cache + n_parallel=4 over 4 episodes ⇒ generate_context_file
 #              invoked exactly once (asserts the invariant, not a reproduction).
 #   hash=PENDING: stamped by scripts/auto_fix_lint.py (Tier-1) on first run.
+# auto-fix-note(450) {class=L1 anchor=PR#450 hash=PENDING ctx=investigator/empty-or-malformed-verdict-dropped-finding/verdict-repair-retry+loud-sentinel/tbench2:kv-store-grpc/cube-harness@ccba968e}

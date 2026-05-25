@@ -61,6 +61,10 @@ class InvestigatorRecipe(TypedBaseModel):
     allowed_tools: tuple[str, ...] = ("Read", "Glob", "Grep", "Bash")
     permission_mode: Literal["bypassPermissions", "ask"] = "bypassPermissions"
     audit: bool = False
+    # If the investigator finishes its analysis but emits no parseable/complete
+    # structured verdict, re-prompt it (with no tools) up to this many times to
+    # repair just the verdict before falling back to a loud sentinel finding.
+    max_verdict_retries: int = 2
 
     @field_serializer("output_model")
     def _serialize_output_model_field(self, value: type[TypedBaseModel]) -> str:
