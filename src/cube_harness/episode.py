@@ -5,6 +5,7 @@ from typing import Callable, Self
 
 from cube.benchmark import Benchmark, RuntimeContext
 from cube.core import EnvironmentOutput, StepError, TypedBaseModel
+from cube.resource import IncompatibleInfraError
 from cube.task import TaskConfig
 from opentelemetry.trace import StatusCode
 from termcolor import colored
@@ -305,9 +306,12 @@ class Episode:
         except Exception as e:
             logger.exception(f"Error during agent run: {e}")
             # Permanent provider errors (bad model name, bad key, malformed request)
-            # will fail identically on retry — mark them terminal & non-retriable so
-            # the runner stops instead of burning the whole retry budget.
-            ep_status.status = "INVALID_CONFIG" if is_permanent_llm_error(e) else "FAILED"
+            # and infra-incompatibility (IncompatibleInfraError — e.g. a task that
+            # needs container:root on a non-root infra) will fail identically on
+            # retry — mark them terminal & non-retriable so the runner stops instead
+            # of burning the whole retry budget.
+            permanent = is_permanent_llm_error(e) or isinstance(e, IncompatibleInfraError)
+            ep_status.status = "INVALID_CONFIG" if permanent else "FAILED"
             ep_status.error_type = type(e).__name__
             ep_status.error_message = str(e)[:500]
             raise e

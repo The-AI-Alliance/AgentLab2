@@ -10,6 +10,7 @@ from typing import Any
 
 from cube.container import relocate_if_readonly
 from cube.core import ActionSchema, Observation
+from cube.resource import IncompatibleInfraError
 from cube.task import STOP_ACTION, RuntimeContext, Task, TaskConfig, TaskExecutionInfo, TaskMetadata
 
 from cube.tools.terminal import ContainerTerminalTool, TerminalToolConfig
@@ -178,8 +179,56 @@ class SWEBenchVerifiedTask(Task[SWEBenchVerifiedTaskMetadata, ContainerTerminalT
         )
         self._tool = self.tool_config.model_copy(update={"working_dir": new_wd}).make(container=self._container)
 
+    # auto-fix(446)↓ fail loud, not silent-0.
+    _GOLD_TARGET_RE = re.compile(r"^\+\+\+ b/(.+)$", re.MULTILINE)
+
+    def _raise_if_unpatchable(self, working_dir: str) -> None:
+        """Raise ``IncompatibleInfraError`` if the gold patch's target files can't be
+        written after the writability normalisation in ``_build_tool``.
+
+        On non-root infra (EAI toolkit, uid 13011) some images ship root-owned package
+        subdirs (e.g. psf/requests' ``/testbed/requests/``) that ``cp/mv`` can't reparent
+        without root. Any patch — gold or agent — to a file there dies with ``git apply:
+        Permission denied``, and the task would silently score a *correct* fix 0. We probe
+        exactly the files the **gold patch** touches (the canonical fix's source paths) —
+        not the whole tree — so unrelated root-owned vendored dirs (e.g. astropy's
+        ``astropy/_erfa``) don't false-positive. If even the gold patch's targets aren't
+        writable, no agent patch to the same files can be either → surface the cube's
+        IncompatibleInfraError (terminal + non-retriable per episode.py) instead. Root
+        infras leave everything writable, so this never fires there. See #446.
+        """
+        targets = sorted(set(self._GOLD_TARGET_RE.findall(self._exec.patch or "")))
+        if not targets:
+            return
+        # A target is patchable iff its parent dir is writable (git apply unlinks+recreates
+        # via the dir) and the file itself is writable-or-absent.
+        quoted = " ".join(shlex.quote(t) for t in targets)
+        probe = (
+            f"cd {shlex.quote(working_dir)} || exit 0; for f in {quoted}; do "
+            'd=$(dirname "$f"); if [ ! -w "$d" ] || { [ -e "$f" ] && [ ! -w "$f" ]; }; then '
+            "printf '%s\\n' \"$f\"; break; fi; done"
+        )
+        blocked = self._container.exec(probe, timeout=60).stdout.strip()
+        if blocked:
+            uid = self._container.exec("id -u", timeout=15).stdout.strip()
+            raise IncompatibleInfraError(
+                f"{self.metadata.id}: gold-patch target {blocked.splitlines()[0]!r} under "
+                f"{working_dir} is not writable by the runtime user (uid {uid}) after writability "
+                f"normalisation — this image ships root-owned package dirs a non-root infra cannot "
+                f"patch (git apply would fail 'Permission denied', silently scoring a correct patch 0). "
+                f"This task needs 'container:root'; run it on a root-capable infra (daytona/local/aws). "
+                f"See cube-harness#446."
+            )
+
+    # /auto-fix(446)
+
     def reset(self) -> tuple[Observation, dict[str, Any]]:
         self.tool.reset()
+        # auto-fix(446): fail loud (IncompatibleInfraError), not silent-0, if the gold
+        # patch's target files aren't writable on this (non-root) infra. Called here —
+        # inside reset(), which the episode runs within its try/except — so the error
+        # is classified terminal & non-retriable (episode.py) rather than escaping setup.
+        self._raise_if_unpatchable(self.tool._config.working_dir)
 
         # Oracle mode: write gold patch for debug/baseline use
         if self.oracle_mode and self._exec.patch:
@@ -450,3 +499,16 @@ class SWEBenchVerifiedTaskConfig(TaskConfig[SWEBenchVerifiedTaskMetadata]):
 # === auto-fix notes ===
 # auto-fix-note(423) {class=L1 anchor=PR#423 hash=00588ac5 ctx=daytona+toolkit/swebench-verified/sphinx-doc__sphinx-8475}
 # auto-fix-note(430) {class=L1 anchor=PR#430 hash=6a2bbc39 ctx=daytona/swebench-verified/sphinx-doc__sphinx-8475/test_build_linkcheck}
+# auto-fix-note(446) {class=L2 issue=446 hash=PENDING ctx=toolkit/uid-13011/swebench-verified/psf__requests-1142}
+#   symptoms:  non-root toolkit + image with root-owned package subdir
+#              (/testbed/requests/) -> git apply "Permission denied" -> a correct
+#              patch (gold or agent) silently scores 0.
+#   invariant: a writability defect of the infra must NOT masquerade as an agent
+#              failure (reward 0). Fail loud (IncompatibleInfraError) instead.
+#   why:       band-aid — detects the unpatchable dir at _build_tool and raises the
+#              cube's IncompatibleInfraError (terminal/non-retriable). The full
+#              resolution (declare container:root vs skip vs relocate) is the
+#              design decision tracked in #446; no in-place non-root fix exists.
+#   tested:    scripts/smoke/nonroot_unpatchable_faill0ud.py (requests-1142 raises;
+#              writable tasks no-op).
+#   hash=PENDING: stamped by scripts/auto_fix_lint.py (Tier-1) on first run.
