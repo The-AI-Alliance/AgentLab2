@@ -32,22 +32,31 @@ directly to their specs in the implementation PR per the constitution.
   - `agent_config_dump: dict` — serialized config of the agent that ran the rollout (for provenance)
 
 - `Rollout` — orchestrator class:
-  - `__init__(self, task: Task, agent: Agent, config: RolloutConfig) -> None`
+  - `__init__(self, task_config: TaskConfig, agent_config: AgentConfig, config: RolloutConfig, output_dir: Path | None = None, runtime_context: RuntimeContext | None = None, exp_name: str = "rollout") -> None`
   - `run(self) -> RolloutResult`
+
+  Takes **configs**, not live `Task` / `Agent` instances — `Rollout.run()` constructs both
+  once internally (preserving the "Python is the config" idiom and letting `output_dir`
+  remain optional for in-memory rollouts).
 
 ### Public methods
 
 - `Rollout.run() -> RolloutResult`
 
-  Executes `n_episodes` against `task` reusing the same `agent` instance. Between
-  episodes calls `task.reset()` then `agent.reflect(trajectory, final_reward)`.
-  Reflection is **not** called after the final episode.
+  Constructs task + agent once, then executes `n_episodes` against them. Between
+  non-final episodes calls `task.reset()` (next iteration) and
+  `agent.reflect(trajectory, final_reward)`. If `reflect()` returns a non-None
+  `AgentOutput`, the rollout appends it as a synthetic trajectory step on the
+  just-finished episode's trajectory before moving on.
 
 ### Invariants
 
 - The same `Agent` instance handles all `n_episodes` within one `Rollout.run()` call.
 - `task.reset()` is invoked before each episode (including the first).
 - `agent.reflect()` is invoked after each non-final episode (`n_episodes - 1` times).
+- When `reflect()` returns a non-None `AgentOutput`, that output is appended as a
+  `TrajectoryStep` on the just-finished episode's trajectory — making the reflection
+  LLMCall (`tag="reflection"`) observable in XRay, cost stats, and training-data extraction.
 - `len(trajectories) == len(per_episode_rewards) == n_episodes` on a normal completion.
 - `discounted_reward = sum(gamma**k * r for k, r in enumerate(per_episode_rewards))`.
 - `rollout_id` is unique per `Rollout.run()` call (uuid4).
@@ -69,11 +78,18 @@ directly to their specs in the implementation PR per the constitution.
 ### `Agent` base class — new optional method
 
 ```python
-def reflect(self, trajectory: Trajectory, final_reward: float) -> None:
+def reflect(self, trajectory: Trajectory, final_reward: float) -> AgentOutput | None:
     """Called between episodes within a Rollout.
 
-    Default implementation: no-op. Implementations may update internal state
-    that subsequent step() calls read (e.g., a memory list spliced into prompts).
+    Default implementation: no-op (returns None). Implementations may update
+    internal state that subsequent step() calls read (e.g., a memory list spliced
+    into prompts).
+
+    When the implementation runs an LLM call as part of reflecting, it SHOULD
+    return an AgentOutput carrying that LLMCall (with tag="reflection") and the
+    reflection text in `thoughts`. The Rollout appends that output as a synthetic
+    trajectory step so the reflection is observable in XRay / cost stats /
+    training-data extraction. Returning None means "nothing to record".
 
     Standalone Episode runs never invoke this method — backwards compatible.
     """
@@ -81,12 +97,16 @@ def reflect(self, trajectory: Trajectory, final_reward: float) -> None:
 
 ### Invariants (new)
 
-- Default implementation on `Agent` is a no-op; subclasses opt in by overriding.
+- Default implementation on `Agent` is a no-op returning `None`; subclasses opt in by overriding.
 - `reflect()` is invoked exactly once per non-final episode within a `Rollout`,
   with the just-finished trajectory and its final scalar reward.
 - `reflect()` is **never** called by `Episode` (single-episode execution path).
+- The return value, when non-None, is an `AgentOutput` whose first `LLMCall` carries
+  `tag="reflection"`. The Rollout appends it to the trajectory as a synthetic
+  step (see Rollout invariants above).
 - Implementations may raise; the rollout treats reflection errors the same as
-  episode-level errors (propagated up).
+  episode-level errors (propagated up). Implementations that want to suppress
+  LLM failures should catch internally and return `None`.
 
 ### Not changed
 
@@ -113,24 +133,27 @@ readable without migration.
 
 ### File layout extension
 
-`Rollout` writes a sibling `rollout_record.json` alongside the per-episode
-directories:
+`Rollout._persist` writes trajectories using the canonical `FileStorage` V2 layout
+(so XRay and existing trajectory tooling discover them unchanged) **plus** a
+rollout-level aggregate as a sibling directory:
 
 ```
 <experiment_dir>/
+├── episodes/                          ← canonical FileStorage V2 (XRay reads this)
+│   └── <trajectory_id>/
+│       ├── metadata.json
+│       └── steps/NNN_*.json, ...
 └── rollouts/
     └── <rollout_id>/
-        ├── rollout_record.json    ← RolloutResult dump (less trajectories)
-        └── episodes/
-            ├── ep0/...            ← existing Episode storage layout, unchanged
-            ├── ep1/...
-            └── ...
+        └── rollout_record.json        ← rollout-level aggregate
 ```
 
-`rollout_record.json` contains `rollout_id`, `per_episode_rewards`,
-`discounted_reward`, `gamma`, `n_episodes`, and `agent_config_dump`. Per-episode
-trajectories live where `Episode` already writes them; the rollout record points to
-them by relative path.
+The aggregate `rollout_record.json` contains `rollout_id`, `per_episode_rewards`,
+`discounted_reward`, `gamma`, `n_episodes`, `agent_config_dump`, and
+`trajectory_ids: list[str]` (the trajectory IDs of the episodes that ran, in
+execution order). Per-episode content lives entirely under `episodes/<trajectory_id>/`;
+the rollout record only carries the IDs and aggregates, so the two layers don't
+duplicate trajectory data.
 
 ---
 
