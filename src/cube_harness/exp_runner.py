@@ -40,9 +40,6 @@ _CLEANUP_GRACE_TIMEOUT_S: float = 30.0
 DEFAULT_STEP_TIMEOUT_S: float = 9000.0
 DEFAULT_SETUP_TIMEOUT_S: float = 4 * DEFAULT_STEP_TIMEOUT_S  # container scheduling can queue
 DEFAULT_CANCEL_GRACE_S: float = 120.0
-# A driver-pre-claimed episode that Ray never picks up (worker died / unschedulable)
-# is failed after this long in QUEUED so it can't hang the poll loop indefinitely.
-DEFAULT_ORPHAN_THRESHOLD_S: float = 3600.0
 
 # How often the driver updates experiment_status.json in Ray mode.
 _EXP_HEARTBEAT_INTERVAL_S: float = 30.0
@@ -288,7 +285,7 @@ def run_with_ray(
     step_timeout_s: float = DEFAULT_STEP_TIMEOUT_S,
     setup_timeout_s: float = DEFAULT_SETUP_TIMEOUT_S,
     cancel_grace_s: float = DEFAULT_CANCEL_GRACE_S,
-    orphan_threshold_s: float = DEFAULT_ORPHAN_THRESHOLD_S,
+    orphan_threshold_s: float = 3600.0,
     max_retry_rounds: int = 3,
     otlp_endpoint: str | None = None,
     model: str | None = None,
@@ -454,7 +451,6 @@ def _run_with_ray_impl(
                 step_timeout_s=step_timeout_s,
                 setup_timeout_s=setup_timeout_s,
                 cancel_grace_s=cancel_grace_s,
-                orphan_threshold_s=orphan_threshold_s,
                 exp_status=exp_status,
                 exp_status_path=exp_status_path,
             )
@@ -482,7 +478,6 @@ def _poll_ray(
     step_timeout_s: float,
     setup_timeout_s: float,
     cancel_grace_s: float,
-    orphan_threshold_s: float = DEFAULT_ORPHAN_THRESHOLD_S,
     exp_status: ExperimentStatus,
     exp_status_path: Path,
 ) -> ExpResult:
@@ -528,7 +523,6 @@ def _poll_ray(
             step_timeout_s=step_timeout_s,
             setup_timeout_s=setup_timeout_s,
             cancel_grace_s=cancel_grace_s,
-            orphan_threshold_s=orphan_threshold_s,
         )
 
         # Heartbeat experiment_status.json so XRay knows this driver is alive.
@@ -561,53 +555,23 @@ def _kill_stale_workers(
     step_timeout_s: float,
     setup_timeout_s: float,
     cancel_grace_s: float,
-    orphan_threshold_s: float = DEFAULT_ORPHAN_THRESHOLD_S,
 ) -> None:
-    """Read each active episode's status.json; force-kill stalled/orphaned workers.
+    """Read each active episode's status.json; force-kill workers with stale heartbeats.
 
-    Two stall classes are handled so the poll loop can't hang on a ref forever:
-    - **RUNNING** with a stale heartbeat — phase-aware budget: episodes still in setup
-      (current_step == 0) get `setup_timeout_s`, episodes in the agent loop get the full
-      `step_timeout_s`. Detects setup hangs (container boot, env reset) quickly without
-      shortening the budget for legitimate long-running agent steps.
-    - **QUEUED** past `orphan_threshold_s` — Ray never picked the episode up (worker died
-      or the task is unschedulable). There's no heartbeat to age, so the wait is bounded
-      from `started_at`. Without this a stuck-QUEUED ref keeps `episodes_in_progress`
-      non-empty forever and hangs the poll loop.
+    Uses a phase-aware budget: episodes still in setup (current_step == 0) are given
+    `setup_timeout_s`; episodes that have entered the agent loop get the full `step_timeout_s`.
+    This lets setup hangs (container boot, env reset) be detected quickly without
+    shortening the budget for legitimate long-running agent steps.
     """
     now = time.time()
     to_remove: list[ray.ObjectRef] = []
     for ref in list(episodes_in_progress):
         traj_id = ref_to_traj_id[ref]
         status = storage.read_episode_status(traj_id)
-        if status is None:
+        # QUEUED → episode hasn't been picked up by a Ray worker yet (no heartbeat to check).
+        # The orphan threshold path in the STALE sweep handles a never-picked-up QUEUED.
+        if status is None or status.status != "RUNNING" or status.last_heartbeat_at is None:
             continue
-        # auto-fix(445)↓
-        # QUEUED orphan: never picked up by a worker (no heartbeat). Bound from started_at.
-        if status.status != "RUNNING" or status.last_heartbeat_at is None:
-            if status.status == "QUEUED" and now - status.started_at > orphan_threshold_s:
-                logger.error(
-                    f"Episode {traj_id} stuck QUEUED for {now - status.started_at:.0f}s "
-                    f"(>{orphan_threshold_s:.0f}s) — Ray never picked it up; force killing"
-                )
-                try:
-                    ray.cancel(ref, force=True)
-                except Exception:
-                    logger.exception(f"ray.cancel failed for {traj_id}")
-                # Re-read: a worker may have picked it up between our read and the cancel.
-                fresh = storage.read_episode_status(traj_id)
-                if fresh is not None and fresh.status != "QUEUED":
-                    to_remove.append(ref)
-                    continue
-                status.status = "CANCELLED"
-                status.ended_at = now
-                status.error_type = "OrphanedInQueue"
-                status.error_message = f"never picked up by a Ray worker within {orphan_threshold_s:.0f}s"
-                storage.write_episode_status(traj_id, status)
-                results.failures[traj_id] = status.error_message
-                to_remove.append(ref)
-            continue
-        # /auto-fix(445)
         age = now - status.last_heartbeat_at
         budget = setup_timeout_s if status.current_step == 0 else step_timeout_s
         if age <= budget + cancel_grace_s:
@@ -646,7 +610,7 @@ def run_sequentially(
     *,
     step_timeout_s: float = DEFAULT_STEP_TIMEOUT_S,
     cancel_grace_s: float = DEFAULT_CANCEL_GRACE_S,
-    orphan_threshold_s: float = DEFAULT_ORPHAN_THRESHOLD_S,
+    orphan_threshold_s: float = 3600.0,
     max_retry_rounds: int = 3,
     otlp_endpoint: str | None = None,
     model: str | None = None,
@@ -794,7 +758,3 @@ def _run_sequentially_impl(
         )
         exp.print_stats(results)
         return results
-
-
-# === auto-fix notes ===  (spec: openspec/specs/auto-fix/spec.md)
-# auto-fix-note(445) {class=L1 anchor=PR#445 hash=PENDING ctx=ray-runner/queued-orphan-timeout/orphan_threshold_s-was-plumbed-but-never-consumed/cube-harness@0c3861ca}
