@@ -22,6 +22,7 @@ from pathlib import Path
 import pytest
 
 from cube_harness.experiment import Experiment
+from cube_harness.rollout import Rollout
 
 # Package prefixes owned by this repo. Imports of these MUST resolve.  Imports
 # from external packages (cube_infra_*, anthropic, etc.) are best-effort and
@@ -91,7 +92,7 @@ def _runnable_recipes() -> list[Path]:
 
 @pytest.mark.parametrize("recipe", _runnable_recipes(), ids=lambda p: p.relative_to(REPO_ROOT).as_posix())
 def test_recipe_defines_experiment(recipe: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Executing the recipe builds at least one Experiment (var or dict value)."""
+    """Executing the recipe builds at least one Experiment or Rollout (var or dict value)."""
     monkeypatch.setattr("cube_harness.experiment.make_experiment_output_dir", lambda *a, **k: tmp_path)
     spec = importlib.util.spec_from_file_location(recipe.stem, recipe)
     assert spec is not None and spec.loader is not None
@@ -102,10 +103,12 @@ def test_recipe_defines_experiment(recipe: Path, tmp_path: Path, monkeypatch: py
         # Recipe's cube/tool dep not installed here — the AST guard above
         # already covers import-name resolution when it is installed.
         pytest.skip(f"recipe dependency not installed: {e.name}")
-    exps: list[Experiment] = []
+    runnables: list[Experiment | Rollout] = []
     for v in vars(module).values():
-        if isinstance(v, Experiment):
-            exps.append(v)
+        if isinstance(v, (Experiment, Rollout)):
+            runnables.append(v)
         elif isinstance(v, dict):
-            exps.extend(x for x in v.values() if isinstance(x, Experiment))
-    assert exps, f"{recipe.relative_to(REPO_ROOT)} defines no Experiment (a var or a dict[str, Experiment])"
+            runnables.extend(x for x in v.values() if isinstance(x, (Experiment, Rollout)))
+    assert runnables, (
+        f"{recipe.relative_to(REPO_ROOT)} defines no Experiment or Rollout (a var or a dict[str, Experiment|Rollout])"
+    )
