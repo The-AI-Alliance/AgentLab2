@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from cube.core import Content, EnvironmentOutput, Observation, StepError
+from cube.core import Content, EnvironmentOutput, Observation
 
 from cube_harness.core import AgentOutput, Trajectory, TrajectoryStep
 from cube_harness.eval_log import (
@@ -20,7 +20,6 @@ from cube_harness.eval_log import (
     InvestigatorLLMConfig,
     UsageSummary,
     Verifier,
-    _extract_error_type,
     _extract_llm_model,
     _extract_tool_names,
     _to_github_url,
@@ -126,29 +125,20 @@ def test_extract_tool_names_skips_tools_without_name() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _extract_error_type
+# error_type (sourced from summary_stats, populated by the streaming SummaryProcessor)
 # ---------------------------------------------------------------------------
 
 
-def test_extract_error_type_clean_trajectory() -> None:
-    traj = _trajectory(reward=1.0)
-    assert _extract_error_type(traj) is None
+def test_episode_record_error_none_for_clean_trajectory() -> None:
+    record = EpisodeRecord.from_trajectory(_trajectory(reward=1.0), evaluation_id="abc123")
+    assert record.error is None
 
 
-def test_extract_error_type_from_agent_output() -> None:
+def test_episode_record_error_from_summary_stats() -> None:
     traj = _trajectory(reward=0.0)
-    err = StepError(error_type="ValueError", exception_str="bad value", stack_trace="")
-    traj.steps.insert(1, TrajectoryStep(output=AgentOutput(error=err), start_time=101.0, end_time=101.5))
-    assert _extract_error_type(traj) == "ValueError"
-
-
-def test_extract_error_type_returns_first_error() -> None:
-    traj = _trajectory(reward=0.0)
-    err1 = StepError(error_type="TimeoutError", exception_str="timeout", stack_trace="")
-    err2 = StepError(error_type="ValueError", exception_str="bad", stack_trace="")
-    traj.steps.insert(1, TrajectoryStep(output=AgentOutput(error=err1), start_time=101.0, end_time=101.5))
-    traj.steps.insert(2, TrajectoryStep(output=AgentOutput(error=err2), start_time=101.5, end_time=102.0))
-    assert _extract_error_type(traj) == "TimeoutError"
+    traj.summary_stats["error_type"] = "ValueError"
+    record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
+    assert record.error == "ValueError"
 
 
 # ---------------------------------------------------------------------------
@@ -358,7 +348,8 @@ def test_episode_record_wall_time() -> None:
 def test_episode_record_num_turns() -> None:
     traj = _trajectory(reward=1.0, n_agent_steps=3)
     record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
-    assert record.num_turns == len(traj.steps)
+    # num_turns derives from the streamed summary_stats (n_env + n_agent), not len(steps).
+    assert record.num_turns == traj.summary_stats["n_env_steps"] + traj.summary_stats["n_agent_steps"]
     assert record.n_agent_steps == 3
 
 

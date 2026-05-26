@@ -5,6 +5,7 @@ from typing import Callable, Self
 
 from cube.benchmark import Benchmark, RuntimeContext
 from cube.core import EnvironmentOutput, StepError, TypedBaseModel
+from cube.resource import IncompatibleInfraError
 from cube.task import TaskConfig
 from opentelemetry.trace import StatusCode
 from termcolor import colored
@@ -169,6 +170,8 @@ class Episode:
         ep_status = self._open_status(trajectory_id)
 
         trajectory: Trajectory | None = None
+        summary_proc: SummaryProcessor | None = None
+        step_idx = 0
         try:
             with tracer.episode(task_id, experiment=self.config.exp_name) as episode_span:
                 start_time = ep_status.started_at
@@ -176,7 +179,6 @@ class Episode:
                 agent_name = self.config.agent_config.agent_name
                 trajectory = Trajectory(
                     id=trajectory_id,
-                    steps=[TrajectoryStep(output=env_output, start_time=start_time, end_time=time.time())],
                     metadata={
                         "task_id": task_id,
                         "agent_name": agent_name,
@@ -186,13 +188,25 @@ class Episode:
                     },
                     start_time=start_time,
                 )
+                # Steps stream to disk and are never retained in memory: the returned
+                # Trajectory carries metadata + summary_stats only (steps load lazily from
+                # disk via storage.load_trajectory). Keeps driver and worker RAM flat on
+                # image-heavy benchmarks; stats come from the streaming SummaryProcessor.
                 self.storage.save_trajectory(trajectory, allow_overwrite=self.allow_overwrite)
                 ep_dir = self.storage._episode_dir(trajectory.id)
                 (ep_dir / "episode_config.json").write_text(
                     self.config.model_dump_json(indent=2, serialize_as_any=True)
                 )
                 summary_proc = SummaryProcessor(ep_dir)
-                summary_proc.on_step(0, trajectory.steps[0])
+
+                def _record(step: TrajectoryStep) -> None:
+                    """Persist one step to disk and fold it into the running summary."""
+                    nonlocal step_idx
+                    self.storage.save_step(step, trajectory.id, step_idx)
+                    summary_proc.on_step(step_idx, step)
+                    step_idx += 1
+
+                _record(TrajectoryStep(output=env_output, start_time=start_time, end_time=time.time()))
                 logger.info(colored(f"Episode started — done={env_output.done} reward={env_output.reward}", "blue"))
                 turns = 0
                 while not env_output.done and turns < self.config.max_steps:
@@ -213,18 +227,12 @@ class Episode:
                         except Exception as e:
                             logger.exception(f"Error in agent.step() at turn {turns}: {e}")
                             agent_output = AgentOutput(error=StepError.from_exception(e))
-                            agent_step = TrajectoryStep(output=agent_output, start_time=ts, end_time=time.time())
-                            self.storage.save_step(agent_step, trajectory.id, len(trajectory.steps))
-                            summary_proc.on_step(len(trajectory.steps), agent_step)
-                            trajectory.steps.append(agent_step)
+                            _record(TrajectoryStep(output=agent_output, start_time=ts, end_time=time.time()))
                             ep_status.had_step_errors = True
                             raise e
 
                         self.log_agent_output(turns, agent_output)
-                        agent_step = TrajectoryStep(output=agent_output, start_time=ts, end_time=time.time())
-                        self.storage.save_step(agent_step, trajectory.id, len(trajectory.steps))
-                        summary_proc.on_step(len(trajectory.steps), agent_step)
-                        trajectory.steps.append(agent_step)
+                        _record(TrajectoryStep(output=agent_output, start_time=ts, end_time=time.time()))
                         if agent_output.error is not None:
                             ep_status.had_step_errors = True
 
@@ -238,10 +246,7 @@ class Episode:
                         except Exception as e:
                             logger.exception(f"Error in step() at turn {turns}: {e}")
                             env_output = EnvironmentOutput(obs=env_output.obs, error=StepError.from_exception(e))
-                            env_step = TrajectoryStep(output=env_output, start_time=env_ts, end_time=time.time())
-                            self.storage.save_step(env_step, trajectory.id, len(trajectory.steps))
-                            summary_proc.on_step(len(trajectory.steps), env_step)
-                            trajectory.steps.append(env_step)
+                            _record(TrajectoryStep(output=env_output, start_time=env_ts, end_time=time.time()))
                             ep_status.had_step_errors = True
                             raise e
 
@@ -250,10 +255,7 @@ class Episode:
                                 f"Turn {turns} Env output: done={env_output.done} reward={env_output.reward}", "blue"
                             )
                         )
-                        env_step = TrajectoryStep(output=env_output, start_time=env_ts, end_time=time.time())
-                        self.storage.save_step(env_step, trajectory.id, len(trajectory.steps))
-                        summary_proc.on_step(len(trajectory.steps), env_step)
-                        trajectory.steps.append(env_step)
+                        _record(TrajectoryStep(output=env_output, start_time=env_ts, end_time=time.time()))
                         if env_output.error is not None:
                             ep_status.had_step_errors = True
                         span.set_attribute("done", env_output.done)
@@ -262,8 +264,8 @@ class Episode:
                 # Loop exited without `done=True` — either max_steps fired or the agent
                 # gave up. cube's task.step only calls evaluate() when done or
                 # validate_per_step, so we'd otherwise return reward=0.0. Force one
-                # final evaluation and save it as a synthetic env step so the
-                # trajectory's last_env_step carries the real reward.
+                # final evaluation and record it as a synthetic env step so the recorded
+                # reward (reward_info / summary_stats) is real.
                 max_steps_reached = turns >= self.config.max_steps and not env_output.done
                 if not env_output.done:
                     try:
@@ -276,15 +278,14 @@ class Episode:
                             info={**env_output.info, **forced_info},
                             error=env_output.error,
                         )
-                        forced_step = TrajectoryStep(output=env_output, start_time=eval_ts, end_time=time.time())
-                        self.storage.save_step(forced_step, trajectory.id, len(trajectory.steps))
-                        summary_proc.on_step(len(trajectory.steps), forced_step)
-                        trajectory.steps.append(forced_step)
+                        _record(TrajectoryStep(output=env_output, start_time=eval_ts, end_time=time.time()))
                     except Exception:
                         logger.exception("Final evaluate() raised; trajectory keeps last step's reward")
                 trajectory.end_time = time.time()
                 trajectory.reward_info = {"reward": env_output.reward, "done": env_output.done, **env_output.info}
-                trajectory.summary_stats = _compute_summary_stats(trajectory)
+                trajectory.summary_stats = summary_proc.summary_stats(
+                    duration=trajectory.end_time - start_time, final_reward=env_output.reward
+                )
                 self.storage.save_trajectory(trajectory)
                 summary_proc.on_episode_complete(trajectory, self.storage)
                 try:
@@ -297,17 +298,19 @@ class Episode:
                 except Exception:
                     logger.warning("Failed to write episode record", exc_info=True)
                 logger.info(colored(f"Episode completed in {turns} turns, reward: {env_output.reward}", "blue"))
-                final_reward = trajectory.last_env_step().reward
-                ep_status.reward = final_reward
-                status = StatusCode.OK if final_reward > 0 else StatusCode.ERROR
+                ep_status.reward = env_output.reward
+                status = StatusCode.OK if env_output.reward > 0 else StatusCode.ERROR
                 episode_span.set_status(status)
             ep_status.status = "MAX_STEPS_REACHED" if max_steps_reached else "COMPLETED"
         except Exception as e:
             logger.exception(f"Error during agent run: {e}")
             # Permanent provider errors (bad model name, bad key, malformed request)
-            # will fail identically on retry — mark them terminal & non-retriable so
-            # the runner stops instead of burning the whole retry budget.
-            ep_status.status = "INVALID_CONFIG" if is_permanent_llm_error(e) else "FAILED"
+            # and infra-incompatibility (IncompatibleInfraError — e.g. a task that
+            # needs container:root on a non-root infra) will fail identically on
+            # retry — mark them terminal & non-retriable so the runner stops instead
+            # of burning the whole retry budget.
+            permanent = is_permanent_llm_error(e) or isinstance(e, IncompatibleInfraError)
+            ep_status.status = "INVALID_CONFIG" if permanent else "FAILED"
             ep_status.error_type = type(e).__name__
             ep_status.error_message = str(e)[:500]
             raise e
@@ -317,9 +320,13 @@ class Episode:
             # step/token/cost stats without loading any steps — which is what makes the
             # background bulk-loader unnecessary. Best-effort: never mask the real error,
             # and save_trajectory is a safe re-save (the id is already in _saved_ids).
-            if trajectory is not None and not trajectory.summary_stats:
+            if trajectory is not None and summary_proc is not None and not trajectory.summary_stats:
                 try:
-                    trajectory.summary_stats = _compute_summary_stats(trajectory)
+                    end = trajectory.end_time or time.time()
+                    trajectory.summary_stats = summary_proc.summary_stats(
+                        duration=end - (trajectory.start_time or end),
+                        final_reward=summary_proc.final_reward,
+                    )
                     self.storage.save_trajectory(trajectory)
                 except Exception:
                     logger.exception("Failed to persist summary_stats on terminal path")
@@ -344,57 +351,3 @@ class Episode:
                     logger.info(colored(f"Turn {turns} LLM Thinking Block: {block}", "cyan"))
         actions_summary = [a.name for a in agent_output.actions] if agent_output.actions else []
         logger.info(colored(f"Turn {turns} Agent output: actions={actions_summary}", "magenta"))
-
-
-def _compute_summary_stats(traj: Trajectory) -> dict:
-    n_env_steps = 0
-    n_agent_steps = 0
-    total_actions = 0
-    total_llm_calls = 0
-    prompt_tokens = 0
-    completion_tokens = 0
-    cached_tokens = 0
-    cache_creation_tokens = 0
-    cost = 0.0
-
-    for step in traj.steps:
-        if isinstance(step.output, EnvironmentOutput):
-            n_env_steps += 1
-        elif isinstance(step.output, AgentOutput):
-            n_agent_steps += 1
-            total_actions += len(step.output.actions)
-            total_llm_calls += len(step.output.llm_calls)
-            for llm_call in step.output.llm_calls:
-                if llm_call.usage:
-                    prompt_tokens += llm_call.usage.prompt_tokens
-                    completion_tokens += llm_call.usage.completion_tokens
-                    cached_tokens += llm_call.usage.cached_tokens
-                    cache_creation_tokens += llm_call.usage.cache_creation_tokens
-                    cost += llm_call.usage.cost
-
-    duration = None
-    if traj.start_time is not None and traj.end_time is not None:
-        duration = traj.end_time - traj.start_time
-
-    final_reward = 0.0
-    if traj.reward_info:
-        final_reward = traj.reward_info.get("reward", 0.0)
-    else:
-        for step in reversed(traj.steps):
-            if isinstance(step.output, EnvironmentOutput):
-                final_reward = step.output.reward
-                break
-
-    return {
-        "n_env_steps": n_env_steps,
-        "n_agent_steps": n_agent_steps,
-        "total_actions": total_actions,
-        "total_llm_calls": total_llm_calls,
-        "duration": duration,
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "cached_tokens": cached_tokens,
-        "cache_creation_tokens": cache_creation_tokens,
-        "cost": cost,
-        "final_reward": final_reward,
-    }

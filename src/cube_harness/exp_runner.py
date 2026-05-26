@@ -504,12 +504,15 @@ def _poll_ray(
             traj_id = ref_to_traj_id[task_ref]
             try:
                 traj: Trajectory = ray.get(task_ref, timeout=step_timeout_s + cancel_grace_s)
+                # traj carries summary_stats but no steps (streamed to disk on the worker).
+                _stats = traj.summary_stats or {}
+                _n_agent, _n_env = _stats.get("n_agent_steps", 0), _stats.get("n_env_steps", 0)
                 logger.info(
                     "Completed trajectory %s with %d steps (%d agent steps, %d environment steps)",
                     traj_id,
-                    len(traj.steps),
-                    traj.n_agent_steps,
-                    traj.n_env_steps,
+                    _n_agent + _n_env,
+                    _n_agent,
+                    _n_env,
                 )
                 results.trajectories[traj_id] = traj
             except Exception as e:

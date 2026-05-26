@@ -563,9 +563,10 @@ class EpisodeRecord(TypedBaseModel):
         action_schemas: list[dict] = trajectory.metadata.get("action_schemas", [])
         tool_names = _extract_tool_names(action_schemas)
 
-        last_env = trajectory.last_env_step()
-        score = last_env.reward
         stats = trajectory.summary_stats or {}
+        # Steps are streamed to disk and not retained in memory after a run, so derive
+        # everything from the summary_stats / reward_info the episode loop populated.
+        score = (trajectory.reward_info or {}).get("reward", stats.get("final_reward", 0.0))
 
         wall_time_s: float | None = None
         if trajectory.start_time is not None and trajectory.end_time is not None:
@@ -593,10 +594,10 @@ class EpisodeRecord(TypedBaseModel):
             tool_names=tool_names,
             is_correct=score > 0,
             score=score,
-            error=_extract_error_type(trajectory),
-            num_turns=len(trajectory.steps),
-            n_agent_steps=stats.get("n_agent_steps", trajectory.n_agent_steps),
-            n_env_steps=stats.get("n_env_steps", trajectory.n_env_steps),
+            error=stats.get("error_type"),
+            num_turns=stats.get("n_env_steps", 0) + stats.get("n_agent_steps", 0),
+            n_agent_steps=stats.get("n_agent_steps", 0),
+            n_env_steps=stats.get("n_env_steps", 0),
             wall_time_s=wall_time_s,
             usage=UsageSummary.from_summary_stats(stats),
             trajectory_id=trajectory.id,

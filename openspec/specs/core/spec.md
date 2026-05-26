@@ -37,17 +37,22 @@ A step is either the environment's output (obs/reward/done/info) or the agent's 
 ```python
 class Trajectory(TypedBaseModel):
     id: str                                # usually f"{task_id}_ep{episode_id}"
-    steps: list[TrajectoryStep] = []
+    steps: list[TrajectoryStep] = []       # lazy/on-disk view; EMPTY on a runner-produced traj
     metadata: dict = {}                    # task_id, agent_name, info dump
     start_time: float | None = None
     end_time: float | None = None
     reward_info: dict = {}                 # final reward + info dict
-    summary_stats: dict | None = None      # computed by _compute_summary_stats
+    summary_stats: dict | None = None      # streamed by SummaryProcessor (the aggregate source)
 
-    def last_env_step(self) -> EnvironmentOutput  # raises if none present
+    def last_env_step(self) -> EnvironmentOutput  # raises if none present (needs steps loaded)
     @property n_agent_steps: int
     @property n_env_steps: int
 ```
+
+A `Trajectory` returned by `Episode.run()` / the runners carries metadata + `summary_stats`
++ `reward_info` but **no steps** (they stream to disk during the run). Use `summary_stats` /
+`reward_info` for aggregates; call `FileStorage.load_trajectory(id)` to materialize step
+content (xray/investigator do this on demand).
 
 ### `ActionSpace`
 ```python

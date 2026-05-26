@@ -61,9 +61,12 @@ class SummaryProcessor:
         self._total_llm_calls = 0
         self._prompt_tokens = 0
         self._completion_tokens = 0
+        self._cached_tokens = 0
+        self._cache_creation_tokens = 0
         self._cost_usd = 0.0
         self._reward = 0.0
         self._done = False
+        self._error_type: str | None = None
 
     def _build_entry(self, turn: int, status: EpisodeStatus) -> StepSummary:
         return StepSummary(
@@ -87,6 +90,12 @@ class SummaryProcessor:
             f.write(entry.model_dump_json() + "\n")
 
     def on_step(self, step_num: int, step: TrajectoryStep) -> None:
+        # Capture the first step-level error so EpisodeRecord can report it without
+        # re-walking the (now un-retained) step list.
+        err = getattr(step.output, "error", None)
+        if err is not None and self._error_type is None:
+            self._error_type = err.error_type
+
         if isinstance(step.output, AgentOutput):
             self._n_agent_steps += 1
             self._total_actions += len(step.output.actions)
@@ -95,6 +104,8 @@ class SummaryProcessor:
                 if llm_call.usage:
                     self._prompt_tokens += llm_call.usage.prompt_tokens
                     self._completion_tokens += llm_call.usage.completion_tokens
+                    self._cached_tokens += llm_call.usage.cached_tokens
+                    self._cache_creation_tokens += llm_call.usage.cache_creation_tokens
                     self._cost_usd += llm_call.usage.cost
         elif isinstance(step.output, EnvironmentOutput):
             self._n_env_steps += 1
@@ -103,8 +114,34 @@ class SummaryProcessor:
 
         self._append(self._build_entry(step_num, EpisodeStatus.RUNNING))
 
+    @property
+    def has_error(self) -> bool:
+        return self._error_type is not None
+
+    @property
+    def final_reward(self) -> float:
+        """Reward of the most recent environment step (the trajectory's final reward)."""
+        return self._reward
+
+    def summary_stats(self, *, duration: float | None, final_reward: float) -> dict:
+        """Final per-episode stats, accumulated incrementally — the single source of
+        truth (replaces the old end-of-run walk over ``trajectory.steps``)."""
+        return {
+            "n_env_steps": self._n_env_steps,
+            "n_agent_steps": self._n_agent_steps,
+            "total_actions": self._total_actions,
+            "total_llm_calls": self._total_llm_calls,
+            "duration": duration,
+            "prompt_tokens": self._prompt_tokens,
+            "completion_tokens": self._completion_tokens,
+            "cached_tokens": self._cached_tokens,
+            "cache_creation_tokens": self._cache_creation_tokens,
+            "cost": self._cost_usd,
+            "final_reward": final_reward,
+            "error_type": self._error_type,
+        }
+
     def on_episode_complete(self, trajectory: Trajectory, storage: "FileStorage") -> None:
-        has_error = any(isinstance(s.output, AgentOutput) and s.output.error is not None for s in trajectory.steps)
-        status = EpisodeStatus.FAILED if has_error else EpisodeStatus.DONE
+        status = EpisodeStatus.FAILED if self.has_error else EpisodeStatus.DONE
         self._append(self._build_entry(-1, status))
         storage.update_experiment_summary(trajectory)

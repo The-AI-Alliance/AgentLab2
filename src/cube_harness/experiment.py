@@ -245,13 +245,16 @@ class Experiment(TypedBaseModel):
             logger.info("No trajectories to compute stats")
             return
 
-        total_steps = sum(len(trajectory.steps) for trajectory in results.trajectories.values())
+        # Trajectories returned by the runner carry summary_stats + reward_info but no
+        # steps (streamed to disk), so read counts/reward from those, not len(steps).
+        def _step_count(stats: dict | None) -> int:
+            stats = stats or {}
+            return stats.get("n_env_steps", 0) + stats.get("n_agent_steps", 0)
+
+        total_steps = sum(_step_count(t.summary_stats) for t in results.trajectories.values())
         avg_steps = total_steps / len(results.trajectories)
 
-        rewards = []
-        for traj in results.trajectories.values():
-            rewards.append(traj.last_env_step().reward)
-
+        rewards = [(t.reward_info or {}).get("reward", 0.0) for t in results.trajectories.values()]
         accuracy = sum(rewards) / len(rewards) if rewards else 0.0
 
         logger.info(f"Experiment '{self.name}' stats:")

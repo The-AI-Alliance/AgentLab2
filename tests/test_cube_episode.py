@@ -78,23 +78,51 @@ class TestCubeEpisode:
             trajectory = episode.run()
 
         assert trajectory.metadata["task_id"] == mock_cube_task_config.task_id
-        assert len(trajectory.steps) == 3
+        # Steps stream to disk; load the persisted trajectory to inspect step structure.
+        loaded = episode.storage.load_trajectory(trajectory.id)
+        assert len(loaded.steps) == 3
 
-        initial_env_step = trajectory.steps[0].output
+        initial_env_step = loaded.steps[0].output
         assert isinstance(initial_env_step, EnvironmentOutput)
         assert initial_env_step.done is False
 
-        agent_step = trajectory.steps[1].output
+        agent_step = loaded.steps[1].output
         assert isinstance(agent_step, AgentOutput)
         assert agent_step.actions[0].name == "final_step"
 
-        final_env_step = trajectory.last_env_step()
+        final_env_step = loaded.last_env_step()
         assert final_env_step.done is True
         assert final_env_step.reward == 1.0
 
         assert "profiling" in trajectory.reward_info
         trajectory.reward_info.pop("profiling")  # ignore profiling info for this test
         assert trajectory.reward_info == {"reward": 1.0, "done": True, "success": True}
+
+    def test_run_streams_steps_to_disk_and_returns_step_less(self, tmp_dir, mock_agent_config, mock_cube_task_config):
+        """Contract: the loop streams steps to disk; the returned Trajectory carries
+        metadata + summary_stats + reward_info but NO steps (loaded lazily from disk).
+        This is what keeps driver/worker RAM flat on image-heavy benchmarks."""
+        episode = Episode(
+            id=0,
+            output_dir=tmp_dir,
+            agent_config=mock_agent_config,
+            task_config=mock_cube_task_config,
+            exp_name="cube_test",
+            max_steps=5,
+            storage=None,
+            runtime_context=None,
+        )
+        trajectory = episode.run()
+
+        # Returned trajectory is step-less but fully summarised.
+        assert trajectory.steps == []
+        assert trajectory.summary_stats["n_env_steps"] >= 1
+        assert trajectory.reward_info["reward"] == 1.0
+
+        # Steps are fully persisted and reload from disk; summary survives the round-trip.
+        loaded = episode.storage.load_trajectory(trajectory.id)
+        assert len(loaded.steps) == 3
+        assert loaded.summary_stats == trajectory.summary_stats
 
     def test_failed_episode_persists_summary_stats(self, tmp_dir, mock_cube_task_config):
         """A FAILED episode must persist summary_stats to its metadata stub, so the XRay

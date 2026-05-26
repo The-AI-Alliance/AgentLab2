@@ -56,8 +56,9 @@ class TestEpisode:
 
         assert isinstance(trajectory, Trajectory)
         assert "task_id" in trajectory.metadata
-        # Should have initial env output + agent output + final env output
-        assert len(trajectory.steps) >= 2
+        # Steps stream to disk; the returned trajectory carries metadata + summary only.
+        loaded = mock_episode.storage.load_trajectory(trajectory.id)
+        assert len(loaded.steps) >= 2  # initial env output + agent output + final env output
 
     def test_episode_run_saves_trajectory(self, mock_episode, tmp_dir):
         """Test Episode run saves trajectory files."""
@@ -130,9 +131,8 @@ class TestEpisode:
 
         trajectory = episode.run()
 
-        # Should have stopped at max_steps
-        agent_steps = sum(1 for step in trajectory.steps if isinstance(step.output, AgentOutput))
-        assert agent_steps <= 3
+        # Should have stopped at max_steps (steps stream to disk; read the streamed count)
+        assert trajectory.summary_stats["n_agent_steps"] <= 3
 
     def test_episode_run_stops_on_done(self, tmp_dir, mock_agent_config, mock_cube_task_config):
         """Test Episode run stops when done=True."""
@@ -147,8 +147,7 @@ class TestEpisode:
         trajectory = episode.run()
 
         # Should stop before max_steps because agent returns final_step
-        last_env_step = trajectory.last_env_step()
-        assert last_env_step.done is True
+        assert trajectory.reward_info["done"] is True
 
     def test_storage_save_trajectory_creates_directory(self, mock_episode, tmp_dir):
         """Test save_trajectory creates episode directory."""

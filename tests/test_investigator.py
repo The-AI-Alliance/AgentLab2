@@ -1063,6 +1063,45 @@ def test_investigate_experiment_injects_full_context_markdown(tmp_path: Path) ->
     assert "cubes/foo/task.py:evaluate is the reward function" in user_prompt, "key-location pointer not injected"
 
 
+def test_context_map_built_once_under_parallelism(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """auto-fix: cold context cache + n_parallel>1 must build the (Opus) context
+    map exactly once, not once per worker.
+
+    Asserts the invariant, not the reproduction: with 4 episodes and n_parallel=4
+    over a cold session-keyed cache, the benchmark-context-agent
+    (`generate_context_file`) is invoked exactly once. Before the fix, all 4
+    parallel episode workers raced on the check-then-act and each built it.
+    """
+    import cube_harness.analyze.investigator.core as inv_core
+
+    # 4 real episodes (with steps) so every parallel worker reaches _ensure_context_file.
+    exp = tmp_path / "exp"
+    for i in range(4):
+        exp, _ = _make_episode_dir(tmp_path, f"task{i}_ep0")
+
+    # context_dir set => session-keyed cache (cold), independent of the per-episode
+    # seed _make_episode_dir writes into the experiment dir.
+    session = tmp_path / "session"
+    session.mkdir()
+
+    calls = {"n": 0}
+
+    async def _counting_generate(experiment_dir: Path, *, driver: Any, out_path: Path, **_: Any) -> Path:
+        calls["n"] += 1
+        out_path.write_text("# ctx\n\n```paths\n```\n")
+        return out_path
+
+    monkeypatch.setattr(inv_core, "generate_context_file", _counting_generate)
+
+    driver = _FakeDriver(output_text=f"```json\n{_VALID_FINDINGS_JSON}\n```")
+    investigate_experiment(
+        exp,
+        InvestigationConfig(driver=driver, n_parallel=4, context_dir=session, synthesis_model=""),
+    )
+
+    assert calls["n"] == 1, f"context map built {calls['n']}x under n_parallel=4; expected exactly once"
+
+
 # ---------------------------------------------------------------------------
 # CLI smoke (subcommand dispatch only — no real LLM calls)
 # ---------------------------------------------------------------------------
