@@ -300,3 +300,7 @@ cube-standard/
 # Personal/throwaway experiment recipes (use custom_* prefix)
 recipes/custom_*
 .venv-auto-cube/
+playwright_traces/
+
+# Any file which shouldn't be copied by the ray worker into their env, but is local-enough not to belong to the shared gitignore.
+.rayignore
