@@ -559,7 +559,7 @@ class EpisodeRecord(TypedBaseModel):
         task_config: Any | None = None,
     ) -> "EpisodeRecord":
         """Assemble an EpisodeRecord from a completed trajectory."""
-        sample_id = trajectory.metadata.get("task_id", "")
+        sample_id = str(trajectory.metadata.get("task_id", ""))
         action_schemas: list[dict] = trajectory.metadata.get("action_schemas", [])
         tool_names = _extract_tool_names(action_schemas)
 
