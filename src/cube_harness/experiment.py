@@ -68,6 +68,12 @@ class Experiment(TypedBaseModel):
     max_steps: int = MAX_STEPS
     max_retries: int = 3
     git_cwd: str | None = None
+    run_id: str = Field(default_factory=lambda: uuid4().hex)
+    """Stable per-run id, exported as ``CUBE_RUN_ID`` so the infra tags every cloud
+    resource this run launches with it. Lets ``infra.cleanup(run_id)`` (on exit) and the
+    startup GC reap the *whole* run when its client dies abnormally (Ray crash / sleep),
+    identity-scoped — never another run's resources. Serialized, so it survives resume.
+    See cube-standard #206."""
 
     @model_validator(mode="after")
     def _ensure_unique_output_dir(self) -> "Experiment":

@@ -79,11 +79,50 @@ def _trajectory_id(episode: Episode) -> str:
     return trajectory_log_id(episode.config.task_config.task_id, episode.config.id)
 
 
+# auto-fix(206)↓ a RUNNING experiment_status.json whose heartbeat is this stale = a dead
+# client (the 30s heartbeat couldn't have lapsed otherwise). Generous vs the interval so
+# a paused/slow driver isn't reaped out from under itself.
+_DEAD_RUN_STALE_AFTER_S: float = 5 * 60
+
+
+def _reap_dead_runs(infra: InfraConfig, exp_dir: Path, current_run_id: str = "") -> None:
+    """Startup GC (identity + liveness): reap cloud resources of *prior* runs that died
+    abnormally (Ray OOM-crash / laptop sleep), so they don't linger to the server-side TTL.
+
+    A sibling run is dead iff its ``experiment_status.json`` is still ``RUNNING`` with a
+    heartbeat older than ``_DEAD_RUN_STALE_AFTER_S`` — a still-heartbeating run is never
+    touched (no time-on-task heuristic; cf. the reverted #445). For each dead run with a
+    recorded ``run_id`` we call ``infra.cleanup(run_id)``, which on this infra reaps only
+    that run's resources — never a live run's, never another session's. Runs with no local
+    status record are left to the TTL backstop (could be another machine's live run).
+    """
+    now = time.time()
+    for status_path in exp_dir.parent.glob(f"*/{EXPERIMENT_STATUS_FILENAME}"):
+        st = ExperimentStatus.read(status_path)
+        if st is None or not st.run_id or st.run_id == current_run_id:
+            continue
+        if st.status == "RUNNING" and (now - st.last_heartbeat_at) > _DEAD_RUN_STALE_AFTER_S:
+            try:
+                infra.cleanup(st.run_id)
+                logger.info(
+                    "startup GC: reaped dead run %s (%s; heartbeat %.0fs stale)",
+                    st.run_id,
+                    status_path.parent.name,
+                    now - st.last_heartbeat_at,
+                )
+            except Exception:
+                logger.warning("startup GC: cleanup(%s) failed", st.run_id, exc_info=True)
+
+
+# /auto-fix(206)
+
+
 @contextmanager
 def _experiment_lifecycle(
     exp_dir: Path,
     mode: Literal["ray", "sequential"],
     infra: InfraConfig | None = None,
+    run_id: str = "",
 ) -> Iterator[tuple[ExperimentStatus, Path]]:
     """Manage `experiment_status.json` from RUNNING through terminal write.
 
@@ -117,12 +156,24 @@ def _experiment_lifecycle(
         started_at=now,
         last_heartbeat_at=now,
         total_episodes=0,
+        run_id=run_id,
     )
     exp_status_path = exp_dir / EXPERIMENT_STATUS_FILENAME
     try:
         exp_status.write(exp_status_path)
     except Exception:
         logger.warning("Failed to write initial experiment status", exc_info=True)
+
+    # auto-fix(206)↓ identity-based reaping. Export CUBE_RUN_ID so the infra tags every
+    # cloud resource this run launches with it (→ cleanup(run_id) reaps the whole run),
+    # then GC any *prior* run whose heartbeat proves it died (Ray crash / sleep) before we
+    # add cluster load. See cube-standard#206 and resource/spec.md.
+    prev_run_id_env = os.environ.get("CUBE_RUN_ID")
+    if run_id:
+        os.environ["CUBE_RUN_ID"] = run_id
+    if infra is not None:
+        _reap_dead_runs(infra, exp_dir, current_run_id=run_id)
+    # /auto-fix(206)
 
     prev_sigterm = None
     if infra is not None:
@@ -151,8 +202,13 @@ def _experiment_lifecycle(
             except ValueError:
                 pass
 
+        if prev_run_id_env is None:
+            os.environ.pop("CUBE_RUN_ID", None)
+        else:
+            os.environ["CUBE_RUN_ID"] = prev_run_id_env
+
         if infra is not None:
-            _run_cleanup_with_grace(infra, timeout_s=_CLEANUP_GRACE_TIMEOUT_S)
+            _run_cleanup_with_grace(infra, timeout_s=_CLEANUP_GRACE_TIMEOUT_S, run_id=run_id)
 
 
 def _raise_systemexit_on_sigterm(signum: int, frame: object) -> None:
@@ -168,7 +224,9 @@ def _raise_systemexit_on_sigterm(signum: int, frame: object) -> None:
     raise SystemExit(128 + signum)
 
 
-def _run_cleanup_with_grace(infra: InfraConfig, timeout_s: float) -> Literal["OK", "ERROR", "TIMEOUT", "FORCED"]:
+def _run_cleanup_with_grace(
+    infra: InfraConfig, timeout_s: float, run_id: str = ""
+) -> Literal["OK", "ERROR", "TIMEOUT", "FORCED"]:
     """Run ``infra.cleanup_stale()`` with a timeout and Ctrl+C escalation.
 
     Cleanup runs in a daemon thread; the main thread polls for completion and
@@ -188,6 +246,12 @@ def _run_cleanup_with_grace(infra: InfraConfig, timeout_s: float) -> Literal["OK
 
     def _worker() -> None:
         try:
+            # auto-fix(206): reap THIS run's resources by id first — identity-scoped,
+            # regardless of TTL — so a graceful/SIGTERM/Ctrl+C exit leaves nothing behind
+            # (the exit-path companion to the startup GC). Then the TTL + orphan
+            # port-forward sweep as defense-in-depth across runs.
+            if run_id:
+                infra.cleanup(run_id)
             result["deleted"] = infra.cleanup_stale()
         except Exception as exc:
             result["error"] = exc
@@ -302,7 +366,10 @@ def run_with_ray(
     try:
         with (
             tracer.benchmark(exp.name),
-            _experiment_lifecycle(exp.output_dir, mode="ray", infra=exp.infra) as (exp_status, exp_status_path),
+            _experiment_lifecycle(exp.output_dir, mode="ray", infra=exp.infra, run_id=exp.run_id) as (
+                exp_status,
+                exp_status_path,
+            ),
         ):
             return _run_with_retries(
                 exp,
@@ -413,12 +480,15 @@ def _run_with_ray_impl(
 
     if not ray.is_initialized():
         _warn_if_ephemeral_venv()
+        # auto-fix(206): propagate CUBE_RUN_ID to workers so the infra (which launches
+        # each task's resources inside a Ray worker) tags them with the run's id.
+        env_vars = {**get_trace_env_vars(), "CUBE_RUN_ID": exp.run_id}
         ray.init(
             num_cpus=n_cpus,
             dashboard_host="0.0.0.0",
             include_dashboard=True,
             log_to_driver=True,
-            runtime_env={"env_vars": get_trace_env_vars()},
+            runtime_env={"env_vars": env_vars},
         )  # TODO: Ray breaks signal handling, we cannot react to Ctrl+C here, still cannot find a workaround
 
     with exp.benchmark_config.make(exp.infra) as benchmark:
@@ -685,7 +755,10 @@ def run_sequentially(
     try:
         with (
             tracer.benchmark(exp.name),
-            _experiment_lifecycle(exp.output_dir, mode="sequential", infra=exp.infra) as (exp_status, exp_status_path),
+            _experiment_lifecycle(exp.output_dir, mode="sequential", infra=exp.infra, run_id=exp.run_id) as (
+                exp_status,
+                exp_status_path,
+            ),
         ):
             return _run_sequentially_with_retries(
                 exp,
@@ -838,4 +911,26 @@ def _run_sequentially_impl(
 #   tested:    tests/test_experiment.py — QUEUED + all-slots-busy (idle_capacity_since None)
 #              not cancelled even at 2h; QUEUED + sustained idle capacity cancelled;
 #              momentary idle dip not cancelled.
+#   hash=PENDING: stamped by scripts/auto_fix_lint.py (Tier-1) on first run.
+#
+# auto-fix-note(206) {class=L1 anchor=issue#206 hash=PENDING ctx=exp-runner/experiment-scoped-reaping/cube-harness@dev}
+#   symptoms:  on abnormal client exit (Ray OOM-crash / laptop sleep / SIGKILL) the
+#              in-flight toolkit (EAI) jobs orphaned ~24h to --max-run-time: handle.close()
+#              never ran and exit cleanup was TTL-only (cleanup_stale()).
+#   invariant: a run's cloud resources are reaped when the run ends, including an abnormal
+#              end — identity + liveness based (whose run owns it × is its client alive),
+#              never time-on-task (the reverted #445/#458 lesson). A still-heartbeating run
+#              is never touched; a run with no local status record is left to the TTL
+#              backstop (cross-machine/cross-session safe).
+#   why:       export a stable Experiment.run_id as CUBE_RUN_ID (driver env + Ray worker
+#              runtime_env) → the toolkit tags every job cube_run_id=<run_id> (paired
+#              cube-standard#209) → infra.cleanup(run_id) reaps the whole run. Exit reaper
+#              calls cleanup(run_id) (graceful/SIGTERM/Ctrl+C); startup GC _reap_dead_runs
+#              reaps prior runs whose experiment_status.json is RUNNING with a heartbeat
+#              older than _DEAD_RUN_STALE_AFTER_S (hard-kill/sleep, where the exit reaper
+#              can't run).
+#   tested:    tests/test_reap_dead_runs.py (reaps only the stale-RUNNING sibling by id;
+#              leaves live/terminal/no-id/self; cleanup error swallowed);
+#              scripts/smoke/experiment_reap_on_death.py (end-to-end on toolkit yul101:
+#              dead-run job reaped, concurrent live-run job untouched).
 #   hash=PENDING: stamped by scripts/auto_fix_lint.py (Tier-1) on first run.

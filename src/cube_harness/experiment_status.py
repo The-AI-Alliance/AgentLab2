@@ -61,6 +61,9 @@ class ExperimentStatus:
     stale: int = 0
     ray_dashboard_url: str | None = None
     ended_at: float | None = None
+    run_id: str = ""
+    """The experiment's CUBE_RUN_ID. Lets a later run's startup GC map this (possibly
+    dead) run's heartbeat to the cloud resources it owns and reap them. See #206."""
 
     def to_json(self) -> str:
         return json.dumps(asdict(self), indent=2)
