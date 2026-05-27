@@ -160,7 +160,7 @@ class FileStorage:
         (ep_dir / STEPS_DIR).mkdir(exist_ok=True)
         self._saved_ids.add(trajectory.id)
 
-        trajectory_data = trajectory.model_dump(exclude={"steps"})
+        trajectory_data = trajectory.model_dump(exclude={"steps"}, mode="json")
         with open(metadata_path, "w") as f:
             f.write(json.dumps(trajectory_data, indent=2))
 
