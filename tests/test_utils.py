@@ -1,6 +1,47 @@
 """Tests for cube_harness.utils module."""
 
-from cube_harness.utils import prune_html
+from litellm import Message
+from litellm.types.utils import ChatCompletionMessageToolCall, Function
+
+from cube_harness.utils import parse_actions, prune_html
+
+
+def _tool_call(call_id: str, name: str, arguments: str) -> ChatCompletionMessageToolCall:
+    return ChatCompletionMessageToolCall(id=call_id, type="function", function=Function(name=name, arguments=arguments))
+
+
+class TestParseActions:
+    """Tests for parse_actions — must never raise on malformed model output."""
+
+    def test_valid_tool_call(self) -> None:
+        msg = Message(role="assistant", content=None, tool_calls=[_tool_call("c1", "click", '{"bid": "42"}')])
+        actions, malformed = parse_actions(msg)
+        assert malformed == []
+        assert len(actions) == 1
+        assert actions[0].name == "click"
+        assert actions[0].arguments == {"bid": "42"}
+
+    def test_malformed_json_is_skipped_not_raised(self) -> None:
+        msg = Message(role="assistant", content=None, tool_calls=[_tool_call("c1", "click", "{bad json")])
+        actions, malformed = parse_actions(msg)
+        assert actions == []
+        assert [tc.id for tc in malformed] == ["c1"]
+
+    def test_mixed_valid_and_malformed(self) -> None:
+        msg = Message(
+            role="assistant",
+            content=None,
+            tool_calls=[_tool_call("c1", "click", '{"bid": "1"}'), _tool_call("c2", "type", "{oops")],
+        )
+        actions, malformed = parse_actions(msg)
+        assert [a.id for a in actions] == ["c1"]
+        assert [tc.id for tc in malformed] == ["c2"]
+
+    def test_no_tool_calls(self) -> None:
+        msg = Message(role="assistant", content="just text")
+        actions, malformed = parse_actions(msg)
+        assert actions == []
+        assert malformed == []
 
 
 class TestPruneHtml:

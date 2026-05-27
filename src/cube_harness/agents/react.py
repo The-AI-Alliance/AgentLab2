@@ -16,6 +16,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# How many times to re-prompt the model within a single step when every tool
+# call it emitted had malformed JSON arguments. After this many retries the step
+# returns empty actions and the episode ends cleanly (never an infinite loop).
+MAX_PARSE_RETRIES = 2
+
 
 class ReactAgentConfig(AgentConfig):
     llm_config: LLMConfig
@@ -87,6 +92,36 @@ class ReactAgent(Agent):
             return AgentOutput(actions=[Action(id="stop", name=STOP_ACTION.name, arguments={})])
         self.history += obs.to_llm_messages()
         self.maybe_compact_history()
+        self._actions_cnt += 1
+
+        # A model can emit a tool call whose arguments are not valid JSON. Rather
+        # than crash the episode, reply with a corrective `role="tool"` message —
+        # this keeps the tool_call/tool_result pairing valid (strict providers
+        # reject an orphaned tool_call on the next turn) and gives the model the
+        # feedback it needs to self-correct. Bounded by MAX_PARSE_RETRIES so a
+        # persistently-broken model degrades to a clean episode end (empty
+        # actions) instead of looping forever.
+        actions: list[Action] = []
+        for _ in range(MAX_PARSE_RETRIES + 1):
+            llm_output = self._call_llm()
+            actions, malformed = parse_actions(llm_output)
+            for tc in malformed:
+                self.history.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": "Your previous tool call arguments were not valid JSON. "
+                        "Please retry the call with a valid JSON object.",
+                    }
+                )
+            if actions or not malformed:
+                break
+            logger.warning("All tool calls had malformed JSON arguments; re-prompting the model.")
+        return AgentOutput(actions=actions)
+
+    def _call_llm(self) -> Message:
+        """Render the current history, call the LLM once, append the assistant
+        message to history, and return it."""
         messages = self.choose_steps_to_render(self.history)
         prompt = Prompt(messages=messages, tools=self.tools)
         prompt_tokens = self.token_counter(messages=messages)
@@ -105,8 +140,7 @@ class ReactAgent(Agent):
         )
         llm_output = call.output
         self.history.append(llm_output)
-        self._actions_cnt += 1
-        return AgentOutput(actions=parse_actions(llm_output))
+        return llm_output
 
     def choose_steps_to_render(self, history: list[dict | Message]) -> list[dict | Message]:
         """Select which parts of history to include in the prompt based on length."""

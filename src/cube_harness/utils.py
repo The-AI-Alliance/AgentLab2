@@ -1,9 +1,13 @@
 import json
+import logging
 import re
 
 from bs4 import BeautifulSoup
 from cube.core import Action
 from litellm import Message
+from litellm.types.utils import ChatCompletionMessageToolCall
+
+logger = logging.getLogger(__name__)
 
 
 def prune_html(html):
@@ -31,8 +35,16 @@ def prune_html(html):
     return html
 
 
-def parse_actions(llm_output: Message) -> list[Action]:
-    actions = []
+def parse_actions(llm_output: Message) -> tuple[list[Action], list[ChatCompletionMessageToolCall]]:
+    """Decode an assistant message's tool calls into `Action`s.
+
+    Tool calls whose `arguments` are not valid JSON are skipped and returned in a
+    second list so the caller can emit a corrective `role="tool"` reply keyed to
+    the call id — keeping the tool_call/tool_result pairing valid and letting the
+    model retry. This decoder never raises on malformed model output.
+    """
+    actions: list[Action] = []
+    malformed: list[ChatCompletionMessageToolCall] = []
     if hasattr(llm_output, "tool_calls") and llm_output.tool_calls:
         for tc in llm_output.tool_calls:
             arguments = tc.function.arguments
@@ -40,8 +52,10 @@ def parse_actions(llm_output: Message) -> list[Action]:
                 try:
                     arguments = json.loads(arguments)
                 except json.JSONDecodeError:
-                    raise ValueError(f"Invalid JSON arguments in tool call: {arguments}")
+                    logger.warning("Malformed tool call arguments for %s: %s", tc.function.name, arguments[:200])
+                    malformed.append(tc)
+                    continue
             if tc.function.name is None:
                 raise ValueError("Tool call must have a function name.")
             actions.append(Action(id=tc.id, name=tc.function.name, arguments=arguments))
-    return actions
+    return actions, malformed

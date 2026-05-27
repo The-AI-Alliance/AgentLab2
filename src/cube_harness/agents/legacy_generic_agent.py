@@ -1226,8 +1226,8 @@ class GenericAgent(Agent):
                 if "thoughts" not in ans_dict and text_response.strip():
                     ans_dict["thoughts"] = text_response.strip()
 
-                # Parse actions from tool calls
-                actions = parse_actions(llm_response.output)
+                # Parse actions from tool calls (malformed calls are skipped)
+                actions, _ = parse_actions(llm_response.output)
                 if actions:
                     # Return first action (multiaction not supported in legacy agent)
                     ans_dict["actions"] = actions
