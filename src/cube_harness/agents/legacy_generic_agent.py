@@ -1224,7 +1224,7 @@ class GenericAgent(Agent):
                     ans_dict["thoughts"] = text_response.strip()
 
                 # Parse actions from tool calls
-                actions = parse_actions(llm_response.message)
+                actions, _ = parse_actions(llm_response.message)
                 if actions:
                     # Return first action (multiaction not supported in legacy agent)
                     ans_dict["actions"] = actions

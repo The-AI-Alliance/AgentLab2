@@ -99,7 +99,8 @@ class ReactAgent(Agent):
         self.history.append(llm_output)
         self._actions_cnt += 1
         llm_call = LLMCall(llm_config=self.config.llm_config, prompt=prompt, output=llm_output, usage=usage)
-        return AgentOutput(actions=parse_actions(llm_output), llm_calls=[llm_call])
+        actions, decode_error = parse_actions(llm_output)
+        return AgentOutput(actions=actions, llm_calls=[llm_call], error=decode_error)
 
     def choose_steps_to_render(self, history: list[dict | Message]) -> list[dict | Message]:
         """Select which parts of history to include in the prompt based on length."""
