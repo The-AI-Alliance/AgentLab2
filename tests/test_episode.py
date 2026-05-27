@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 import pytest
-from cube.core import Action, EnvironmentOutput, Observation
+from cube.core import Action, EnvironmentOutput, Observation, TaskResult
 from cube.task import TaskConfig, TaskMetadata
 
 from cube_harness.agent import AgentConfig
@@ -313,7 +313,7 @@ class TestEpisode:
         """Test Episode captures environment errors correctly in trajectory."""
 
         class ErrorEvalTask(MockCubeTask):
-            def evaluate(self, obs=None):
+            def evaluate(self, obs: Observation | None = None) -> TaskResult:
                 _ = obs
                 raise ValueError("Environment validation failed")
 

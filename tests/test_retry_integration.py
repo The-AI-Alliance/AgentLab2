@@ -27,7 +27,7 @@ import ray
 from cube.benchmark import Benchmark as CubeBenchmark
 from cube.benchmark import BenchmarkConfig as CubeBenchmarkConfig
 from cube.benchmark import BenchmarkMetadata
-from cube.core import Action, Observation
+from cube.core import Action, Observation, TaskResult
 from cube.task import Task as CubeTask
 from cube.task import TaskConfig as CubeTaskConfig
 from cube.task import TaskMetadata
@@ -64,8 +64,8 @@ class DebugCubeTask(CubeTask):
     def reset(self) -> tuple[Observation, dict]:
         return Observation.from_text(f"task_id={self.metadata.id}"), {"task_id": self.metadata.id}
 
-    def evaluate(self, obs: Observation | None = None) -> tuple[float, dict]:
-        return 1.0, {"success": True}
+    def evaluate(self, obs: Observation | None = None) -> TaskResult:
+        return TaskResult(reward=1.0, checks=[], info={"success": True})
 
 
 class DebugCubeTaskConfig(CubeTaskConfig):

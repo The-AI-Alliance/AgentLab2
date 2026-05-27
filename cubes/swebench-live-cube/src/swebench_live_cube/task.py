@@ -13,7 +13,7 @@ import re
 from typing import Any
 
 from cube.container import relocate_if_readonly
-from cube.core import ActionSchema, Observation
+from cube.core import ActionSchema, Observation, TaskResult
 from cube.task import STOP_ACTION, RuntimeContext, Task, TaskConfig, TaskExecutionInfo, TaskMetadata
 
 from cube.tools.terminal import ContainerTerminalTool, TerminalToolConfig
@@ -210,7 +210,7 @@ class SWEBenchLiveTask(Task[SWEBenchLiveTaskMetadata, ContainerTerminalTool]):
             "repo": self.metadata.repo,
         }
 
-    def evaluate(self, obs: Observation | None = None) -> tuple[float, dict[str, Any]]:
+    def evaluate(self, obs: Observation | None = None) -> TaskResult:
 
         fail_to_pass = self._exec.fail_to_pass
         pass_to_pass = self._exec.pass_to_pass
@@ -251,18 +251,22 @@ class SWEBenchLiveTask(Task[SWEBenchLiveTaskMetadata, ContainerTerminalTool]):
         resolved = f2p_passed > 0 and p2p_failed == 0
         reward = 1.0 if resolved else 0.0
 
-        return reward, {
-            "done": True,
-            "resolved": resolved,
-            "fail_to_pass_passed": f2p_passed,
-            "fail_to_pass_total": len(fail_to_pass),
-            "pass_to_pass_failed": p2p_failed,
-            "pass_to_pass_total": len(pass_to_pass),
-            "pre_existing_p2p_failures": len(pre_existing_p2p),
-            "test_output": test_output
-            if len(test_output) <= 30000
-            else test_output[:5000] + "\n...[truncated]...\n" + test_output[-25000:],
-        }
+        return TaskResult(
+            reward=reward,
+            checks=[],
+            info={
+                "done": True,
+                "resolved": resolved,
+                "fail_to_pass_passed": f2p_passed,
+                "fail_to_pass_total": len(fail_to_pass),
+                "pass_to_pass_failed": p2p_failed,
+                "pass_to_pass_total": len(pass_to_pass),
+                "pre_existing_p2p_failures": len(pre_existing_p2p),
+                "test_output": test_output
+                if len(test_output) <= 30000
+                else test_output[:5000] + "\n...[truncated]...\n" + test_output[-25000:],
+            },
+        )
 
     # ── Private helpers ────────────────────────────────────────────
 

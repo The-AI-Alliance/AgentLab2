@@ -6,7 +6,7 @@ from typing import Any
 import litellm
 
 from cube.benchmark import RuntimeContext
-from cube.core import Observation
+from cube.core import Observation, TaskResult
 from cube.task import Task, TaskConfig, TaskExecutionInfo, TaskMetadata
 from cube.tool import Toolbox, ToolboxConfig
 
@@ -109,10 +109,12 @@ class BrowseCompTask(Task[BrowseCompTaskMetadata]):
         assert isinstance(tool, SubmitAnswerTool)
         return tool
 
-    def evaluate(self, obs: Observation | None = None) -> tuple[float, dict[str, Any]]:
+    def evaluate(self, obs: Observation | None = None) -> TaskResult:
         submitted = self._submit_tool().last_answer
         if submitted is None:
-            return 0.0, {"correct": False, "submitted": None, "reason": "No answer submitted"}
+            return TaskResult(
+                reward=0.0, checks=[], info={"correct": False, "submitted": None, "reason": "No answer submitted"}
+            )
 
         prompt = _GRADER_TEMPLATE.format(
             question=self._exec.problem,
@@ -124,15 +126,21 @@ class BrowseCompTask(Task[BrowseCompTaskMetadata]):
         for _ in range(self.grader_retries):
             try:
                 is_correct, grader_response = self._call_grader(prompt, self.scorer_model)
-                return (1.0 if is_correct else 0.0), {
-                    "correct": is_correct,
-                    "submitted": submitted,
-                    "grader_response": grader_response,
-                }
+                return TaskResult(
+                    reward=(1.0 if is_correct else 0.0),
+                    checks=[],
+                    info={
+                        "correct": is_correct,
+                        "submitted": submitted,
+                        "grader_response": grader_response,
+                    },
+                )
             except Exception as e:
                 last_error = e
 
-        return 0.0, {"correct": False, "submitted": submitted, "grader_error": str(last_error)}
+        return TaskResult(
+            reward=0.0, checks=[], info={"correct": False, "submitted": submitted, "grader_error": str(last_error)}
+        )
 
     def finished(self, obs: Observation | None = None) -> bool:
         return self._submit_tool().last_answer is not None

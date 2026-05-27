@@ -12,7 +12,7 @@ from cube.benchmark import (  # noqa: F401 — needed for Pydantic to resolve Ta
 from cube.benchmark import (  # noqa: F401
     BenchmarkMetadata,
 )
-from cube.core import Action, ActionSchema, Content, EnvironmentOutput, Observation
+from cube.core import Action, ActionSchema, Content, EnvironmentOutput, Observation, TaskResult
 from cube.task import Task as CubeTask
 from cube.task import TaskConfig as CubeTaskConfig
 from cube.task import TaskMetadata
@@ -247,9 +247,9 @@ class MockCubeTask(CubeTask):
     def reset(self) -> tuple[Observation, dict]:
         return Observation.from_text("Cube task goal"), {}
 
-    def evaluate(self, obs: Observation | None = None) -> tuple[float, dict]:
+    def evaluate(self, obs: Observation | None = None) -> TaskResult:
         _ = obs
-        return 1.0, {"success": True}
+        return TaskResult(reward=1.0, checks=[], info={"success": True})
 
 
 class MockCubeTaskConfig(CubeTaskConfig):

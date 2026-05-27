@@ -2,7 +2,7 @@ import logging
 from typing import Any, overload
 
 from cube.benchmark import RuntimeContext
-from cube.core import Observation
+from cube.core import Observation, TaskResult
 from cube.task import Task, TaskConfig, TaskMetadata
 from cube.tools.browser import BrowserTool
 from pydantic import PrivateAttr
@@ -87,18 +87,18 @@ class WebArenaVerifiedTask(Task):
         }
         return obs, info
 
-    def evaluate(self, obs: Observation | None = None) -> tuple[float, dict[str, Any]]:
+    def evaluate(self, obs: Observation | None = None) -> TaskResult:
         """Evaluate the agent's submitted response against the WebArena verified evaluators.
 
         Closes the browser context to flush the HAR file to disk, reads the network trace,
         then calls the WebArenaVerified API to score the response. Returns 0.0 immediately
         if no response was submitted.
 
-        Returns the score and a dict with eval_status and per-evaluator results.
+        Returns a TaskResult with the score and eval_status/per-evaluator results in info.
         """
         submitted = self._submit_tool.get_submitted_response()
         if submitted is None:
-            return 0.0, {"eval_status": EvalStatus.FAILURE, "evaluators_results": []}
+            return TaskResult(reward=0.0, checks=[], info={"eval_status": EvalStatus.FAILURE, "evaluators_results": []})
         if not self._playwright_closed:
             self._browser_tool.close()
             self._playwright_closed = True
@@ -109,10 +109,14 @@ class WebArenaVerifiedTask(Task):
             agent_response=submitted.model_dump(),
             network_trace=network_trace,
         )
-        return result.score, {
-            "eval_status": result.status,
-            "evaluators_results": [r.model_dump() for r in result.evaluators_results],
-        }
+        return TaskResult(
+            reward=result.score,
+            checks=[],
+            info={
+                "eval_status": result.status,
+                "evaluators_results": [r.model_dump() for r in result.evaluators_results],
+            },
+        )
 
     def finished(self, obs: Observation | None = None) -> bool:
         """Return True once the agent has submitted a response via the SubmitResponseTool."""

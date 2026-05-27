@@ -9,7 +9,7 @@ import shlex
 from typing import Any
 
 from cube.container import relocate_if_readonly
-from cube.core import ActionSchema, Observation
+from cube.core import ActionSchema, Observation, TaskResult
 from cube.task import STOP_ACTION, RuntimeContext, Task, TaskConfig, TaskExecutionInfo, TaskMetadata
 
 from cube.tools.terminal import ContainerTerminalTool, TerminalToolConfig
@@ -162,7 +162,7 @@ class SWEBenchVerifiedTask(Task[SWEBenchVerifiedTaskMetadata, ContainerTerminalT
             "difficulty": self.metadata.difficulty,
         }
 
-    def evaluate(self, obs: Observation | None = None) -> tuple[float, dict[str, Any]]:
+    def evaluate(self, obs: Observation | None = None) -> TaskResult:
 
         # Apply test patch
         self._apply_patch(self._exec.test_patch)
@@ -187,14 +187,18 @@ class SWEBenchVerifiedTask(Task[SWEBenchVerifiedTaskMetadata, ContainerTerminalT
         resolved = f2p_passed and p2p_passed
         reward = 1.0 if resolved else 0.0
 
-        return reward, {
-            "done": True,
-            "resolved": resolved,
-            "fail_to_pass_passed": f2p_passed,
-            "pass_to_pass_passed": p2p_passed,
-            "fail_to_pass_output": f2p_output,
-            "pass_to_pass_output": p2p_output,
-        }
+        return TaskResult(
+            reward=reward,
+            checks=[],
+            info={
+                "done": True,
+                "resolved": resolved,
+                "fail_to_pass_passed": f2p_passed,
+                "pass_to_pass_passed": p2p_passed,
+                "fail_to_pass_output": f2p_output,
+                "pass_to_pass_output": p2p_output,
+            },
+        )
 
     # ── Private helpers ────────────────────────────────────────────
 

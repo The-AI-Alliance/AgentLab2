@@ -7,7 +7,7 @@ from typing import Any, List, Literal, override
 import browsergym.workarena
 from browsergym.workarena.tasks.base import AbstractServiceNowTask
 from cube.benchmark import RuntimeContext
-from cube.core import Action, EnvironmentOutput, Observation
+from cube.core import Action, EnvironmentOutput, Observation, TaskResult
 from cube.task import Task, TaskConfig, TaskMetadata
 from cube.tool import Toolbox
 from cube.tools.browser import BrowserTool
@@ -156,10 +156,10 @@ class WorkArenaTask(Task):
         self._validate_cache = None
         return super().step(action)
 
-    def evaluate(self, obs: Observation | None = None) -> tuple[float, dict[str, Any]]:
+    def evaluate(self, obs: Observation | None = None) -> TaskResult:
         """Score the current task state via WorkArena's validate()."""
         reward, done, _user_message, task_info = self._validate()
-        return reward, {"done": done, **task_info}
+        return TaskResult(reward=reward, checks=[], info={"done": done, **task_info})
 
     def finished(self, obs: Observation | None = None) -> bool:
         """Check if the task is done via WorkArena's validate()."""

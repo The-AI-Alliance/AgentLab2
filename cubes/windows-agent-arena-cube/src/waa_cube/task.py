@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 import requests
 from cube.benchmark import RuntimeContext  # noqa: F401 — triggers WAATask.model_rebuild()
-from cube.core import Observation
+from cube.core import Observation, TaskResult
 from cube.resource import InfraConfig, ResourceHandle
 from cube.task import Task, TaskExecutionInfo
 from cube_computer_tool.axtree import linearize_accessibility_tree, tag_screenshot
@@ -495,8 +495,8 @@ class WAATask(Task):
         }
         return obs, info
 
-    def evaluate(self, obs: Observation) -> tuple[float, dict]:
-        """Call the WAA task evaluator and return (reward, info).
+    def evaluate(self, obs: Observation) -> TaskResult:
+        """Call the WAA task evaluator and return a TaskResult.
 
         reward ∈ [0.0, 1.0]:  1.0 = task fully completed.
         """
@@ -504,18 +504,22 @@ class WAATask(Task):
 
         if not evaluator_cfg:
             logger.warning("Task %s: no evaluator configured, returning 0.0", self.metadata.id)
-            return 0.0, {"error": "no_evaluator"}
+            return TaskResult(reward=0.0, checks=[], info={"error": "no_evaluator"})
 
         eval_func = evaluator_cfg.get("func", "unknown")
         logger.debug("Evaluating WAA task %s with evaluator: %s", self.metadata.id, eval_func)
 
         reward, eval_info = self._evaluate_task()
         logger.info("WAA task %s evaluation: reward=%f, evaluator=%s", self.metadata.id, reward, eval_func)
-        return reward, {
-            "evaluator": eval_func,
-            "expected": evaluator_cfg.get("expected", {}),
-            **eval_info,
-        }
+        return TaskResult(
+            reward=reward,
+            checks=[],
+            info={
+                "evaluator": eval_func,
+                "expected": evaluator_cfg.get("expected", {}),
+                **eval_info,
+            },
+        )
 
     def finished(self, obs: Observation) -> bool:
         """Return True if the task has reached a terminal state."""

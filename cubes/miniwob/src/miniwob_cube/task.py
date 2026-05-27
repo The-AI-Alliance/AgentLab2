@@ -2,7 +2,7 @@ import logging
 from typing import Any
 
 from cube.benchmark import RuntimeContext
-from cube.core import Content, Observation
+from cube.core import Content, Observation, TaskResult
 from cube.task import Task, TaskConfig, TaskMetadata  # noqa: F401 — TaskMetadata kept for typing
 from cube.tools.browser import BrowserTool
 from PIL import Image
@@ -41,7 +41,7 @@ class MiniWobTask(Task):
         obs = Observation.from_text(goal) + self.obs_postprocess(self.tool.page_obs())
         return obs, {**info, "task_id": self.id, "task_url": self.url, "goal": goal}
 
-    def evaluate(self, obs: Observation | None = None) -> tuple[float, dict[str, Any]]:
+    def evaluate(self, obs: Observation | None = None) -> TaskResult:
         result = self.tool.evaluate_js("""() => {
 return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GLOBAL, WOB_EPISODE_ID, WOB_TASK_READY];}""")
         return _parse_validation_result(result)
@@ -161,7 +161,7 @@ def _parse_setup_result(setup_result: str | dict) -> tuple[str, dict]:
         raise ValueError(f"Unexpected setup_result type: {type(setup_result)}")
 
 
-def _parse_validation_result(validation_result: str | dict | list) -> tuple[float, dict]:
+def _parse_validation_result(validation_result: str | dict | list) -> TaskResult:
     if isinstance(validation_result, list):
         chunks = validation_result
         done = chunks[3]
@@ -172,8 +172,12 @@ def _parse_validation_result(validation_result: str | dict | list) -> tuple[floa
         done = chunks[3].strip().lower() == "true"
     raw_reward = float(chunks[1])
     reward = float(raw_reward > 0)
-    return reward, {
-        "raw_reward": raw_reward,
-        "reward_reason": chunks[2],
-        "done": done,
-    }
+    return TaskResult(
+        reward=reward,
+        checks=[],
+        info={
+            "raw_reward": raw_reward,
+            "reward_reason": chunks[2],
+            "done": done,
+        },
+    )

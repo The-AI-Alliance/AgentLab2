@@ -26,7 +26,7 @@ from PIL import Image
 from pydantic import PrivateAttr
 
 from cube.benchmark import RuntimeContext  # noqa: F401 — triggers OSWorldTask.model_rebuild()
-from cube.core import Observation
+from cube.core import Observation, TaskResult
 from cube.task import Task, TaskExecutionInfo, TaskMetadata
 from cube.resource import InfraConfig, ResourceHandle, VMResourceConfig
 
@@ -317,9 +317,9 @@ class OSWorldTask(Task[OSWorldTaskMetadata]):
         }
         return obs, info
 
-    def evaluate(self, obs: Observation | None = None) -> tuple[float, dict]:
+    def evaluate(self, obs: Observation | None = None) -> TaskResult:
         """
-        Call the task evaluator and return (reward, info).
+        Call the task evaluator and return a TaskResult.
 
         reward ∈ [0.0, 1.0]:  1.0 = task fully completed.
         Partial credit is preserved (not rounded to binary).
@@ -328,17 +328,21 @@ class OSWorldTask(Task[OSWorldTaskMetadata]):
 
         if not evaluator_cfg:
             logger.warning("Task %s: no evaluator configured, returning 0.0", self.metadata.id)
-            return 0.0, {"error": "no_evaluator"}
+            return TaskResult(reward=0.0, checks=[], info={"error": "no_evaluator"})
 
         eval_func = evaluator_cfg.get("func", "unknown")
         logger.debug("Evaluating task %s with evaluator: %s", self.metadata.id, eval_func)
 
         reward = self._evaluate_task()
         logger.info("Task %s evaluation: reward=%f, evaluator=%s", self.metadata.id, reward, eval_func)
-        return reward, {
-            "evaluator": eval_func,
-            "expected": evaluator_cfg.get("expected", {}),
-        }
+        return TaskResult(
+            reward=reward,
+            checks=[],
+            info={
+                "evaluator": eval_func,
+                "expected": evaluator_cfg.get("expected", {}),
+            },
+        )
 
     def finished(self, obs: Observation | None = None) -> bool:
         """Return True if the task has reached a terminal state (done() or fail() called)."""

@@ -1,7 +1,7 @@
 from typing import Any, Literal
 
 from cube.benchmark import RuntimeContext
-from cube.core import Observation
+from cube.core import Observation, TaskResult
 from cube.task import Task, TaskConfig, TaskMetadata
 from arithmetic_cube.tool import ArithmeticTool, ArithmeticToolConfig
 
@@ -26,12 +26,16 @@ class SolveArithmeticTask(Task[ArithmeticTaskMetadata]):
         question = f"What is {m.a} {m.op} {m.b}?"
         return Observation.from_text(question), {"question": question, "expected": m.expected}
 
-    def evaluate(self, obs: Observation | None = None) -> tuple[float, dict[str, Any]]:
+    def evaluate(self, obs: Observation | None = None) -> TaskResult:
         assert isinstance(self.tool, ArithmeticTool)
         answer = self.tool.last_answer
         expected = self.metadata.expected
         correct = answer == expected
-        return (1.0 if correct else 0.0), {"answer": answer, "expected": expected, "correct": correct}
+        return TaskResult(
+            reward=(1.0 if correct else 0.0),
+            checks=[],
+            info={"answer": answer, "expected": expected, "correct": correct},
+        )
 
     def finished(self, obs: Observation | None = None) -> bool:
         assert isinstance(self.tool, ArithmeticTool)

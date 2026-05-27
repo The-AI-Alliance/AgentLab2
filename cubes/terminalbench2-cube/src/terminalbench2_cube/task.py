@@ -13,7 +13,7 @@ from typing import Any
 from pydantic import PrivateAttr
 
 from cube.container import relocate_if_readonly
-from cube.core import Observation
+from cube.core import Observation, TaskResult
 from cube.task import RuntimeContext, Task, TaskConfig, TaskExecutionInfo, TaskMetadata
 from cube.tools.terminal import ContainerTerminalTool, TerminalToolConfig
 from terminalbench2_cube.pytest_parser import PytestParser
@@ -141,7 +141,7 @@ class TerminalBench2Task(Task[TerminalBench2TaskMetadata, ContainerTerminalTool]
             "category": self.metadata.category,
         }
 
-    def evaluate(self, obs: Observation | None = None) -> tuple[float, dict[str, Any]]:
+    def evaluate(self, obs: Observation | None = None) -> TaskResult:
         """Run the upstream pytest verifier in the sandbox and return the reward.
 
         Deliberately mutates container state (uploads tests, installs `uv`).  Safe
@@ -196,14 +196,18 @@ class TerminalBench2Task(Task[TerminalBench2TaskMetadata, ContainerTerminalTool]
             reward = 0.0
 
         n_passed = sum(1 for r in test_results.values() if r == "passed")
-        return reward, {
-            "done": True,
-            "passed": n_passed,
-            "total": len(test_results),
-            "all_passed": len(test_results) > 0 and n_passed == len(test_results),
-            "test_results": test_results,
-            "output_preview": output[:1000] if output else "",
-        }
+        return TaskResult(
+            reward=reward,
+            checks=[],
+            info={
+                "done": True,
+                "passed": n_passed,
+                "total": len(test_results),
+                "all_passed": len(test_results) > 0 and n_passed == len(test_results),
+                "test_results": test_results,
+                "output_preview": output[:1000] if output else "",
+            },
+        )
 
     def _upload_file(self, local_path: Path, remote_path: str) -> None:
         """Upload a local file into the container (text or binary)."""
