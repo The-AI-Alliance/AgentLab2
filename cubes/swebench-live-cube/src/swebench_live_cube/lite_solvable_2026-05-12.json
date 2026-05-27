@@ -1,7 +1,7 @@
 {
   "date": "2026-05-12",
   "source_set": "swe-bench-live/lite",
-  "description": "Task IDs from swe-bench-live's 'lite' (300-task) subset that resolved (reward == 1.0) under the gold-patch oracle. Snapshots a deterministic subset for fair agent eval comparisons. Regenerate via `python -m swebench_live_cube.gold_patch.recipe --subset lite --n-runs 3 --dump-solvable <path>` then update the filename's date.",
+  "description": "Task IDs from swe-bench-live's 'lite' (300-task) subset that resolved (reward == 1.0) under the gold-patch oracle. Snapshots a deterministic subset for fair agent eval comparisons. Regenerate by running `python -m swebench_live_cube.gold_patch.recipe` (one or more times), then post-hoc `gold_patch.extract_solvable(run_dir)` (one run) or `gold_patch.intersect_solvable(run_dirs)` (stable across N runs); update the filename's date.",
   "n_tasks": 223,
   "task_ids": [
     "aiogram__aiogram-1594",
