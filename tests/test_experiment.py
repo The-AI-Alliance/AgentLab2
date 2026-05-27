@@ -968,3 +968,97 @@ class TestKillStaleWorkersRaceGuard:
         # Recorded as a failure.
         assert traj_id in results.failures
         assert fake_ref not in episodes_in_progress
+
+
+class TestKillStaleWorkersOrphanCapacityGate:
+    """Capacity-gated QUEUED-orphan detection in _kill_stale_workers (PR #459).
+
+    A QUEUED episode is cancelled as an orphan ONLY when Ray has had idle worker
+    capacity it left unused (`idle_capacity_since`), sustained past `orphan_threshold_s`.
+    All slots busy ⇒ never cancelled, so a deep queue (tasks >> workers) doesn't
+    false-cancel tasks legitimately waiting their turn (the 141/300 regression).
+    """
+
+    def _queued(self, task_id: str, started_age: float) -> EpisodeStatus:
+        return EpisodeStatus(
+            status="QUEUED",
+            task_id=task_id,
+            episode_id=0,
+            started_at=time.time() - started_age,
+            last_heartbeat_at=None,
+            current_step=0,
+            retry_count=0,
+        )
+
+    def _run(self, storage: "FileStorage", queued: EpisodeStatus, *, idle_capacity_since, reads=None):
+        traj_id = f"{queued.task_id}_ep0"
+        fake_ref = MagicMock()
+        ref_to_traj_id = {fake_ref: traj_id}
+        results = ExpResult(exp_id="test", tasks_num=1)
+        episodes_in_progress = [fake_ref]
+        with (
+            patch("cube_harness.exp_runner.ray.cancel") as mock_cancel,
+            patch.object(storage, "read_episode_status", side_effect=reads or [queued, queued]),
+            patch.object(storage, "write_episode_status") as mock_write,
+        ):
+            _kill_stale_workers(
+                episodes_in_progress,
+                ref_to_traj_id,
+                storage,
+                results,
+                step_timeout_s=1.0,
+                setup_timeout_s=1.0,
+                cancel_grace_s=1.0,
+                orphan_threshold_s=3600.0,
+                idle_capacity_since=idle_capacity_since,
+            )
+        return mock_cancel, mock_write, results, episodes_in_progress, fake_ref, traj_id
+
+    def test_orphaned_queued_with_sustained_idle_is_cancelled(self, tmp_dir) -> None:
+        """Idle capacity sustained past the threshold while QUEUED → genuine orphan → cancelled."""
+        storage = FileStorage(tmp_dir)
+        cancel, write, results, in_progress, ref, traj_id = self._run(
+            storage, self._queued("orphan", 7200), idle_capacity_since=time.time() - 7200
+        )
+        cancel.assert_called_once_with(ref, force=True)
+        assert write.call_args[0][1].status == "CANCELLED"
+        assert write.call_args[0][1].error_type == "OrphanedInQueue"
+        assert traj_id in results.failures
+        assert ref not in in_progress
+
+    def test_queued_not_cancelled_when_workers_busy(self, tmp_dir) -> None:
+        """THE FIX: long-QUEUED but all workers busy (idle_capacity_since=None) → not cancelled."""
+        storage = FileStorage(tmp_dir)
+        cancel, write, results, in_progress, ref, traj_id = self._run(
+            storage, self._queued("waiting", 7200), idle_capacity_since=None, reads=[self._queued("waiting", 7200)]
+        )
+        cancel.assert_not_called()
+        write.assert_not_called()
+        assert traj_id not in results.failures
+        assert ref in in_progress
+
+    def test_queued_not_cancelled_on_momentary_idle_dip(self, tmp_dir) -> None:
+        """Idle capacity that only just appeared (turnover dip) → not cancelled; must persist."""
+        storage = FileStorage(tmp_dir)
+        cancel, write, results, in_progress, ref, traj_id = self._run(
+            storage,
+            self._queued("dip", 7200),
+            idle_capacity_since=time.time() - 5,
+            reads=[self._queued("dip", 7200)],
+        )
+        cancel.assert_not_called()
+        write.assert_not_called()
+        assert ref in in_progress
+
+    def test_fresh_queued_not_cancelled(self, tmp_dir) -> None:
+        """Recently QUEUED (< threshold) not cancelled even with idle capacity available."""
+        storage = FileStorage(tmp_dir)
+        cancel, write, results, in_progress, ref, traj_id = self._run(
+            storage,
+            self._queued("fresh", 30),
+            idle_capacity_since=time.time() - 7200,
+            reads=[self._queued("fresh", 30)],
+        )
+        cancel.assert_not_called()
+        write.assert_not_called()
+        assert ref in in_progress
