@@ -59,7 +59,7 @@ class WorkArenaInfeasibleTool(Tool):
         Args:
             explanation: Brief explanation of why the task cannot be completed.
         """
-        self._messages.append({"role": "infeasible", "content": explanation})
+        self._messages.append({"role": "infeasible", "message": explanation})
         return "Reported task as infeasible."
 
     @property

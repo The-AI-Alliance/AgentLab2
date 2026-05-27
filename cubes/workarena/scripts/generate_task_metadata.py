@@ -25,6 +25,7 @@ import logging
 from pathlib import Path
 
 from browsergym.workarena import get_all_tasks_agents
+from browsergym.workarena.tasks.compositional import ALL_COMPOSITIONAL_TASKS_L2, ALL_COMPOSITIONAL_TASKS_L3
 
 import workarena_cube
 from workarena_cube.task import WorkArenaTaskMetadata
@@ -34,18 +35,35 @@ logger = logging.getLogger(__name__)
 assert workarena_cube.__file__ is not None
 _DEFAULT_OUTPUT = Path(workarena_cube.__file__).parent / "task_metadata.json"
 
+_N_HUMAN_CURRICULUM_SEEDS = 5
+
+
+def _human_curriculum_ids(level: str) -> set[str]:
+    """Return the union of human-curriculum task IDs across several meta_seeds.
+
+    get_all_tasks_agents(is_agent_curriculum=False) varies slightly by meta_seed,
+    so we union over a small range to get a stable superset.
+    """
+    ids: set[str] = set()
+    for seed in range(_N_HUMAN_CURRICULUM_SEEDS):
+        for task_class, _ in get_all_tasks_agents(filter=level, meta_seed=seed, n_seed_l1=1, is_agent_curriculum=False):
+            ids.add(task_class.get_task_id())
+    return ids
+
 
 def _build_task_metadata() -> dict[str, WorkArenaTaskMetadata]:
     """Enumerate all WorkArena task types and build typed metadata.
 
-    Calls get_all_tasks_agents for L1, L2 agent superset, and L3 agent superset,
-    then marks which tasks are in the human evaluation curriculum.
-    Uses n_seed_l1=1 and meta_seed=0 — seeds are irrelevant here; only the
-    task classes are needed.
+    L1: uses get_all_tasks_agents (fixed list, seed-independent).
+    L2/L3: enumerates from ALL_COMPOSITIONAL_TASKS_L2/L3 — the full canonical
+    class lists baked into browsergym-workarena. This is seed-independent, unlike
+    get_all_tasks_agents(is_agent_curriculum=True) which returns different subsets
+    for different meta_seeds. Human-curriculum membership is the union across
+    several meta_seeds for stability.
     """
     metadata: dict[str, WorkArenaTaskMetadata] = {}
 
-    # L1 — no curriculum concept
+    # L1 — fixed list, no curriculum concept
     for task_class, _ in get_all_tasks_agents(filter="l1", meta_seed=0, n_seed_l1=1):
         task_id = task_class.get_task_id()
         if task_id not in metadata:
@@ -56,13 +74,14 @@ def _build_task_metadata() -> dict[str, WorkArenaTaskMetadata]:
                 task_class_path=f"{task_class.__module__}.{task_class.__qualname__}",
             )
 
-    # L2 and L3 — agent curriculum is the superset; mark human curriculum tasks
-    for level in ("l2", "l3"):
-        human_ids: set[str] = {
-            task_class.get_task_id()
-            for task_class, _ in get_all_tasks_agents(filter=level, meta_seed=0, n_seed_l1=1, is_agent_curriculum=False)
-        }
-        for task_class, _ in get_all_tasks_agents(filter=level, meta_seed=0, n_seed_l1=1, is_agent_curriculum=True):
+    # L2 and L3 — enumerate from the full canonical lists (seed-independent)
+    all_classes: dict[str, list[type]] = {
+        "l2": list(ALL_COMPOSITIONAL_TASKS_L2),
+        "l3": list(ALL_COMPOSITIONAL_TASKS_L3),
+    }
+    for level, task_classes in all_classes.items():
+        human_ids = _human_curriculum_ids(level)
+        for task_class in task_classes:
             task_id = task_class.get_task_id()
             if task_id not in metadata:
                 metadata[task_id] = WorkArenaTaskMetadata(
