@@ -1,5 +1,6 @@
 import json
 import time
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -774,6 +775,36 @@ class TestSummaryStats:
         assert summary["n_completed"] == 3
         assert summary["total_prompt_tokens"] == 3000
         assert summary["total_cost"] == pytest.approx(0.15)
+
+
+class TestNonNativeMetadataSerialization:
+    """Regression guard for the Decimal serialization fix.
+
+    `Trajectory.metadata` is an untyped dict, so callers (e.g. via
+    `EnvironmentOutput.info` / `extra_metadata`) can drop in non-JSON-native
+    objects such as a `Decimal`. `save_trajectory` must serialize the metadata
+    sidecar through Pydantic's json mode; a plain `model_dump()` would leave the
+    `Decimal` intact and make the subsequent `json.dumps` raise `TypeError`.
+    """
+
+    def test_decimal_in_metadata_does_not_crash_and_roundtrips(self, tmp_dir: Path) -> None:
+        storage = FileStorage(tmp_dir)
+        traj = Trajectory(
+            id="task_1_ep0",
+            metadata={"task_id": "task_1", "agent_name": "A", "cost": Decimal("0.0123")},
+        )
+
+        # Without mode="json" this call raises TypeError in json.dumps.
+        storage.save_trajectory(traj)
+
+        metadata_path = tmp_dir / "episodes" / "task_1_ep0" / "episode.metadata.json"
+        with open(metadata_path) as f:
+            data = json.load(f)
+        # Pydantic serializes Decimal to a string, preserving precision.
+        assert data["metadata"]["cost"] == "0.0123"
+
+        loaded = storage.load_trajectory_metadata("task_1_ep0")
+        assert loaded.metadata["cost"] == "0.0123"
 
 
 class TestEpisodeSummary:
