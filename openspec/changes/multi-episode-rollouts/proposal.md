@@ -22,6 +22,12 @@ This document describes all four because they're co-designed; only the Rollout l
 
 ---
 
+## Design rationale (one paragraph)
+
+**Rollout stays a distinct class** (not a loop folded into `Episode`) — keeps the "one Episode = one Trajectory" invariant intact, preserves the existing Episode contract for all current callers, and code duplication is eliminated via the additive `Episode.run_with(task, agent)` (composition, not subclassing). **Reflection lives in `Agent.reflect()` for V1** — a default-no-op hook called by Rollout between non-final episodes. The cleaner alternative (drop the hook; agent reflects inside `step()` based on observed `reward` / `done`) is deferred: it requires an upstream cube-standard RFC to add those fields to `Observation`. Worth revisiting once that lands; the additive hook is the interim mechanism. See Alternatives for what was rejected and why.
+
+---
+
 ## Problem
 
 cube-harness today runs one episode at a time: `Episode` constructs a fresh `Agent` via `AgentConfig.make()`, plays it against a `Task`, exits. There's no place for an agent instance to survive across episodes, no inter-episode hook, no cross-episode reward aggregate. Meta-RL methods that *adapt across multiple episodes against the same task* by carrying memory — e.g. **LaMer** ([arxiv 2512.16848](https://arxiv.org/abs/2512.16848)), +11–19pp over RL baselines on Sokoban / MineSweeper / Webshop — can't be expressed in the current API.
