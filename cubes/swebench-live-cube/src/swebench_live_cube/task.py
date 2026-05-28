@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+import shlex
 from typing import Any
 
 from cube.container import relocate_if_readonly
@@ -23,6 +24,145 @@ logger = logging.getLogger(__name__)
 # POSIX-compatible: use `.` instead of `source`, skip silently if conda is absent.
 # Works with both bash (Daytona/Modal/Toolkit backends) and sh/dash (LocalContainer).
 CONDA_ACTIVATE = "if [ -f /opt/miniconda3/etc/profile.d/conda.sh ]; then . /opt/miniconda3/etc/profile.d/conda.sh && conda activate testbed; fi"
+
+# ── Scoped-eval helper (see SWEBenchLiveTask.scoped_eval) ───────────────────────
+# The dataset's ``test_cmds`` typically runs the WHOLE repo test suite (e.g.
+# ``pytest keras -rA``), even though ``evaluate()`` only cares about a known
+# ``fail_to_pass`` and ``pass_to_pass`` list. For heavy repos that doesn't fit
+# in the per-run ``eval_timeout`` budget and even a correct gold patch silently
+# scores 0. ``scoped_eval`` rewrites such commands to run only the relevant
+# node IDs via ``xargs``, preserving env vars, flags, and the pytest wrapper
+# (``poetry run pytest``, ``uv run pytest``, etc.).
+#
+# Truncated IDs: a small fraction of the dataset's parametrized IDs are
+# silently cut mid-string (commas inside brackets, unbalanced quotes/parens —
+# e.g. ``[formats1-Vinyl-7",``). Pytest's strict node-ID matching rejects
+# these with ``ERROR: not found:`` and aborts the whole run. We filter them
+# out before scoping (``_is_truncated_id``). The f2p tests added by
+# ``test_patch`` are almost never parametrized this way, so filtering doesn't
+# typically drop the resolution-gating tests.
+
+# Wrappers we recognise around a pytest invocation.
+_PYTEST_WRAPPERS: tuple[tuple[str, ...], ...] = (
+    ("poetry", "run", "pytest"),
+    ("uv", "run", "pytest"),
+    ("python", "-m", "pytest"),
+    ("python3", "-m", "pytest"),
+)
+
+# Bare pytest flags whose VALUE is the NEXT token (rather than ``--key=value``).
+# The ``--key=value`` form is a single shlex token and needs no special handling.
+_PYTEST_VALUE_FLAGS: frozenset[str] = frozenset(
+    {
+        "-n",
+        "-k",
+        "-m",
+        "-p",
+        "-c",
+        "-W",
+        "-o",
+        "--timeout",
+        "--rootdir",
+        "--basetemp",
+        "--junitxml",
+        "--cov",
+        "--cov-report",
+        "--ignore",
+        "--ignore-glob",
+        "--deselect",
+        "--maxfail",
+        "--dist",
+    }
+)
+
+_ENV_VAR_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+
+
+def _is_truncated_id(node_id: str) -> bool:
+    """Heuristic: ``node_id`` looks like a CSV-truncated parametrized ID.
+
+    Pytest's parametrized IDs are ``file.py::Class::test[arg0-arg1-…]`` (or
+    ``test_(arg,…)`` for some custom collectors). The SWE-bench-Live dataset
+    extraction sometimes cuts mid-string when a parametrize arg contains a
+    literal comma, paren, or double quote — or just at an arbitrary boundary —
+    leaving trailers like ``[formats1-Vinyl-7",``, ``[365_day-(1,``,
+    ``[extra_persistent_ds-failing_node_names0-No`` (no closing bracket), or
+    ``test_split_dataset_tensorflow_(100,`` (no brackets at all). Pytest
+    rejects all such IDs with ``ERROR: not found:`` and aborts the whole run.
+
+    We flag any ID where the whole string ends in ``,`` or has an unbalanced
+    ``[``/``]`` / ``(``/``)`` / ``"`` count. f2p tests added by ``test_patch``
+    are rarely parametrized in these unfortunate shapes, so filtering doesn't
+    typically drop the resolution-gating tests.
+    """
+    if node_id.endswith(","):
+        return True
+    if node_id.count("[") != node_id.count("]"):
+        return True
+    if node_id.count("(") != node_id.count(")"):
+        return True
+    if node_id.count('"') % 2 != 0:
+        return True
+    return False
+
+
+def _scope_pytest_cmd(cmd: str, node_ids_file: str) -> str | None:
+    """Rewrite a pytest test_cmd to run only the lines in ``node_ids_file``.
+
+    Strips broad positional path selectors (e.g. ``keras`` in
+    ``pytest keras -rA``), preserves env-var prefixes, the pytest wrapper, and
+    every flag (including value-bearing ones like ``-n 4`` or ``-m unit``).
+    Returns ``None`` when the command is not a pytest invocation we recognise —
+    the caller falls back to the unscoped command.
+
+    The rewritten form is ``xargs -a <file> -d '\\n' --no-run-if-empty -s 2000000
+    <env> <pytest_head> <flags>`` so the test selectors (file paths — see the
+    module-top rationale) come from the file (avoids ARG_MAX) and ``xargs``
+    runs pytest exactly once (``-s 2000000`` is just under Linux ARG_MAX).
+    """
+    try:
+        tokens = shlex.split(cmd)
+    except ValueError:
+        return None
+    i = 0
+    env_prefix: list[str] = []
+    while i < len(tokens) and _ENV_VAR_RE.match(tokens[i]):
+        env_prefix.append(tokens[i])
+        i += 1
+    pytest_head: list[str] | None = None
+    for wrapper in _PYTEST_WRAPPERS:
+        if tuple(tokens[i : i + len(wrapper)]) == wrapper:
+            pytest_head = list(wrapper)
+            i += len(wrapper)
+            break
+    if pytest_head is None:
+        if i < len(tokens) and tokens[i] in ("pytest", "py.test"):
+            pytest_head = [tokens[i]]
+            i += 1
+        else:
+            return None
+    # Walk the rest, keeping flags (and their values for known value-flags),
+    # dropping bare positionals (the broad test-path selectors).
+    kept_flags: list[str] = []
+    while i < len(tokens):
+        t = tokens[i]
+        if t.startswith("-"):
+            kept_flags.append(t)
+            # Consume the next token as a value only when the flag takes one
+            # AND the next token doesn't start with `-` (mirrors argparse's
+            # nargs="?" handling for optional flags like ``--cov``).
+            if "=" not in t and t in _PYTEST_VALUE_FLAGS and i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
+                kept_flags.append(tokens[i + 1])
+                i += 1
+        # else: bare positional → drop
+        i += 1
+    # Env vars must go BEFORE ``xargs`` — placed after, xargs would treat
+    # ``KEY=VAL`` as the command to run. xargs inherits its env to pytest.
+    env_str = " ".join(shlex.quote(t) for t in env_prefix)
+    cmd_str = " ".join(shlex.quote(t) for t in pytest_head + kept_flags)
+    prefix = f"{env_str} " if env_str else ""
+    return f"{prefix}xargs -a {shlex.quote(node_ids_file)} -d '\\n' --no-run-if-empty -s 2000000 {cmd_str}"
+
 
 # Appended to every task description so the agent knows evaluation constraints,
 # how to verify the fix, and how to submit.
@@ -109,6 +249,17 @@ class SWEBenchLiveTask(Task[SWEBenchLiveTaskMetadata, ContainerTerminalTool]):
 
     oracle_mode: bool = False
     """If True, write the gold patch to /tmp/gold_patch.diff in reset()."""
+
+    scoped_eval: bool = False
+    """If True, rewrite each pytest ``test_cmd`` in ``evaluate()`` to run only
+    the **test files** containing the relevant node IDs (``pass_to_pass`` for
+    the baseline, ``fail_to_pass ∪ pass_to_pass`` after the fix) instead of
+    the whole suite. Recovers heavy repos (keras / xarray / sympy) whose
+    dataset cmd doesn't fit in ``eval_timeout``. Non-pytest cmds and parses
+    we can't recognise fall back to the unscoped path, so existing behaviour
+    is bit-for-bit unchanged when the rewrite doesn't apply. See the module-
+    top ``_scope_pytest_cmd`` comment for the rationale on file- vs
+    node-ID-level scoping."""
 
     append_submission_instructions: bool = True
     """If True, append evaluation constraints, test command, and final_step
@@ -234,8 +385,10 @@ class SWEBenchLiveTask(Task[SWEBenchLiveTaskMetadata, ContainerTerminalTool]):
         # imports, etc.) completely unrelated to the task. Without a baseline, these
         # show up as p2p regressions and cause correct fixes to score 0.
         # Running before _apply_patch(test_patch) means f2p tests don't exist yet,
-        # so only p2p tests are relevant here.
-        baseline_output = self._run_test_cmds(test_cmds, timeout=eval_timeout)
+        # so the baseline is scoped to p2p only (f2p would just be collection errors).
+        baseline_output = self._run_test_cmds(
+            test_cmds, timeout=eval_timeout, scoped_node_ids=list(pass_to_pass) if self.scoped_eval else None
+        )
         pre_existing_p2p = self._get_failing_test_ids(baseline_output, pass_to_pass, self.metadata.log_parser)
         if pre_existing_p2p:
             logger.info(
@@ -247,8 +400,14 @@ class SWEBenchLiveTask(Task[SWEBenchLiveTaskMetadata, ContainerTerminalTool]):
         # Step 2: Apply test patch (adds new f2p test cases)
         self._apply_patch(self._exec.test_patch)
 
-        # Step 3: Run tests with agent's fix + test_patch applied
-        test_output = self._run_test_cmds(test_cmds, timeout=eval_timeout)
+        # Step 3: Run tests with agent's fix + test_patch applied (scoped to
+        # f2p ∪ p2p when scoped_eval is on; the test_patch has added the f2p
+        # node IDs to the codebase so they now collect).
+        test_output = self._run_test_cmds(
+            test_cmds,
+            timeout=eval_timeout,
+            scoped_node_ids=list(fail_to_pass) + list(pass_to_pass) if self.scoped_eval else None,
+        )
 
         # Step 4: Score — exclude pre-existing p2p failures from the count
         f2p_passed, p2p_failed = self._check_test_results(
@@ -298,10 +457,102 @@ class SWEBenchLiveTask(Task[SWEBenchLiveTaskMetadata, ContainerTerminalTool]):
             logger.warning("_apply_patch: all methods failed.\npatch output:\n%s", result)
         return result
 
-    def _run_test_cmds(self, test_cmds: list[str], timeout: int = 1800) -> str:
-        """Run the explicit test commands from the dataset."""
+    # Plain-content chunk size for writing the scoped-tests file. Empirically
+    # (Daytona, 2026-05-28) the container's exec arg cap sits around ~64 KB;
+    # ``write_file``'s single-call approach fails silently above ~30 KB. We
+    # stay well under at 16 KB plain (≈22 KB base64 on the cmdline).
+    _SCOPED_TESTS_CHUNK_BYTES = 16_000
+
+    def _write_scoped_tests_file(self, node_ids: list[str], path: str) -> None:
+        """Write ``node_ids`` (one per line) to ``path`` inside the container.
+
+        ``tool.write_file`` interpolates content onto the shell cmdline and
+        silently fails above ~30 KB on Daytona — the container's exec arg cap
+        is tighter than ARG_MAX. Chunked base64-append keeps each individual
+        shell command small (see ``_SCOPED_TESTS_CHUNK_BYTES``) so every chunk
+        lands; we check each chunk's exit code and verify the final line count
+        matches — fail loud rather than silently mis-score.
+        """
+        quoted = shlex.quote(path)
+        self._exec_or_raise(f"rm -f {quoted} && touch {quoted}", timeout=30, context=f"init {path}")
+        chunk: list[str] = []
+        size = 0
+        chunk_idx = 0
+        for nid in node_ids:
+            if chunk and size + len(nid) + 1 > self._SCOPED_TESTS_CHUNK_BYTES:
+                self._append_b64_chunk(chunk, quoted, chunk_idx)
+                chunk_idx += 1
+                chunk = []
+                size = 0
+            chunk.append(nid)
+            size += len(nid) + 1
+        if chunk:
+            self._append_b64_chunk(chunk, quoted, chunk_idx)
+        # Verify: line count must match.
+        result = self._exec_or_raise(f"wc -l < {quoted}", timeout=30, context=f"verify {path}")
+        try:
+            actual = int(result.split()[0])
+        except (IndexError, ValueError):
+            raise RuntimeError(f"could not parse line count for {path}: {result!r}")
+        if actual != len(node_ids):
+            raise RuntimeError(f"scoped tests file {path}: wrote {len(node_ids)} ids, container reports {actual} lines")
+
+    def _append_b64_chunk(self, ids: list[str], quoted_path: str, chunk_idx: int) -> None:
+        """Append ``ids`` (one per line) to ``quoted_path`` via base64."""
+        b64 = base64.b64encode(("\n".join(ids) + "\n").encode()).decode()
+        self._exec_or_raise(
+            f"printf '%s' '{b64}' | base64 -d >> {quoted_path}",
+            timeout=60,
+            context=f"chunk #{chunk_idx} ({len(ids)} ids, {len(b64)} b64 bytes)",
+        )
+
+    def _exec_or_raise(self, cmd: str, timeout: int, context: str) -> str:
+        """Run ``cmd`` and raise if its output marks a non-zero exit code.
+
+        Returns the bash output stripped of the ``[exit_code: 0]`` trailer.
+        ``bash_unlimited`` always appends an ``[exit_code: N]`` marker; we use
+        it as the explicit success signal instead of trusting that a failed
+        sub-pipe leaves a visible error on stdout.
+        """
+        out = self.tool.bash_unlimited(cmd, timeout=timeout)
+        m = re.search(r"\[exit_code:\s*(\d+)\]", out)
+        if m is None:
+            return out  # no marker (e.g. plain output) — assume OK
+        code = int(m.group(1))
+        if code != 0:
+            # Trim to first ~400 chars of pre-marker output for the error msg.
+            head = out[: m.start()].rstrip()[-400:]
+            raise RuntimeError(f"{context}: exit {code} — output tail: {head!r}")
+        return out[: m.start()].rstrip()
+
+    def _run_test_cmds(
+        self,
+        test_cmds: list[str],
+        timeout: int = 1800,
+        scoped_node_ids: list[str] | None = None,
+    ) -> str:
+        """Run the explicit test commands from the dataset.
+
+        When ``scoped_node_ids`` is provided (caller has ``scoped_eval`` on),
+        each pytest cmd is rewritten via ``_scope_pytest_cmd`` to run only
+        those node IDs (read from a file via xargs, so ARG_MAX is a non-issue).
+        Cmds we can't recognise as pytest fall back to running unscoped — same
+        behaviour as before. See ``_scope_pytest_cmd`` for the scoping spec.
+        """
         if not test_cmds:
             return "(no test commands)"
+
+        node_ids_file = ""
+        if scoped_node_ids:
+            # Drop CSV-truncated IDs (see _is_truncated_id) — pytest's strict
+            # node-ID matching aborts the whole run on these. The f2p tests
+            # almost never get caught by the filter.
+            clean_ids = [nid for nid in scoped_node_ids if not _is_truncated_id(nid)]
+            dropped = len(scoped_node_ids) - len(clean_ids)
+            if dropped:
+                logger.info("scoped_eval: dropped %d/%d truncated IDs", dropped, len(scoped_node_ids))
+            node_ids_file = "/tmp/cube_scoped_tests.txt"
+            self._write_scoped_tests_file(clean_ids, node_ids_file)
 
         outputs = []
         working_dir = self.tool._config.working_dir
@@ -314,7 +565,15 @@ class SWEBenchLiveTask(Task[SWEBenchLiveTaskMetadata, ContainerTerminalTool]):
         # TIKA_LOG_PATH is a directory; tika appends /tika.log to it.
         tika_log = "mkdir -p /tmp/tika_cube_eval && export TIKA_LOG_PATH=/tmp/tika_cube_eval"
         for cmd in test_cmds:
-            full_cmd = f"{CONDA_ACTIVATE} && {pythonpath} && {tika_log} && {cmd}"
+            effective_cmd = cmd
+            if node_ids_file:
+                scoped = _scope_pytest_cmd(cmd, node_ids_file)
+                if scoped is not None:
+                    logger.info("scoped_eval: %r → %r", cmd, scoped)
+                    effective_cmd = scoped
+                else:
+                    logger.info("scoped_eval: cannot scope %r — running unscoped", cmd)
+            full_cmd = f"{CONDA_ACTIVATE} && {pythonpath} && {tika_log} && {effective_cmd}"
             output = self.tool.bash_unlimited(full_cmd, timeout=timeout)
             outputs.append(output)
         return "\n".join(outputs)
@@ -409,6 +668,11 @@ class SWEBenchLiveTaskConfig(TaskConfig[SWEBenchLiveTaskMetadata]):
     oracle_mode: bool = False
     """If True, write the gold patch to /tmp/gold_patch.diff in reset()."""
 
+    scoped_eval: bool = False
+    """If True, ``evaluate()`` runs only the test files containing the f2p/p2p
+    node IDs (instead of the full dataset ``test_cmds``) for pytest commands we
+    can rewrite. See ``SWEBenchLiveTask.scoped_eval``."""
+
     append_submission_instructions: bool = True
     """If True, append evaluation constraints, test command, and final_step
     submission instructions to the problem statement."""
@@ -441,5 +705,6 @@ class SWEBenchLiveTaskConfig(TaskConfig[SWEBenchLiveTaskMetadata]):
             runtime_context=runtime_context,
             include_hints=self.include_hints,
             oracle_mode=self.oracle_mode,
+            scoped_eval=self.scoped_eval,
             append_submission_instructions=self.append_submission_instructions,
         )

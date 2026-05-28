@@ -165,6 +165,12 @@ class SWEBenchLiveBenchmarkConfig(BenchmarkConfig[SWEBenchLiveTaskMetadata]):
     # User-configurable fields
     include_hints: bool = False
     oracle_mode: bool = False
+    scoped_eval: bool = False
+    """If True, ``evaluate()`` runs only the per-task ``fail_to_pass`` /
+    ``pass_to_pass`` node IDs (instead of the dataset's broad ``test_cmds``) for
+    pytest commands we can rewrite. Recovers heavy-suite repos (keras / xarray
+    / sympy) whose full suite doesn't fit in ``eval_timeout``. Non-pytest cmds
+    fall back to the unscoped path. See ``SWEBenchLiveTask.scoped_eval``."""
 
     # ------------------------------------------------------------------
     # Data lifecycle
@@ -235,11 +241,13 @@ class SWEBenchLiveBenchmarkConfig(BenchmarkConfig[SWEBenchLiveTaskMetadata]):
         return cast(SWEBenchLiveBenchmark, super().make(infra=infra or LocalInfraConfig()))
 
     def get_task_configs(self) -> Generator[SWEBenchLiveTaskConfig, None, None]:
-        """Yield TaskConfigs with include_hints and oracle_mode forwarded from benchmark settings."""
+        """Yield TaskConfigs with include_hints, oracle_mode, and scoped_eval forwarded
+        from benchmark settings."""
         for tm in self.tasks().values():
             yield SWEBenchLiveTaskConfig(
                 metadata=tm,
                 tool_config=self.tool_config,
                 include_hints=self.include_hints,
                 oracle_mode=self.oracle_mode,
+                scoped_eval=self.scoped_eval,
             )

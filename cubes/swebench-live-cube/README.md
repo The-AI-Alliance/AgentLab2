@@ -130,6 +130,14 @@ Then wrap the resulting list in the schema above and rename to encode the date (
 
 The Linux-only "at-least-one" criterion matches the upstream SWE-bench Live convention and is more permissive than SWE-bench Verified's "all fail_to_pass must pass".
 
+### Scoped eval (`scoped_eval=True`)
+
+The dataset's `test_cmds` usually runs the **whole repo test suite** (e.g. `pytest keras -rA`), even though `evaluate()` only cares about the per-task `fail_to_pass` and `pass_to_pass` node IDs. For heavy repos that doesn't fit in `eval_timeout` and the run silently scores 0 even when the fix is correct.
+
+`SWEBenchLiveBenchmarkConfig(scoped_eval=True)` rewrites each pytest test_cmd to run **only the per-task `fail_to_pass` / `pass_to_pass` node IDs** (read from a file via `xargs`). It preserves env vars (placed before `xargs` so they propagate through), every flag, and pytest wrappers (`poetry run pytest`, `uv run pytest`, `python -m pytest`); commands we can't recognise as pytest fall back to the unscoped path. Default `False` to keep existing behaviour bit-for-bit unchanged; the gold-patch recipe sets it to `True` since it's strictly more faithful to the SWE-bench-Live scoring spec ("at-least-one f2p passes, zero net p2p regress").
+
+A small fraction of the dataset's parametrized IDs are silently truncated by the upstream extractor (commas inside brackets get cut, leaving unparseable trailers like `[formats1-Vinyl-7",`); pytest's strict matching aborts the whole run on these. `_is_truncated_id` detects and drops them before scoping — f2p tests almost never get caught by the filter, so resolution isn't typically affected. See [`task.py`](src/swebench_live_cube/task.py) (`_scope_pytest_cmd`, `_is_truncated_id`).
+
 ## Debug suite
 
 Two oracle tasks exercise the full pipeline end-to-end via `cube test swebench-live-cube`:

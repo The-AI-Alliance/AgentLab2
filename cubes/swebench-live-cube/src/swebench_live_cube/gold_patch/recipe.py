@@ -72,7 +72,10 @@ _LIVE_GOLDEN_30: frozenset[str] = frozenset(
 
 # Edit for a different subset, e.g. .named_subset("full") (all 1895) or
 # .subset_from_list(sorted(_LIVE_GOLDEN_30)). Defaults to the lite (300) split.
-bench = SWEBenchLiveBenchmarkConfig(oracle_mode=True).named_subset("lite")
+# scoped_eval=True scopes evaluate() to the per-task f2p/p2p node IDs instead of
+# the whole dataset test_cmds — recovers heavy repos (keras / xarray / sympy)
+# that timed out under the unscoped path and cuts run cost across the board.
+bench = SWEBenchLiveBenchmarkConfig(oracle_mode=True, scoped_eval=True).named_subset("lite")
 
 
 def _exp(infra: str) -> Experiment:
