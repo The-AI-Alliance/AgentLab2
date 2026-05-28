@@ -26,8 +26,10 @@ Usage::
 from __future__ import annotations
 
 import logging
+import sys
 
 from cube.core import Action, ActionSchema, Observation
+from cube.testing import run_debug_suite
 
 from drbench_cube.benchmark import DrBenchBenchmarkConfig
 from drbench_cube.container import DrBenchContainerBackend
@@ -115,10 +117,7 @@ def make_debug_agent(task_id: str) -> DebugAgent:
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    import sys
-
     import drbench_cube.debug as _mod
-    from cube.testing import run_debug_suite
 
     logging.basicConfig(
         level=logging.INFO,

@@ -154,9 +154,7 @@ class DrBenchTaskConfig(TaskConfig):
         runtime_context=None,
         container_backend: ContainerBackend | None = None,
     ) -> DrBenchTask:
-        from drbench_cube.benchmark import DrBenchBenchmarkConfig
-
-        metadata: TaskMetadata = DrBenchBenchmarkConfig.task_metadata[self.task_id]
+        metadata: TaskMetadata = self.metadata
 
         # Load persona credentials to build the ToolConfig
         drbench_task = get_task_from_id(self.task_id)

@@ -14,8 +14,17 @@ import json
 import logging
 import os
 
+import docx
+import openpyxl
+import PyPDF2
 import requests
 from bs4 import BeautifulSoup
+from pptx import Presentation
+
+try:
+    import pdfplumber
+except ImportError:
+    pdfplumber = None
 
 from cube.container import Container
 from cube.tool import Tool, ToolConfig, tool_action
@@ -79,30 +88,25 @@ def _is_text_content(path: str, content_type: str) -> bool:
 
 def _extract_pdf_text(content: bytes) -> str:
     try:
-        import PyPDF2
-
         reader = PyPDF2.PdfReader(io.BytesIO(content))
         pages = [page.extract_text() for page in reader.pages if page.extract_text()]
         if pages:
             return "\n\n".join(pages)
     except Exception:
         pass
-    try:
-        import pdfplumber
-
-        with pdfplumber.open(io.BytesIO(content)) as pdf:
-            pages = [page.extract_text() for page in pdf.pages if page.extract_text()]
-            if pages:
-                return "\n\n".join(pages)
-    except Exception:
-        pass
+    if pdfplumber is not None:
+        try:
+            with pdfplumber.open(io.BytesIO(content)) as pdf:
+                pages = [page.extract_text() for page in pdf.pages if page.extract_text()]
+                if pages:
+                    return "\n\n".join(pages)
+        except Exception:
+            pass
     return ""
 
 
 def _extract_docx_text(content: bytes) -> str:
     try:
-        import docx
-
         doc = docx.Document(io.BytesIO(content))
         return "\n".join(p.text for p in doc.paragraphs if p.text)
     except Exception:
@@ -111,8 +115,6 @@ def _extract_docx_text(content: bytes) -> str:
 
 def _extract_xlsx_text(content: bytes) -> str:
     try:
-        import openpyxl
-
         wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True)
         lines = []
         for sheet in wb.sheetnames:
@@ -127,8 +129,6 @@ def _extract_xlsx_text(content: bytes) -> str:
 
 def _extract_pptx_text(content: bytes) -> str:
     try:
-        from pptx import Presentation
-
         prs = Presentation(io.BytesIO(content))
         parts = []
         for i, slide in enumerate(prs.slides, 1):
@@ -197,19 +197,17 @@ def _fetch_from_html(content_bytes: bytes) -> str:
 
 def _fetch_from_pdf(content_bytes: bytes) -> str:
     try:
-        import PyPDF2
-
         reader = PyPDF2.PdfReader(io.BytesIO(content_bytes))
         return "\n".join(page.extract_text() for page in reader.pages if page.extract_text()).strip()
     except Exception:
         pass
-    try:
-        import pdfplumber
-
-        with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
-            return "\n".join(p.extract_text() for p in pdf.pages if p.extract_text()).strip()
-    except Exception:
-        return ""
+    if pdfplumber is not None:
+        try:
+            with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
+                return "\n".join(p.extract_text() for p in pdf.pages if p.extract_text()).strip()
+        except Exception:
+            pass
+    return ""
 
 
 # ---------------------------------------------------------------------------
