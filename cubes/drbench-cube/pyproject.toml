@@ -1,0 +1,30 @@
+[project]
+name = "drbench-cube"
+version = "0.2.1"
+description = "Deep Research Benchmark: 100 enterprise document research tasks requiring multi-hop retrieval across Nextcloud, Mattermost, email, and web."
+requires-python = ">=3.12"
+dependencies = [
+    "cube-standard>=0.1.0rc8",
+    "drbench",
+    "requests",
+    "beautifulsoup4",
+    "PyPDF2",
+    "python-docx",
+    "openpyxl",
+    "python-pptx",
+]
+
+[project.entry-points."cube.benchmarks"]
+drbench-cube = "drbench_cube.benchmark:DrBenchBenchmarkConfig"
+
+[build-system]
+requires = ["uv_build>=0.8,<0.9"]
+build-backend = "uv_build"
+
+[tool.uv.sources]
+drbench = { git = "https://github.com/ServiceNow/drbench.git" }
+
+[tool.ruff]
+fix = true
+line-length = 120
+indent-width = 4

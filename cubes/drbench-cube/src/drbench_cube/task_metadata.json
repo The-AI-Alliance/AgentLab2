@@ -1,0 +1,2902 @@
+[
+  {
+    "id": "DR0001",
+    "split": "val",
+    "abstract_description": "How can Lee's Market leverage FSMA 204 regulations to enhance food safety and customer trust?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0001",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "compliance",
+    "difficulty": "easy",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Emily Patel",
+    "persona_role": "Operations",
+    "insight_count": 13,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0002",
+    "split": "val",
+    "abstract_description": "How can personalization drive sales in the retail industry and what strategies can be used for Lee's Market in action?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0002",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "sales",
+    "difficulty": "easy",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Michael Lee",
+    "persona_role": "Sales",
+    "insight_count": 17,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0003",
+    "split": "val",
+    "abstract_description": "How can we leverage data-driven loyalty programs to enhance customer engagement?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0003",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "crm",
+    "difficulty": "medium",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "David Lee",
+    "persona_role": "Marketing",
+    "insight_count": 25,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0004",
+    "split": "val",
+    "abstract_description": "What are the new trends in the grocery retail market and what strategies can Lee's Market adopt to remain competitive?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0004",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "market_analysis",
+    "difficulty": "medium",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Sofia Patel",
+    "persona_role": "Marketing",
+    "insight_count": 23,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0005",
+    "split": "val",
+    "abstract_description": "How can Lee's Market leverage chatbots to enhance the consumer experience for centennial shoppers?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0005",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "csm",
+    "difficulty": "hard",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "David Thompson",
+    "persona_role": "Customer Service",
+    "insight_count": 52,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0006",
+    "split": "val",
+    "abstract_description": "What are the key factors influencing MediConn Solutions' decision to accept insurance for telehealth providers, considering HIPAA compliance and state-specific data privacy regulations?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0006",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "compliance",
+    "difficulty": "easy",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Samantha Lee",
+    "persona_role": "Executive Leadership",
+    "insight_count": 15,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0007",
+    "split": "val",
+    "abstract_description": "How can we leverage ISTM and AI-driven analytics to minimize IT service desk workload and improve response times in MediConn Solutions?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0007",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "itsm",
+    "difficulty": "easy",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Emily Patel",
+    "persona_role": "IT Operations",
+    "insight_count": 21,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0008",
+    "split": "val",
+    "abstract_description": "What is the impact of third-party data breaches on MediConn's virtual healthcare platforms and patient data, and what new regulations can be implemented to defend against these breaches?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0008",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "medium",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Brian Smith",
+    "persona_role": "IT Operations",
+    "insight_count": 24,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0009",
+    "split": "val",
+    "abstract_description": "How can MediConn Solutions leverage trendy new CRM solutions to improve patient engagement and retention, and what new CRM solutions are expected in 2025?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0009",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "crm",
+    "difficulty": "medium",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Liam Patel",
+    "persona_role": "Sales",
+    "insight_count": 39,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0010",
+    "split": "val",
+    "abstract_description": "What are the most critical elements of a robust digital presence for a telehealth provider such as MediConn Solutions, and how can we optimize our website and content marketing strategy to attract digital-first patients?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0010",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "marketing",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Ryan Thompson",
+    "persona_role": "Marketing",
+    "insight_count": 49,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0011",
+    "split": "val",
+    "abstract_description": "How can we balance the need for durability and warranty guarantees for EV batteries with evolving regulatory requirements, especially ACC regulations (ACC II), while staying on track with our production timelines through 2035?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0011",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "compliance",
+    "difficulty": "easy",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Sofia Rodriguez",
+    "persona_role": "Product Development",
+    "insight_count": 12,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0012",
+    "split": "val",
+    "abstract_description": "How can Elexion Automotive\u2019s quality assurance processes be optimized to address the unique challenges of electric vehicle production, such as software and user experience issues, compared to gasoline cars?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0012",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "quality_assurance",
+    "difficulty": "easy",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ethan Smith",
+    "persona_role": "Quality and Reliability",
+    "insight_count": 12,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0013",
+    "split": "val",
+    "abstract_description": "How can Elexion Automotive effectively implement a cybersecurity strategy for its electric vehicles, considering the risks and challenges posed by connected and autonomous technologies?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0013",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "medium",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ethan Thompson",
+    "persona_role": "Information Technology",
+    "insight_count": 21,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0014",
+    "split": "val",
+    "abstract_description": "Can we leverage AI-enhanced battery management to improve EV battery lifespan by 15%?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0014",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "research",
+    "difficulty": "medium",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Liam Chen",
+    "persona_role": "Engineering and Technology",
+    "insight_count": 24,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0015",
+    "split": "val",
+    "abstract_description": "How can Elexion Automotive increase customer trust through after-sales support while balancing the need for exceptional customer care with efficient and cost-effective service?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0015",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "csm",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ryan Thompson",
+    "persona_role": "Customer Experience",
+    "insight_count": 48,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0016",
+    "split": "val",
+    "abstract_description": "How is Lee's Market positioned to communicate with all of its suppliers, big and small, concerning FSMA 204 regulations, specifically the tracking of Lot codes?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0016",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "compliance",
+    "difficulty": "easy",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Emily Patel",
+    "persona_role": "Operations",
+    "insight_count": 9,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0017",
+    "split": "val",
+    "abstract_description": "Given the 2025 market trend of consumers value-seeking and trading down to discounters, what specific metrics should Lee's Market utilize to measure the incremental market share gained within its target Asian community and diverse urban center markets by Q4 2026, assuming a strategic focus on expanding its culturally authentic private label and prepared foods offerings as its primary value proposition?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0017",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "market analysis",
+    "difficulty": "easy",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Sofia Patel",
+    "persona_role": "Marketing",
+    "insight_count": 9,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0018",
+    "split": "val",
+    "abstract_description": "In light of the broader competitive context, including the failed Albertsons-Kroger merger and the persistent threat from discounters, what specific competitive data should Lee's Market's Market Research team track and analyze over the next 12 months to measure the shift in consumer behavior across its target diverse urban centers, specifically concerning the simultaneous prioritization of value-seeking and health & wellness?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0018",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "market analysis",
+    "difficulty": "easy",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Sofia Patel",
+    "persona_role": "Marketing",
+    "insight_count": 9,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0019",
+    "split": "val",
+    "abstract_description": "Given the industry focus on operational efficiency and the trend of using technology like electronic shelf labels (ESL) mentioned in 2025 forecasts, what is the projected return on investment (ROI) that Lee's Market's Canadian operations can expect from a full rollout of ESL technology by Q3 2026, considering its unique challenge of managing a high volume of bilingual/multilingual product information?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0019",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "market analysis",
+    "difficulty": "easy",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Sofia Patel",
+    "persona_role": "Marketing",
+    "insight_count": 9,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0020",
+    "split": "val",
+    "abstract_description": "What is the best way for my team at Lee's Market to leverage retail personalization techniques to make customer interactions more convenient and efficient and generate more regional growth in 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0020",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "sales",
+    "difficulty": "medium",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Michael Lee",
+    "persona_role": "Sales",
+    "insight_count": 13,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0021",
+    "split": "val",
+    "abstract_description": "What ITSM strategies, such as governance improvements, workflow automation, or system integrations, could provide insights to improve incident, problem, and change management at Lee\u2019s Market in 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0021",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "itsm",
+    "difficulty": "medium",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Kevin Wong",
+    "persona_role": "Information Technology",
+    "insight_count": 13,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0022",
+    "split": "val",
+    "abstract_description": "Lee's Market is getting a high number of service desk emails across our stores, so how could we reduce the number of these emails by Q2 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0022",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "itsm",
+    "difficulty": "medium",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Kevin Wong",
+    "persona_role": "Information Technology",
+    "insight_count": 13,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0023",
+    "split": "val",
+    "abstract_description": "By Q3 2026, how can Lee\u2019s Market expand and optimize its IT self-service capabilities to reduce service desk dependency, accelerate resolution times, and improve both employee and customer experience across all stores?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0023",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "itsm",
+    "difficulty": "medium",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Kevin Wong",
+    "persona_role": "Information Technology",
+    "insight_count": 13,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0024",
+    "split": "val",
+    "abstract_description": "What regulatory challenges should MediConn prepare for if it decided to expand its cash-only services into the United States?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0024",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "compliance",
+    "difficulty": "medium",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Samantha Lee",
+    "persona_role": "Executive Leadership",
+    "insight_count": 11,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0025",
+    "split": "val",
+    "abstract_description": "How can Lee's Market, a regional Asian supermarket chain, use tailored AI tools, including chatbots and conversational AI, to personalize their shoppers' experiences in ordering groceries, finding recipes, accessing product information, and enhancing self-service through 2030 and beyond?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0025",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "csm",
+    "difficulty": "hard",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "David Thompson",
+    "persona_role": "Customer Service",
+    "insight_count": 20,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0026",
+    "split": "val",
+    "abstract_description": "How can Lee\u2019s Market use conversational AI and data-driven chatbots to capture the growing Centennial market by providing them with instant feedback and responding to cultural and linguistic nuances among its diverse customer base by May 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0026",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "csm",
+    "difficulty": "hard",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "David Thompson",
+    "persona_role": "Customer Service",
+    "insight_count": 20,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0027",
+    "split": "val",
+    "abstract_description": "How can Lee\u2019s Market, a regional Asian supermarket chain, use conversational AI across social media, live chat, and texting to improve customer engagement and loyalty among Centennial shoppers while ensuring secure handling of customer interactions through 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0027",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "csm",
+    "difficulty": "hard",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "David Thompson",
+    "persona_role": "Customer Service",
+    "insight_count": 20,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0028",
+    "split": "val",
+    "abstract_description": "With the rapid increase in virtual consultations for healthcare visits reported since 2023, what marketing strategies can MediConn Solutions adopt to continue attracting new customers?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0028",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "marketing",
+    "difficulty": "medium",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Ryan Thompson",
+    "persona_role": "Marketing",
+    "insight_count": 13,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0029",
+    "split": "val",
+    "abstract_description": "Given the rise of AI-based knowledge management systems, what strategies can Lee's Market's knowledge management team implement to help maintain low employee turnover rates through 2027?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0029",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "knowledge management",
+    "difficulty": "hard",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Sophie Tran",
+    "persona_role": "Operations and Training",
+    "insight_count": 18,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0030",
+    "split": "val",
+    "abstract_description": "Considering the Retail Knowledge Management article published on the Knowmax website in June 2025, what AI integration strategies could Lee's Market consider for its knowledge systems to help achieve its financial targets for 2030?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0030",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "knowledge management",
+    "difficulty": "hard",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Sophie Tran",
+    "persona_role": "Operations and Training",
+    "insight_count": 18,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0031",
+    "split": "val",
+    "abstract_description": "Given the growing prominence of AI solutions discussed in the June 2025 Retail Knowledge Management article, what AI-driven knowledge management strategies should Lee's Market adopt to ultimately enhance customer experience by 2028?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0031",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "knowledge management",
+    "difficulty": "hard",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Sophie Tran",
+    "persona_role": "Operations and Training",
+    "insight_count": 18,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0032",
+    "split": "val",
+    "abstract_description": "How can Elexion Automotive ensure product compliance with CARB's 100% ZEV sales mandate by 2035 in California?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0032",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "compliance",
+    "difficulty": "easy",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Sofia Rodriguez",
+    "persona_role": "Product Development",
+    "insight_count": 8,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0033",
+    "split": "val",
+    "abstract_description": "How can Lee's Market, guided by information security manager Jason Wong, design and implement a cybersecurity awareness and training program by the end of 2025 that mitigates security risk from high employee turnover and seasonal hiring while minimizing incidents caused by human error and supporting the company's growth in both US and Canadian markets?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0033",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "hard",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Jason Wong",
+    "persona_role": "IT & Security",
+    "insight_count": 47,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0034",
+    "split": "val",
+    "abstract_description": "How can Jason Wong, given Lee's Markets' limited IT resources in 2025, strengthen employee cybersecurity training to reduce risk of retail cyberattacks that lead to operation disruptions and financial loss by Q3 2027?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0034",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "hard",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Jason Wong",
+    "persona_role": "IT & Security",
+    "insight_count": 47,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0035",
+    "split": "val",
+    "abstract_description": "Between Q1 2025 and Q4 2025, how can the adoption of managed security service providers (MSSPs) be leveraged by Jason Wong to address Lee's Market's internal cybersecurity resource constraints, and what measurable improvement in threat management, compliance, and customer trust can be achieved compared to maintaining traditional in-house approaches?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0035",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "hard",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Jason Wong",
+    "persona_role": "IT & Security",
+    "insight_count": 47,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0036",
+    "split": "val",
+    "abstract_description": "With the reported slowdown in the sales of electric vehicles (EV), how can after sales products and customer service strategies help our company remain successful in 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0036",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "csm",
+    "difficulty": "medium",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ryan Thompson",
+    "persona_role": "Customer Experience",
+    "insight_count": 11,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0037",
+    "split": "val",
+    "abstract_description": "Between 2025 and 2027, what are the strategies that Andrew Park needs to put into place for Lee's Market to reduce reputational risk associated with corporate social responsibility communication and at the same time leverage the opportunities to position itself as an ethical alternative to large retailers across Canada and the United States?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0037",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "public relations",
+    "difficulty": "medium",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Andrew Park",
+    "persona_role": "Corporate Communications",
+    "insight_count": 11,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0038",
+    "split": "val",
+    "abstract_description": "Which community partnership programs gave regional food retailers with annual revenues that is between five hundred million dollars and six hundred million dollars the best return on investment during the period of 2022-2023, measured by media coverage value, costs to attract new customers, and improvements in how people felt about the brand?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0038",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "public relations",
+    "difficulty": "medium",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Andrew Park",
+    "persona_role": "Corporate Communications",
+    "insight_count": 11,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0039",
+    "split": "val",
+    "abstract_description": "What carbon footprint metrics and methods of communication did online grocery retailers share about their delivery operations throughout 2024, and how did being open about these environmental impacts affect customer perception in competitive markets across Canada and the US?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0039",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "public relations",
+    "difficulty": "medium",
+    "company_name": "Lee's Market",
+    "company_industry": "Retail",
+    "persona_name": "Andrew Park",
+    "persona_role": "Corporate Communications",
+    "insight_count": 11,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0040",
+    "split": "val",
+    "abstract_description": "The WTT Solution article from March 2025 indicates that Customer Relationship Management (CRM) software is trending in the healthcare industry. How can MediConn Solutions leverage this software to drive the growth of its healthcare services, using patient benefits from the software as a key to increased business by the year 2028?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0040",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "crm",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Liam Patel",
+    "persona_role": "Sales",
+    "insight_count": 16,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0041",
+    "split": "val",
+    "abstract_description": "According to an article in WTT Solutions from March 2025, Customer Relationship Management (CRM) software is trending. What kind of business data can this software analyze, which would aid in the growth of Mediconn Solutions' virtual healthcare clientele going into the year 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0041",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "crm",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Liam Patel",
+    "persona_role": "Sales",
+    "insight_count": 16,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0042",
+    "split": "val",
+    "abstract_description": "According to an article in WTT Solutions in March 2025, Customer Relations Management (CRM) is an important component of any healthcare business plan. What would a business development representative look for in CRM software that would contribute to MediConn Solutions' business growth in 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0042",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "crm",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Liam Patel",
+    "persona_role": "Sales",
+    "insight_count": 16,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0043",
+    "split": "val",
+    "abstract_description": "Considering the tele-health industry trends discussed in the article, how can MediConn Solutions improve patient experience in terms of trust, satisfaction, and retention in Canada by Q4 2026 to stay ahead of competitors?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0043",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "market analysis",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Emily Chen",
+    "persona_role": "Marketing",
+    "insight_count": 19,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0044",
+    "split": "val",
+    "abstract_description": "Starting in 2026 through Q1 2027, how can MediConn Solutions integrate the use of AI in creating the right patient experience, starting from the first touch point through care delivery and follow up to increase the number of patients that engage with their tele-health services?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0044",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "market analysis",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Emily Chen",
+    "persona_role": "Marketing",
+    "insight_count": 19,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0045",
+    "split": "val",
+    "abstract_description": "Given the CHG Healthcare article from June 2025, in which the firm of McKinsey and Company estimates that more than 50 million in-person visits could be converted to virtual visits, how could MediConn Solution's marketing department promote this virtual service to their current patients through Q4 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0045",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "market analysis",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Emily Chen",
+    "persona_role": "Marketing",
+    "insight_count": 19,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0046",
+    "split": "val",
+    "abstract_description": "How would incorporating  AI-IT Service Management (ITSM) allow MediConn Solutions' IT Service Desk employees to become more efficient and effective in 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0046",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "itsm",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Emily Patel",
+    "persona_role": "IT Operations",
+    "insight_count": 34,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0047",
+    "split": "val",
+    "abstract_description": "How can MediConn Solutions use AI-integrated IT Service Management (ITSM) to improve its support of remote care and mobile health apps while maintaining a high standard of regulatory compliance and delivering a seamless experience for patients and healthcare professionals by Q1 of 2027?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0047",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "itsm",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Emily Patel",
+    "persona_role": "IT Operations",
+    "insight_count": 34,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0048",
+    "split": "val",
+    "abstract_description": "By Q3 2025, how can MediConn Solutions' IT Service Management (ITSM) team manage security protocols, ensure regulatory compliance, and implement preventive measures against network and information system security risks, given the sensitivity of electronic medical data?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0048",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "itsm",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Emily Patel",
+    "persona_role": "IT Operations",
+    "insight_count": 34,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0049",
+    "split": "val",
+    "abstract_description": "A 2022 patient experience report found that six in 10 patients identified poor online booking tools and convoluted call centers as barriers to making appointments. When individual patients or corporate employees struggle to book appointments on MediConn Solutions' platform, how can I determine whether the root cause is poot booking tool design or convoluted customer support processes?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0049",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "csm",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Rachel Lee",
+    "persona_role": "Customer Support",
+    "insight_count": 43,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0050",
+    "split": "val",
+    "abstract_description": "According to an article published on TechTarget.com in 2024, excellent patient communication is critical for a successful customer service department. How can MediConn Solutions improve patient communication in order to reduce service calls into Q12025?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0050",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "csm",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Rachel Lee",
+    "persona_role": "Customer Support",
+    "insight_count": 43,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0051",
+    "split": "val",
+    "abstract_description": "The article published on TechTarget in January 2024 cited the MGMA's findings, showing that patient communication technology addresses digital front door issues like poor booking systems. How might MediConn Solutions enhance patient access to virtual consultations and prescription management services in Q1 2026 to reduce wait times and boost satisfaction and retention?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0051",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "csm",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Rachel Lee",
+    "persona_role": "Customer Support",
+    "insight_count": 43,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0052",
+    "split": "val",
+    "abstract_description": "How can MediConn Solutions strengthen its knowledge management system by Q3 2026 to help virtual care teams prevent knowledge-related errors that are shown to be a leading cause of medical errors.",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0052",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "knowledge management",
+    "difficulty": "easy",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Isabella Nguyen",
+    "persona_role": "Operations and Strategy",
+    "insight_count": 8,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0053",
+    "split": "val",
+    "abstract_description": "How can MediConn Solutions leverage its knowledge management systems in 2026 to ensure accurate and safe prescription management in response to newly approved medications, minimizing the risk of medication errors for patients?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0053",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "knowledge management",
+    "difficulty": "easy",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Isabella Nguyen",
+    "persona_role": "Operations and Strategy",
+    "insight_count": 8,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0054",
+    "split": "val",
+    "abstract_description": "In 2026, how can MediConn Solutions use its virtual knowledge management platform to deliver targeted continuous training for healthcare professionals in multidisciplinary care teams, addressing knowledge gaps and improving patient care outcomes in head and neck cancer management?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0054",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "knowledge management",
+    "difficulty": "easy",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Isabella Nguyen",
+    "persona_role": "Operations and Strategy",
+    "insight_count": 8,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0055",
+    "split": "val",
+    "abstract_description": "What data-based strategies can MediConn Solutions opt for to boost sales for their digital health services in Canada in order to reduce readmission rates and improve customer lifetime retention by 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0055",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "sales",
+    "difficulty": "easy",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Julian Lee",
+    "persona_role": "Sales",
+    "insight_count": 8,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0056",
+    "split": "val",
+    "abstract_description": "What sales strategies can MediConn launch in Q1 2026 to grow its customer base for virtual healthcare services while managing the key challenges of entering new markets?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0056",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "sales",
+    "difficulty": "easy",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Julian Lee",
+    "persona_role": "Sales",
+    "insight_count": 8,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0057",
+    "split": "val",
+    "abstract_description": "After converting a client into a full-time user of their virtual healthcare digital services in 2026, what key factors should be considered to ensure long term client retention with MediConn Solutions?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0057",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "sales",
+    "difficulty": "easy",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Julian Lee",
+    "persona_role": "Sales",
+    "insight_count": 8,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0058",
+    "split": "val",
+    "abstract_description": "In 2026, since a ransomware attack would not be just an IT issue but a risk to every function of MediConn Solutions, what specific architectural and procedural controls would a cybersecurity specialist need to design and implement to minimize the blast radius and ensure MediConn\u2019s clinical continuity during an extended loss of services from one of their third-party providers?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0058",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Brian Smith",
+    "persona_role": "IT Operations",
+    "insight_count": 16,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0059",
+    "split": "val",
+    "abstract_description": "By Q4 2025, how can MediConn Solutions integrate the HHS Cybersecurity Performance Goals (CPGs) into its virtual healthcare platform to ensure compliance for both internal systems and third-party vendors, while effectively mitigating emerging cyber threats?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0059",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Brian Smith",
+    "persona_role": "IT Operations",
+    "insight_count": 16,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0060",
+    "split": "val",
+    "abstract_description": "In 2026, how can MediConn Solutions defend its virtual healthcare platform against coordinated ransomware attacks facilitated by foreign nation-state cyber threat actors, ensuring uninterrupted access to clinical systems and patient safety?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0060",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Brian Smith",
+    "persona_role": "IT Operations",
+    "insight_count": 16,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0061",
+    "split": "val",
+    "abstract_description": "By Q3 2026, which specific features of Salesforce's Automotive Cloud, such as Drive Console, House Management, or Vehicle Console, could most effectively enhance Elexion's customer retention strategies for mid-income families across North American markets, keeping in mind Elexion Automotive's focus on sustainability messaging and after-purchase charging station support?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0061",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "crm",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Emily Lee",
+    "persona_role": "Sales and Marketing",
+    "insight_count": 19,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0062",
+    "split": "val",
+    "abstract_description": "Given that manufacturers typically lose all contact once their vehicles are resold by the original owner or dealer, how could Automotive Cloud's vehicle tracking capabilities help Elexion Automotive increase engagement with second-hand buyers of its EVs by 25% in North America by Q4 2025?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0062",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "crm",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Emily Lee",
+    "persona_role": "Sales and Marketing",
+    "insight_count": 19,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0063",
+    "split": "val",
+    "abstract_description": "How could Elexion Automotive utilize Automotive Cloud's dealer performance management tools by early 2027 to strengthen relationships with its North American dealer network and, at the same time, maintain 90% of its direct-to-government sales channel?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0063",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "crm",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Emily Lee",
+    "persona_role": "Sales and Marketing",
+    "insight_count": 19,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0064",
+    "split": "val",
+    "abstract_description": "How will Elexion Automotive's adoption of a complete direct-to-customer sales model by 2026 affect sales cycle duration, conversion rates, and average revenue per customer across the United States with franchise laws?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0064",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "sales",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Amanda Lee",
+    "persona_role": "Sales",
+    "insight_count": 43,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0065",
+    "split": "val",
+    "abstract_description": "If Elexion Automotive shifts from dealership franchising to a direct-to-customer sales model, how could it capture the benefits of the transition to drive sales and higher margins in 2027?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0065",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "sales",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Amanda Lee",
+    "persona_role": "Sales",
+    "insight_count": 43,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0066",
+    "split": "val",
+    "abstract_description": "By the end of 2025, how can Elexion Automotive use data generated through its customer relationship management system to analyze customer behavior online and identify patterns that drive sales?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0066",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "sales",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Amanda Lee",
+    "persona_role": "Sales",
+    "insight_count": 43,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0067",
+    "split": "val",
+    "abstract_description": "How well is Elexion positioned to adapt to and take advantage of AI and machine learning to advance our ADAS technology by June 2026 while providing a friendly end-user experience for our drivers?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0067",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "research",
+    "difficulty": "easy",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Liam Chen",
+    "persona_role": "Engineering and Technology",
+    "insight_count": 4,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0068",
+    "split": "val",
+    "abstract_description": "HERE's ADAS technology has the potential to warn drivers about hazards they might not see in front of them. How can Elexion utilize AI to test our ADAS while maintaining our compliance certifications by Q2 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0068",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "research",
+    "difficulty": "easy",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Liam Chen",
+    "persona_role": "Engineering and Technology",
+    "insight_count": 4,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0069",
+    "split": "val",
+    "abstract_description": "How can AI be used to help Elexion identify problems with their EVs before they become issues when EU's policy of zero emissions goes into effect in 2035?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0069",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "research",
+    "difficulty": "easy",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Liam Chen",
+    "persona_role": "Engineering and Technology",
+    "insight_count": 4,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0070",
+    "split": "val",
+    "abstract_description": "Given the Help Net Security article from April 2025, what strategies should Elexion Automotive be cognizant of to protect its consumer base from remote cybersecurity attacks going into Q1 of 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0070",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "medium",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ethan Thompson",
+    "persona_role": "Information Technology",
+    "insight_count": 11,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0071",
+    "split": "val",
+    "abstract_description": "Referencing the information shared in the April 2025 article from Help Net Security, what external cybersecurity market data involving the automotive industry should Elexion Automotive analyze by the end of Q4 2025 to protect consumer data and safety?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0071",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "medium",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ethan Thompson",
+    "persona_role": "Information Technology",
+    "insight_count": 11,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0072",
+    "split": "val",
+    "abstract_description": "In response to the April 2025 Help Net Security article, how well is Elexion Automotive poised to adapt and take proactive measures to prevent itself and its consumer base from the latest cybersecurity threats as we approach 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0072",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "medium",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ethan Thompson",
+    "persona_role": "Information Technology",
+    "insight_count": 11,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0073",
+    "split": "val",
+    "abstract_description": "How can Elexion Automotive's control interface design strategy for 2026 EV models prioritize physical buttons and switches by Q3 2025 to reduce the 30% higher control/display problem rate for EVs and achieve PP100 scores below the 266 EV average?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0073",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "quality assurance",
+    "difficulty": "medium",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ethan Smith",
+    "persona_role": "Quality and Reliability",
+    "insight_count": 11,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0074",
+    "split": "val",
+    "abstract_description": "What impact would a 20% increase in dealer-led customer education on EV infotainment and connectivity features have on reducing service visit frequency by 2027?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0074",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "quality assurance",
+    "difficulty": "medium",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ethan Smith",
+    "persona_role": "Quality and Reliability",
+    "insight_count": 11,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0075",
+    "split": "val",
+    "abstract_description": "How can Elexion Automotive's quality assurance testing protocols prioritize Apple CarPlay and Android Auto connectivity performance by Q4 2025 for 2026 EV models to differentiate from competitors and attract 50% of Apple users and 42% of Samsung users who depend on smartphone connections every drive?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0075",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "quality assurance",
+    "difficulty": "medium",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ethan Smith",
+    "persona_role": "Quality and Reliability",
+    "insight_count": 11,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0076",
+    "split": "val",
+    "abstract_description": "By Q2 2026, how can Elexion Automotive leverage the integration of digital engineering methodologies with digital twins to optimize EV battery performance and lifecycle management, while ensuring regulatory compliance across North American markets?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0076",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "asset management",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Olivia Martinez",
+    "persona_role": "Asset Management",
+    "insight_count": 16,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0077",
+    "split": "val",
+    "abstract_description": "How can Elexion Automotive use real-time data from IoT sensors embedded in vehicles and manufacturing equipment, combined with digital engineering-enabled digital twins, to enhance predictive maintenance and minimize downtime in production lines by the end of 2025?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0077",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "asset management",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Olivia Martinez",
+    "persona_role": "Asset Management",
+    "insight_count": 16,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0078",
+    "split": "val",
+    "abstract_description": "By Q3 2026, how can Elexion Automotive apply digital twins enhanced with AI-driven digital engineering capabilities to enable scalable customization of EV models for mid-income families, while maintaining sustainable resource usage and reducing production costs?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0078",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "asset management",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Olivia Martinez",
+    "persona_role": "Asset Management",
+    "insight_count": 16,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0079",
+    "split": "val",
+    "abstract_description": "Based on the 2024 report \"Trends in electric cars\" on iea.org, how are competitor strategies and market positioning shaping the North American EV sector by Q2 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0079",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "market analysis",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ryan Thompson",
+    "persona_role": "Sales and Marketing",
+    "insight_count": 19,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0080",
+    "split": "val",
+    "abstract_description": "Based on the 2024 report \"Trends in electric cars\" on iea.org, which developments in battery technology and EV supply chains are likely to impact global production and delivery dynamics by Q2 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0080",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "market analysis",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ryan Thompson",
+    "persona_role": "Sales and Marketing",
+    "insight_count": 19,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0081",
+    "split": "val",
+    "abstract_description": "Given the evolving battery price trends, supply chain dynamics, and regional material availability highlighted in the 2024 IEA report \"Trends in Electric Cars\", how can Elexion Automotive optimize its battery sourcing and procurement strategy to maintain cost efficiency and production resilience by Q1 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0081",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "market analysis",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ryan Thompson",
+    "persona_role": "Sales and Marketing",
+    "insight_count": 19,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0082",
+    "split": "val",
+    "abstract_description": "How can Elexion Automotive strengthen its retail dealership presence to increase EV showroom visibility in Q4?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0082",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "retail",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ryan Thompson",
+    "persona_role": "Sales and Marketing",
+    "insight_count": 15,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0083",
+    "split": "val",
+    "abstract_description": "How can Elexion use virtual healthcare-style remote diagnostics to reduce warranty repair downtime?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0083",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "virtual/remote healthcare",
+    "difficulty": "medium",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ryan Thompson",
+    "persona_role": "Sales and Marketing",
+    "insight_count": 14,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0084",
+    "split": "val",
+    "abstract_description": "How should Elexion adjust its battery sourcing strategy to mitigate lithium price volatility expected in 2025?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0084",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "automotive -- electric vehicles",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ryan Thompson",
+    "persona_role": "Sales and Marketing",
+    "insight_count": 15,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0085",
+    "split": "val",
+    "abstract_description": "Which compliance gaps must Elexion address to meet updated CARB ZEV 2025 reporting requirements?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0085",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "automotive -- electric vehicles",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive",
+    "company_industry": "Automotive -- Electric Vehicles",
+    "persona_name": "Ryan Thompson",
+    "persona_role": "Sales and Marketing",
+    "insight_count": 15,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0086",
+    "split": "val",
+    "abstract_description": "As the CPPA Act (Bill C-27) awaits parliamentary decision, how can MediConn build preparedness measures to ensure a smooth transition in the event the Act comes into effect by Q2 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0086",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "it service management",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions (Vancouver, Canada, $50M - $100M, 250 employees)",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Ryan Cooper",
+    "persona_role": "",
+    "insight_count": 21,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0087",
+    "split": "val",
+    "abstract_description": "What are some ways for Lee's Market to enhance on-floor customer engagement to offset the impact of Canada\u2019s July 2025 retail sales decline of 0.8% and drive a measurable rebound in the remaining months of 2025?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0087",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "sales",
+    "difficulty": "hard",
+    "company_name": "Lee's Market (Richmond, British Columbia, Canada, $500M - $600M, 5000 employees)",
+    "company_industry": "Retail",
+    "persona_name": "Tony Nguyen",
+    "persona_role": "",
+    "insight_count": 21,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0088",
+    "split": "val",
+    "abstract_description": "In alignment with Canada\u2019s new call for proposals to strengthen the country\u2019s cyber resilience and address evolving cyber threats under the 2025 Cyber Security Cooperation Program (CSCP), what are some considerations to keep in mind while integrating a new AI anomaly detection tool into MediConn's existing infrastructure by Q3 2026 without disrupting critical healthcare services?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0088",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions (Vancouver, Canada, $50M - $100M, 250 employees)",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Jordan Lee",
+    "persona_role": "",
+    "insight_count": 23,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0089",
+    "split": "val",
+    "abstract_description": "Given that one in seven new vehicles sold in Canada in 2024 were zero-emission, how can Elexion Automotive\u2019s QA team enhance cold-weather testing protocols by Q4 2026 to improve EV battery endurance and reliability in the country\u2019s key ZEV markets?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0089",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "quality assurance",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive (Austin, Texas, USA, $350M - $500M, 1900 employees)",
+    "company_industry": "Automotive \u2013 Electric Vehicles",
+    "persona_name": "Amanda Foster",
+    "persona_role": "",
+    "insight_count": 22,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0090",
+    "split": "val",
+    "abstract_description": "How can Lee's Market boost online sales by 20% by targeting younger consumers (ages 18\u201335) and differentiate itself from dominant players in the Canadian retail market by Q1 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0090",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "sales",
+    "difficulty": "hard",
+    "company_name": "Lee's Market (Richmond, British Columbia, Canada, $500M - $600M, 5000 employees)",
+    "company_industry": "Retail",
+    "persona_name": "Grace Kim",
+    "persona_role": "",
+    "insight_count": 21,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0091",
+    "split": "val",
+    "abstract_description": "Considering companies achieve superior financial results by focusing on enhancing the experience of existing customers, what CS service improvements could be implemented by 2026 to make customers feel more recognized and valued during interactions?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0091",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "customer relationship management",
+    "difficulty": "hard",
+    "company_name": "Lee's Market (Richmond, British Columbia, Canada, $500M - $600M, 5000 employees)",
+    "company_industry": "Retail",
+    "persona_name": "Sophie Liu",
+    "persona_role": "",
+    "insight_count": 21,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0092",
+    "split": "val",
+    "abstract_description": "What additional compliance controls should be integrated into MediConn\u2019s platform by Q2 2026 to ensure secure authentication and patient verification for Indigenous patients in low-connectivity environments?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0092",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "compliance",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions (Vancouver, Canada, $50M - $100M, 250 employees)",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Emma Martinez",
+    "persona_role": "",
+    "insight_count": 23,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0093",
+    "split": "val",
+    "abstract_description": "In response to the federal government\u2019s 2025 interpretation of the Canada Health Act, what should MediConn Solutions do to address compliance risks from legal precedents or provincial variations by Q4 2028?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0093",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "compliance",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions (Vancouver, Canada, $50M - $100M, 250 employees)",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Dr. Priya Patel",
+    "persona_role": "",
+    "insight_count": 21,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0094",
+    "split": "val",
+    "abstract_description": "What steps can MediConn Solutions take in FY2026 to optimize cybersecurity and data protection amid the healthcare industry\u2019s growing focus on digital engagement and operational efficiency?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0094",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "cybersecurity",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions (Vancouver, Canada, $50M - $100M, 250 employees)",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Daniel Kim",
+    "persona_role": "",
+    "insight_count": 22,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0095",
+    "split": "val",
+    "abstract_description": "What considerations will need to be made when Lee's Market is redesigning its loyalty program by Q2 2026 to serve both Gen Z/Millennial digital preferences and Gen X/Boomer traditional service expectations?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0095",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "customer relationship management",
+    "difficulty": "hard",
+    "company_name": "Lee's Market (Richmond, British Columbia, Canada, $500M - $600M, 5000 employees)",
+    "company_industry": "Retail",
+    "persona_name": "Janet Park",
+    "persona_role": "",
+    "insight_count": 22,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0096",
+    "split": "val",
+    "abstract_description": "As per the report by the U.S. Census Bureau's indication of a rise in food service sales since August 2024, how can Lee\u2019s Market optimize in-store layouts and product displays across its U.S. locations to increase bakery sales by 15% by the end of Q1 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0096",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "sales",
+    "difficulty": "hard",
+    "company_name": "Lee's Market (Richmond, British Columbia, Canada, $500M - $600M, 5000 employees)",
+    "company_industry": "Retail",
+    "persona_name": "Maria Gonzalez",
+    "persona_role": "",
+    "insight_count": 25,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0097",
+    "split": "val",
+    "abstract_description": "How can MediConn streamline its IT workflows in Q4 2025 to boost clinician efficiency and manage per-consultation costs, given that virtual healthcare expansion has improved access but increased overall expenses?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0097",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "it service management",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions (Vancouver, Canada, $50M - $100M, 250 employees)",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Laura Singh",
+    "persona_role": "",
+    "insight_count": 23,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0098",
+    "split": "val",
+    "abstract_description": "Given the drop in Canadian retail sales brought on by US tariffs in 2025, what insights should Lee\u2019s Market derive from product-level sales trends across tariff-exposed and tariff-insulated categories to update sales forecasts by 2027?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0098",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "sales",
+    "difficulty": "hard",
+    "company_name": "Lee's Market (Richmond, British Columbia, Canada, $500M - $600M, 5000 employees)",
+    "company_industry": "Retail",
+    "persona_name": "Andrew Chang",
+    "persona_role": "",
+    "insight_count": 21,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0099",
+    "split": "val",
+    "abstract_description": "How should Elexion Automotive update its compliance documentation framework by 2026 to verify and record supply-chain investment credits under Canada\u2019s revised ZEV mandate?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0099",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "compliance",
+    "difficulty": "hard",
+    "company_name": "Elexion Automotive (Austin, Texas, USA, $350M - $500M, 1900 employees)",
+    "company_industry": "Automotive \u2013 Electric Vehicles",
+    "persona_name": "Rachel Kim",
+    "persona_role": "",
+    "insight_count": 21,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  },
+  {
+    "id": "DR0100",
+    "split": "val",
+    "abstract_description": "Which IT modernization efforts should MediConn emphasize to stay aligned with national virtual care standards and shared digital health infrastructure by 2026?",
+    "recommended_max_steps": 50,
+    "container_config": {
+      "image": "drbench-services:DR0100",
+      "ports": [
+        8080,
+        8081,
+        8082,
+        8085,
+        8090,
+        8099,
+        1143
+      ],
+      "ram_gb": 6.0,
+      "cpu_cores": 2.0,
+      "disk_gb": 10.0
+    },
+    "domain": "it service management",
+    "difficulty": "hard",
+    "company_name": "MediConn Solutions (Vancouver, Canada, $50M - $100M, 250 employees)",
+    "company_industry": "Virtual/Remote Healthcare",
+    "persona_name": "Mark Johnson",
+    "persona_role": "",
+    "insight_count": 22,
+    "_type": "drbench_cube.benchmark.DrBenchTaskMetadata"
+  }
+]
