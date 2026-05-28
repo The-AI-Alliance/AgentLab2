@@ -85,8 +85,11 @@ def run_cmd(
     path: Annotated[Path, typer.Argument(help="Experiment directory or single episode directory.")],
     recipe: Annotated[str, typer.Option(help="Recipe name (see use_cases/ subdirectories).")] = "general_blame",
     driver: Annotated[
-        str, typer.Option(help="Coding-agent driver: 'claude-code-sdk' (API key) or 'claude-terminal' (subscription).")
-    ] = "claude-code-sdk",
+        str,
+        typer.Option(
+            help="Coding-agent driver: 'claude-terminal' (subscription, default) or 'claude-code-sdk' (API key)."
+        ),
+    ] = "claude-terminal",
     investigator_model: Annotated[
         str | None,
         typer.Option("--investigator-model", help="Override the recipe's per-episode investigator model."),
@@ -190,7 +193,7 @@ def run_cmd(
 @app.command("init-context")
 def init_context_cmd(
     experiment_dir: Annotated[Path, typer.Argument(help="Experiment directory.")],
-    driver: Annotated[str, typer.Option(help="Driver to invoke the context agent through.")] = "claude-code-sdk",
+    driver: Annotated[str, typer.Option(help="Driver to invoke the context agent through.")] = "claude-terminal",
     model: Annotated[str, typer.Option(help="Model name for the context agent.")] = "claude-opus-4-7",
     verbose: Annotated[bool, typer.Option("-v", "--verbose")] = False,
 ) -> None:

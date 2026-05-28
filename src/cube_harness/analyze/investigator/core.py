@@ -20,8 +20,8 @@ from cube_harness.analyze.cross_experiment.cross_investigation_agreement import 
 )
 from cube_harness.analyze.investigator.agent_driver import (
     AgentDriver,
-    ClaudeCodeSDKDriver,
     DriverResult,
+    TerminalClaudeDriver,
     ToolAction,
     TraceMode,
 )
@@ -87,7 +87,7 @@ class InvestigationConfig(TypedBaseModel):
 
     # Behaviour
     recipe: InvestigatorRecipe = Field(default_factory=get_default_recipe)
-    driver: AgentDriver = Field(default_factory=ClaudeCodeSDKDriver)
+    driver: AgentDriver = Field(default_factory=TerminalClaudeDriver)
     selector: Selector | None = None
     audit: bool = False
     n_seeds: int = 1
@@ -283,8 +283,8 @@ def _resolve_recipe(recipe: InvestigatorRecipe | None, model_override: str | Non
 
 
 def _resolve_driver(driver: AgentDriver | None) -> AgentDriver:
-    """Default to `ClaudeCodeSDKDriver()` when no driver is given."""
-    return driver or ClaudeCodeSDKDriver()
+    """Default to `TerminalClaudeDriver()` (subscription `claude -p`) when no driver is given."""
+    return driver or TerminalClaudeDriver()
 
 
 def _build_user_prompt(
@@ -776,7 +776,7 @@ def write_summary(
         effective_model = model or next(iter(results.values()))[1].model
         recipe = get_default_recipe().model_copy(update={"model": effective_model})
     if driver is None:
-        driver = ClaudeCodeSDKDriver()
+        driver = TerminalClaudeDriver()
     audit_costs = audit_costs or {}
     outcomes = Counter(o.outcome.value for o, _ in results.values())
     blames = Counter(o.primary_blame.value for o, _ in results.values())
