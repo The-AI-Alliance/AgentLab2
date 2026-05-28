@@ -164,7 +164,6 @@ class ClaudeCodeSDKDriver:
         permission_mode: Literal["bypassPermissions", "ask"] = "bypassPermissions",
         verbose: bool = False,
         trace_mode: TraceMode = "actions",
-        max_turns: int | None = None,
     ) -> DriverResult:
         try:
             from claude_agent_sdk import (
@@ -191,7 +190,6 @@ class ClaudeCodeSDKDriver:
             cwd=str(cwd),
             add_dirs=[str(p) for p in additional_dirs],
             model=model,
-            max_turns=max_turns,
             include_partial_messages=False,
         )
         if verbose:

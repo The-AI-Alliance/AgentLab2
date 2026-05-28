@@ -74,7 +74,6 @@ ch-trace = "cube_harness.analyze.trace:main"
 ch-investigate = "cube_harness.analyze.investigator:main"
 ch-investigation-report = "cube_harness.analyze.investigation_report:main"
 ch-reset-episodes = "cube_harness.analyze.reset_episodes:main"
-ch-auto-cube = "cube_harness.auto_cube.driver:main"
 
 [dependency-groups]
 dev = [
