@@ -15,9 +15,10 @@ Per the constitution's RFC process (post-`068a718f`): "Additive, backward-compat
 |---|---|
 | New `Rollout` layer (new spec) | **Yes** — net-new architectural layer |
 | `Agent.reflect()` default no-op | No — additive method with default impl |
+| `Episode.run_with(task, agent)` | No — additive method on existing layer |
 | Storage `rollout_id` / `episode_index_in_rollout` fields | No — additive optional fields |
 
-This document describes all three because they're co-designed; only the Rollout layer requires async review. Class signatures live in `deltas.md` — this doc covers placement and rationale.
+This document describes all four because they're co-designed; only the Rollout layer requires async review. Class signatures live in `deltas.md` — this doc covers placement and rationale.
 
 ---
 
@@ -57,6 +58,8 @@ Experiment           ← unchanged: collection of tasks
 ```
 
 `Rollout` sits *between* `Experiment` and `Episode`. It **uses** `Episode` internally — `Episode` is not extended, because that conflates "one task attempt" with "N attempts with shared memory" and breaks the existing episode spec.
+
+Composition is realized via a small additive method on `Episode`: **`Episode.run_with(task, agent, extra_metadata=None) -> Trajectory`**. The existing `Episode.run()` keeps its current contract (constructs task + agent locally, closes the task at the end) — it's now a thin wrapper that calls `run_with()` with the constructed objects. `Rollout` calls `run_with()` directly with its own long-lived `task` and `agent`, threading rollout metadata (`rollout_id`, `episode_index_in_rollout`) through `extra_metadata`. This eliminates the duplicate episode loop that the first cut of `Rollout._run_episode` had to copy from `Episode._run_loop`.
 
 ### Invariants (the architectural decisions)
 

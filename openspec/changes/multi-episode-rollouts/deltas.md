@@ -3,12 +3,14 @@
 Applies to:
 - `openspec/specs/rollout/spec.md` — **new layer, RFC-bound**
 - `openspec/specs/agent/spec.md` — modified (additive: new default-no-op method; no RFC required per constitution Pillar I)
+- `openspec/specs/episode/spec.md` — modified (additive: new `run_with()` method that lets `Rollout` reuse `Episode`'s loop; no RFC required)
 - `openspec/specs/storage/spec.md` — modified (additive: new optional fields; no RFC required)
 - `openspec/README.md` — modified (add rollout layer to index)
 
-The agent and storage deltas are listed here for completeness and traceability,
-even though both are additive backward-compatible changes that can be applied
-directly to their specs in the implementation PR per the constitution.
+The agent, episode, and storage deltas are listed here for completeness and
+traceability, even though all three are additive backward-compatible changes
+that can be applied directly to their specs in the implementation PR per the
+constitution.
 
 ---
 
@@ -43,11 +45,14 @@ directly to their specs in the implementation PR per the constitution.
 
 - `Rollout.run() -> RolloutResult`
 
-  Constructs task + agent once, then executes `n_episodes` against them. Between
-  non-final episodes calls `task.reset()` (next iteration) and
-  `agent.reflect(trajectory, final_reward)`. If `reflect()` returns a non-None
-  `AgentOutput`, the rollout appends it as a synthetic trajectory step on the
-  just-finished episode's trajectory before moving on.
+  Constructs `task` and `agent` once, then executes `n_episodes` by repeatedly
+  delegating to `Episode.run_with(task, agent, extra_metadata=...)`. Between
+  non-final episodes calls `agent.reflect(trajectory, final_reward)`. If
+  `reflect()` returns a non-None `AgentOutput`, the rollout appends it as a
+  synthetic trajectory step on the just-finished episode's trajectory before
+  moving on. `task.close()` is called once at rollout end (not per episode) —
+  the task survives across attempts and `Task.reset()` (invoked at the start
+  of each `Episode.run_with`) returns it to its initial state.
 
 ### Invariants
 
@@ -114,6 +119,66 @@ def reflect(self, trajectory: Trajectory, final_reward: float) -> AgentOutput | 
 - `AgentConfig.make()` contract.
 - ReAct, Genny, legacy_generic_agent — they inherit the no-op default and require
   no source changes to remain functional inside a `Rollout`.
+
+---
+
+## MODIFIED — `openspec/specs/episode/spec.md`
+
+### `Episode` — new optional method
+
+```python
+def run_with(self, task, agent, extra_metadata: dict | None = None) -> Trajectory:
+    """Run one episode against a pre-constructed task and agent.
+
+    Like ``run()``, but skips the internal ``task_config.make()`` and
+    ``agent_config.make()`` calls — the caller owns the task and agent
+    lifecycle. The caller is also responsible for calling ``task.close()``
+    afterwards; ``run_with`` does NOT close the task.
+
+    ``extra_metadata`` is merged into ``Trajectory.metadata`` alongside the
+    standard fields (``task_id``, ``agent_name``, ``action_schemas``).
+    ``Rollout`` uses this to thread ``rollout_id`` and
+    ``episode_index_in_rollout`` into the trajectory.
+    """
+```
+
+### `Episode.run()` — refactored to compose on `run_with`
+
+The existing ``run()`` keeps its current public contract (construct task,
+construct agent, run the loop, close the task). Internally it is now a thin
+wrapper:
+
+```python
+def run(self) -> Trajectory:
+    task = self.config.task_config.make(runtime_context=self._runtime_context)
+    agent = self.config.agent_config.make(action_set=task.action_set, task_id=...)
+    try:
+        return self.run_with(task=task, agent=agent)
+    finally:
+        task.close()
+```
+
+### Invariants (additions)
+
+- `Episode.run()` constructs task + agent, calls ``run_with``, closes the task.
+  Behavior unchanged from prior versions for all existing callers.
+- `Episode.run_with()` does NOT close the task — the caller (typically
+  ``Rollout``) owns the task lifecycle so it can survive across episodes.
+- `extra_metadata` keys are merged into `trajectory.metadata`; on key collision
+  with the standard fields, the caller-provided value wins (allows overriding
+  e.g. `agent_name` if needed, though that's discouraged).
+- `Trajectory.steps[0]` is still the env reset output; ``run_with`` calls
+  ``task.reset()`` itself, so the caller passes a task that may have been
+  reset zero or more times before.
+
+### Not changed
+
+- `Episode.run()` signature and existing callers (experiment, exp_runner,
+  recipes, tests).
+- `EpisodeConfig` fields.
+- `Episode._run_loop` (the inner per-turn loop).
+- Episode's persistence behavior — both ``run()`` and ``run_with()`` write the
+  same files via the same ``FileStorage``.
 
 ---
 
