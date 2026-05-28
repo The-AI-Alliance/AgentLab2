@@ -13,6 +13,13 @@ reward != 1.0 in CI. The debug tests validate structural compliance
 (container starts, reset works, action_set is valid, done triggers) rather
 than reward value.
 
+Note on reset_reproducibility: cube test's test_reset_reproducibility check
+will fail. This is expected and intentional — reset() embeds dynamically-
+allocated Docker host port URLs in the prompt (e.g. http://localhost:55023).
+Two resets of the same task produce different URLs because Docker assigns
+ephemeral ports at container launch time. The research question, persona, and
+credentials are always identical across resets; only the port numbers differ.
+
 Public API
 ----------
 get_debug_benchmark()        → DrBenchBenchmarkConfig (scoped to sanity subset)
