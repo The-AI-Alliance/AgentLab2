@@ -1,11 +1,21 @@
 """Agent abstraction."""
 
+import asyncio
+import logging
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 from cube.core import ActionSchema, Observation, ValidatedConfig
 from pydantic import Field
 
 from cube_harness.core import AgentOutput
+
+if TYPE_CHECKING:
+    from cube.task import Task
+
+    from cube_harness.recorder import TurnRecorder
+
+logger = logging.getLogger(__name__)
 
 
 def apply_description_overrides(encoded_tools: list[dict], overrides: dict[str, str]) -> None:
@@ -66,6 +76,43 @@ class Agent(ABC):
         Perform a step given an observation and return the agent's output with actions.
         """
         pass
+
+    async def run(
+        self,
+        initial_obs: Observation,
+        task: "Task",
+        recorder: "TurnRecorder",
+    ) -> None:
+        """Default gym-style loop on top of `self.step` — the canonical
+        entry point invoked by `Episode` (RFC `agent-owns-loop`).
+
+        Sync `step()` agents get this for free. Agents that want
+        parallel tool calls, async LLM dispatch, or streaming
+        observability override this method instead.
+
+        Termination:
+
+          * Natural: `env_output.done == True` from `task.step`, or
+            `agent.step` returns empty actions with no error.
+          * Hard: `BudgetExceeded` raised by a monitored tool propagates
+            up to `Episode`, which captures it in `finally`.
+
+        The agent does NOT call `task.reset` or `task.evaluate` — those
+        are Episode's. `task.step` is wrapped in `asyncio.to_thread`
+        because cube-standard's `Task.step` is sync today.
+        """
+        obs = initial_obs
+        while True:
+            agent_output = await asyncio.to_thread(self.step, obs)
+            recorder.record(agent_output)
+            if not agent_output.actions and agent_output.error is None:
+                # Graceful "done" by the agent itself (the convention
+                # today's Episode._run_loop honours).
+                return
+            env_output = await asyncio.to_thread(task.step, agent_output.actions)
+            if env_output.done:
+                return
+            obs = env_output.obs
 
     def __repr__(self) -> str:
         return self.config.model_dump_json(indent=2, serialize_as_any=True)
