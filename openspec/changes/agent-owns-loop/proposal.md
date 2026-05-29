@@ -49,9 +49,11 @@ trajectories into typed event streams.
   signature** — drop-in replacements, mixable in a `Toolbox` alongside
   unmonitored tools. Agents call `execute_action(action) → Observation | StepError`
   without knowing or caring which tools are monitored. The wrappers emit
-  trajectory events and OTel spans on every call. They replace
-  `ToolWithTelemetry`. Budget enforcement lives in `MonitoredTool` (raises
-  `BudgetExceeded`).
+  trajectory events and OTel spans on every call. The previous
+  `ToolWithTelemetry` shim was already deleted in commit `e760f9e5`
+  together with the `openspec/specs/tool/` spec layer; this RFC re-creates
+  the layer around `MonitoredTool`. Budget enforcement lives in
+  `MonitoredTool` (raises `BudgetExceeded`).
 - New trajectory event model: `AgentEvent`, `ToolCallEvent`, `EvaluationEvent`,
   replacing the binary `EnvironmentOutput | AgentOutput` union. Alternation
   invariant removed.

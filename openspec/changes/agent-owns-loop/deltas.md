@@ -2,14 +2,35 @@
 
 Applies to (cube-harness specs):
 
-- `openspec/specs/core/spec.md` (primary — trajectory model)
+- `openspec/specs/core/spec.md` (primary — trajectory event model)
 - `openspec/specs/agent/spec.md` (primary — `Agent.run`)
-- `openspec/specs/tool/spec.md` (primary — `MonitoredTool` replaces `ToolWithTelemetry`)
-- `openspec/specs/episode/spec.md` (primary — loop refactor + defensive finalization)
-- `openspec/specs/storage/spec.md` (event-file layout)
+- `openspec/specs/tool/spec.md` (**ADDED** — spec layer was deleted with
+  `ToolWithTelemetry` in commit e760f9e5; this RFC re-creates it for
+  `MonitoredTool`)
+- `openspec/specs/episode/spec.md` (primary — loop refactor; builds on
+  streaming foundation from `stream-trajectory-steps`, already merged)
+- `openspec/specs/storage/spec.md` (event-file layout, evolving the
+  streamed-step model from `stream-trajectory-steps`)
 - `openspec/specs/analyze/spec.md` (XRay event-card UI)
 
 See companion: `cube-standard/openspec/changes/agent-owns-loop/deltas.md`.
+
+### Relationship to recent dev changes
+
+- `stream-trajectory-steps` already lands the "stream every step to disk,
+  never accumulate in memory" pattern (`Trajectory.steps=[]` on return,
+  `SummaryProcessor` as the single source of aggregates). This RFC adopts
+  that pattern wholesale and changes only **what** is streamed: the event
+  union expands from `EnvironmentOutput | AgentOutput` to
+  `AgentEvent | ToolCallEvent | EvaluationEvent`.
+- `e760f9e5` (cleanup: delete unused tool implementations + telemetry
+  wrapper) already removed `ToolWithTelemetry`, `AsyncToolWithTelemetry`,
+  and the `openspec/specs/tool/` spec layer. The tool spec is **created
+  fresh** by this RFC, not modified.
+- `cube-standard:2dfcdeb` (Task generic over tool type) gives `Task` the
+  signature `Task[TMeta, TTool]`. Our additions in
+  `cube-standard/openspec/changes/agent-owns-loop/deltas.md` are additive
+  on top of that generic form.
 
 ---
 
@@ -222,9 +243,13 @@ the standard path; opaque ones use this. See *Connector taxonomy* in
 
 ---
 
-## MODIFIED — `openspec/specs/tool/spec.md`
+## ADDED — `openspec/specs/tool/spec.md`
 
-### `MonitoredTool` replaces `ToolWithTelemetry`
+The `openspec/specs/tool/` spec layer was deleted in commit `e760f9e5`
+together with `ToolWithTelemetry`. This RFC re-creates the layer with a
+single class: `MonitoredTool`.
+
+### `MonitoredTool`
 
 `MonitoredTool` subclasses `cube.tool.AsyncTool` and has the **same**
 `execute_action` signature. It is a transparent decorator — mixable in a
@@ -289,19 +314,14 @@ is sufficient.
   monitored tool is invoked by `task.step`. No harness-side step-eval logic
   needed.
 
-### Removed
-
-- `ToolWithTelemetry` and `AsyncToolWithTelemetry` are removed.
-  In-tree tools currently subclassing them migrate to `cube.tool.Tool` /
-  `AsyncTool` directly; telemetry now comes from `MonitoredTool` wrapping
-  at the harness boundary.
-
 ### Gotchas
 
 - `MonitoredTool` and its budget counter are per-episode — re-using a
   `MonitoredTool` across episodes is a bug.
-- The OTel span attribute `gen_ai.tool.call.result` still uses the
-  string-coerced result body, same as today.
+- The OTel span attribute `gen_ai.tool.call.result` is emitted by
+  `MonitoredTool` (the old `ToolWithTelemetry`-based emission path was
+  removed by `e760f9e5`; this RFC restores per-call tool spans through
+  the new wrapper).
 
 ---
 
@@ -519,11 +539,17 @@ group (parent `AgentEvent` above, siblings below).
 
 ## REMOVED
 
-- `cube_harness.tool.ToolWithTelemetry`, `AsyncToolWithTelemetry`.
 - `Trajectory.steps` direct field — replaced by `Trajectory.events`. The
-  deprecated `steps` property remains as a computed alias for one release.
+  field name `steps` is kept as a computed alias for one release; element
+  type changes from `EnvironmentOutput | AgentOutput` to
+  `AgentEvent | ToolCallEvent | EvaluationEvent`. The streamed-to-disk
+  semantics introduced by `stream-trajectory-steps` (`steps=[]` on a
+  runner-produced trajectory) are preserved.
 - "Trajectory steps alternate" invariant in `core/spec.md`.
 - Standalone screenshot tab in XRay.
+
+(`ToolWithTelemetry` / `AsyncToolWithTelemetry` were already removed by
+`e760f9e5` — listed here for historical context only, not by this RFC.)
 
 ---
 
