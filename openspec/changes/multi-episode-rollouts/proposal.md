@@ -49,6 +49,7 @@ The smallest mechanism that unblocks all four is a single hook: the framework te
 - **`Agent.finalize(reward: float) -> AgentOutput | None`** — additive default-no-op method on the base `Agent` ABC.
 - **Episode invokes it** after the per-turn loop exits (whether via env `done=True` or `max_steps`), passing the final reward from the last `EnvironmentOutput`.
 - **Non-None returns** become synthetic trajectory steps — preserves XRay / cost stats / training-extraction visibility for any LLM call the agent makes inside `finalize()`.
+- **Documented recipe-side convention** for on-disk layout of multi-rollout experiments (`<output_dir>/rollouts/<rollout_id>/{episodes,agent_state}/`). Not framework-enforced; recipes construct paths directly. See "Output directory layout" below.
 
 ### Out of scope
 
@@ -128,28 +129,109 @@ Three invariants worth highlighting:
 
 ### Recipe pattern for multi-episode runs
 
-```python
-# example: 5 attempts at the same task with cross-episode memory
-benchmark = MINIWOB_CONFIGS["default"].make()
-task_config = next(iter(benchmark.get_task_configs()))
-agent_config = LaMerAgentConfig(llm_config=LLMConfig(model_name="openai/gpt-4o"))
+A *rollout* is recipe-level vocabulary for "N sequential episodes against the same task with cross-episode memory." The framework has no notion of a rollout — it's a for-loop the recipe writes. Within one rollout, episodes are sequential (each depends on the prior's memory file). Across rollouts, recipes parallelize via `@ray.remote`.
 
-with benchmark:
+#### Single rollout (sequential)
+
+```python
+# 5 sequential attempts at the same task, cross-episode memory via file
+benchmark_config = MINIWOB_CONFIGS["default"]
+task_config = next(iter(benchmark_config.get_task_configs()))
+
+rollout_dir = experiment_dir / "rollouts" / "rollout_000"
+rollout_dir.mkdir(parents=True, exist_ok=True)
+
+agent_config = LaMerAgentConfig(
+    llm_config=LLMConfig(model_name="openai/gpt-4o"),
+    memory_path=rollout_dir / "agent_state" / "lamer.json",   # ← recipe controls the path
+)
+
+with benchmark_config.make() as benchmark:
     for k in range(5):
         Episode(
-            id=k, output_dir=output_dir, agent_config=agent_config,
+            id=k, output_dir=rollout_dir, agent_config=agent_config,
             task_config=task_config, exp_name="lamer", max_steps=10,
             storage=None, runtime_context=benchmark._runtime_context,
         ).run()
 ```
 
-The agent does its own work:
+#### Many rollouts in parallel (the typical evaluation shape)
 
-- `__init__`: read memory from a file (keyed however it likes — `task_id`, a session id, etc.).
-- `step(obs)`: normal action selection.
-- `finalize(reward)`: append a reflection to memory based on the reward; persist memory file.
+```python
+import ray
+from cube_harness import make_experiment_output_dir
 
-The framework has zero involvement in cross-episode coordination. Each `Episode.run()` constructs a fresh agent; file-based memory survives the agent's lifetime.
+experiment_dir = make_experiment_output_dir("lamer", "miniwob")
+benchmark_config = MINIWOB_CONFIGS["default"]
+task_configs = list(benchmark_config.get_task_configs())
+
+@ray.remote
+def run_rollout(task_config, experiment_dir, rollout_idx, n_episodes=5):
+    rollout_dir = experiment_dir / "rollouts" / f"rollout_{rollout_idx:03d}"
+    rollout_dir.mkdir(parents=True, exist_ok=True)
+    agent_config = LaMerAgentConfig(
+        llm_config=LLMConfig(model_name="openai/gpt-4o"),
+        memory_path=rollout_dir / "agent_state" / "lamer.json",
+    )
+    with benchmark_config.make() as benchmark:
+        for k in range(n_episodes):
+            Episode(
+                id=k, output_dir=rollout_dir, agent_config=agent_config,
+                task_config=task_config, exp_name="lamer", max_steps=10,
+                storage=None, runtime_context=benchmark._runtime_context,
+            ).run()
+
+futures = [
+    run_rollout.remote(tc, experiment_dir, i)
+    for i, tc in enumerate(task_configs)
+]
+ray.get(futures)
+```
+
+Sequentiality is inner (the for-loop, where each episode reads the memory the prior wrote). Parallelism is outer (different rollouts run in different Ray workers, each with its own `rollout_dir` — no contention).
+
+#### What the agent does
+
+- `__init__`: read `self.config.memory_path` from disk into `self.memory`. If the file doesn't exist (first episode of a rollout), start empty.
+- `step(obs)`: normal action selection; uses `self.memory` to inject context into prompts.
+- `finalize(reward)`: append a reward-conditioned reflection to `self.memory`, write `self.memory` back to `memory_path`. Optionally return an `AgentOutput` carrying the reflection's `LLMCall` for trajectory observability.
+
+The framework has zero involvement in cross-episode coordination. Each `Episode.run()` constructs a fresh agent; the *file* is what survives across episodes within a rollout.
+
+### Output directory layout (recipe convention, not framework-enforced)
+
+The recipe is responsible for the on-disk layout. The convention this proposal *recommends* (but does not enforce):
+
+```
+~/cube_harness_results/
+└── <timestamp>_<exp_name>_<hash>/                ← one experiment dir per `make_experiment_output_dir()` call
+    └── rollouts/
+        ├── rollout_000/                          ← one rollout = N sequential episodes
+        │   ├── episodes/                         ← FileStorage V2 layout, written by Episode
+        │   │   ├── <traj_id_ep0>/
+        │   │   │   ├── metadata.json
+        │   │   │   └── steps/...
+        │   │   ├── <traj_id_ep1>/
+        │   │   └── ...
+        │   └── agent_state/                      ← agent's own state files (recipe convention)
+        │       └── lamer.json                    ← cross-episode memory; agent reads on __init__, writes on finalize
+        ├── rollout_001/
+        │   ├── episodes/...
+        │   └── agent_state/...
+        └── ...
+```
+
+Three properties of this layout:
+
+- **One experiment dir, many rollouts.** `make_experiment_output_dir()` creates the top-level dir once per recipe invocation; the recipe constructs `rollouts/rollout_NNN/` subdirs for each rollout. Conceptually parallel to "an experiment evaluates an agent across many rollouts."
+- **`agent_state/` is recipe convention.** The framework doesn't reference `agent_state/`; agents pick paths under `memory_path` (a `LaMerAgentConfig` field). The convention exists so recipes coalesce on one location and downstream tools (analysis scripts, judge runs) can find agent state predictably.
+- **No framework helper for paths.** The recipe constructs `rollout_dir`, `memory_path`, and any other paths directly. Adding a `make_rollout_dir()` framework helper was considered and rejected — recipes need flexibility (different scope-keying, different conventions for non-LaMer agents), and the path construction is two lines.
+
+### Lifecycle and cleanup
+
+- The experiment dir lives in `~/cube_harness_results/` until the user cleans it up — same as non-rollout experiments today. Nothing auto-deletes.
+- Memory files in `agent_state/` are not special — they're part of the experiment artifact, alongside trajectories. Analysis tooling can read them as part of the per-rollout record.
+- Fresh start on next invocation: just call `make_experiment_output_dir()` again. New top-level dir → new `rollouts/` subtree → agent's `__init__` finds no `lamer.json` → starts cold.
 
 ## Alternatives considered
 
@@ -157,7 +239,7 @@ The framework has zero involvement in cross-episode coordination. Each `Episode.
 - **Pass `terminal_obs: Observation` to `finalize`.** Gives the agent the env's final state. Rejected: the agent has been receiving Observations via `step()` all along and has its own internal state. The one thing missing — the reward — is a scalar that doesn't need a whole `Observation` wrapper. Tighter signature, less overhead.
 - **Pass `info: dict` to `finalize`.** Would give the agent task-specific metadata at episode end. Rejected: agents that need this can stash it during `step()` (since they can see `Observation.contents` and the task already routes info into obs). Keeping `finalize` to one scalar is the minimal contract.
 - **A dedicated `Rollout` class + `Agent.reflect(trajectory, reward)` hook.** Earlier design iteration in this same RFC folder. Rejected: bakes meta-RL-specific orchestration into the framework. `Rollout` is one recipe-level for-loop; `reflect`'s `trajectory` parameter is information the agent already has (it received every obs via `step()`).
-- **File-based memory as a framework convention (path keying, helpers).** Considered as a framework affordance. Rejected: agents handle their own persistence. Different agents will key memory differently (per-task, per-rollout, per-config); a framework helper would either be too generic to use or too specific to be general.
+- **File-based memory as a framework-provided helper (path-construction, cleanup).** Considered as a framework affordance (e.g., `make_rollout_dir(experiment_dir, rollout_id) -> Path`). Rejected: the path construction is two lines of recipe code and different agents/recipes need different keying schemes (per-task, per-rollout, per-config-variant). The proposal documents a *recommended on-disk layout* (`<output_dir>/rollouts/<rollout_id>/{episodes,agent_state}/`) so recipes coalesce on one convention, but the framework provides no code — recipes construct paths directly.
 - **Drop `finalize` too; agent infers episode end from step-count heuristics.** Rejected: agent has no reliable signal — the env's `done` flag is invisible to it, and step-count thresholds are fragile across tasks with variable lengths. `finalize` is the minimum signal that's actually reliable.
 
 ## Open questions
@@ -165,7 +247,8 @@ The framework has zero involvement in cross-episode coordination. Each `Episode.
 1. **`finalize()` on errors.** If the episode terminates via exception in `step()` or `task.step()`, should `finalize()` still be called? Proposed: yes — called in a `finally` block, so cleanup runs. The reward passed in that case is whatever `EnvironmentOutput.reward` was at the time of the failure (typically `0.0`).
 2. **Return type: `AgentOutput | None` vs strict `None`.** Proposed: `AgentOutput | None`. Strict `None` would be one fewer concept on the ABC but would make finalize-time LLM calls invisible to the trajectory (no observability for cost stats, XRay, training extraction). The `AgentOutput | None` shape preserves observability at the cost of two extra concepts (return type + the framework's append behavior).
 3. **Whether to pass `done` or `truncated` alongside reward.** Could be useful for an agent that wants to distinguish "env signaled completion" from "max_steps hit." Proposed: no for V1 — keep the signature minimal; agents that need the distinction can check whether their own action history reached `max_steps`.
-4. **Folder name.** The folder is still `multi-episode-rollouts/` for git continuity. Optional cosmetic rename to `agent-finalize-hook/` or similar later — not load-bearing.
+4. **XRay nested-layout support.** XRay currently scans `<output_dir>/episodes/<traj_id>/` directly. Under the recommended nested layout (`<output_dir>/rollouts/<rollout_id>/episodes/<traj_id>/`), XRay would need a small update to traverse the rollout subdir level. Not in scope for this RFC (XRay change lands as a follow-up); the layout works for everything else (analysis scripts, judge, training extraction) since they walk file paths directly.
+5. **Folder name.** The change folder is still `multi-episode-rollouts/` for git continuity. Optional cosmetic rename to `agent-finalize-hook/` or similar later — not load-bearing.
 
 ## References
 
