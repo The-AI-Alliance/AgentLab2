@@ -1,0 +1,73 @@
+id: drbench-cube
+name: "DRBench"
+version: "0.2.1"
+description: >
+  DRBench evaluates agents on 100 enterprise deep research tasks requiring
+  multi-hop retrieval across Nextcloud, Mattermost, email, and web. Each task
+  is grounded in a realistic company scenario with a persona, credentials, and
+  a research question. Scoring uses an LLM judge (insights recall + factuality
+  harmonic mean). Requires Docker and an OpenAI-compatible API key for scoring.
+package: drbench-cube
+dev_install_url: "git+https://github.com/The-AI-Alliance/cube-harness#subdirectory=cubes/drbench-cube"
+
+authors:
+- github: AmirAbaskohi
+  name: Amirhossein Abaskohi
+- github: tianyi-chen
+  name: Tianyi Chen
+- github: mmunozm
+  name: Miguel Muñoz-Mármol
+- name: Curtis Fox
+  email: curtis.fox@servicenow.com
+- name: Amrutha Varshini Ramesh
+  email: amrutha.ramesh@servicenow.com
+- github: marcotet
+  name: Étienne Marcotte
+- github: xhluca
+  name: Xing Han Lù
+- github: nicolaschapados
+  name: Nicolas Chapados
+- github: spandanagella
+  name: Spandana Gella
+- name: Christopher Pal
+  email: christopher.pal@servicenow.com
+- github: aldro61
+  name: Alexandre Drouin
+- github: IssamLaradji
+  name: Issam H. Laradji
+
+legal:
+  wrapper_license: Apache-2.0
+  benchmark_license:
+    reported: Apache-2.0
+    source_url: "https://github.com/ServiceNow/drbench/blob/main/LICENSE"
+    verified_by_original_authors: true
+  notices:
+  - type: third_party_data
+    description: >
+      DRBench dataset hosted on HuggingFace (ServiceNow/drbench). Tasks are
+      synthetic enterprise scenarios; no real company data is included.
+    url: "https://huggingface.co/datasets/ServiceNow/drbench"
+
+paper: "https://arxiv.org/abs/2510.00172"
+getting_started_url: "https://github.com/The-AI-Alliance/cube-harness/tree/main/cubes/drbench-cube"
+
+tags:
+- nlp
+- reasoning
+- docker
+
+max_concurrent_tasks: 8
+parallelization_mode: task-parallel
+
+status: experimental
+task_count: 100
+has_debug_task: true
+has_debug_agent: true
+resources: []
+action_space: []
+features:
+  async: false
+  streaming: false
+  multi_agent: false
+  multi_dim_reward: false

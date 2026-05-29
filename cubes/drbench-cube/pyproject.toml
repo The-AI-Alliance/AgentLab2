@@ -2,6 +2,21 @@
 name = "drbench-cube"
 version = "0.2.1"
 description = "Deep Research Benchmark: 100 enterprise document research tasks requiring multi-hop retrieval across Nextcloud, Mattermost, email, and web."
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Amirhossein Abaskohi" },
+    { name = "Tianyi Chen", email = "tianyi.chen@servicenow.com" },
+    { name = "Miguel Muñoz-Mármol", email = "miguel.munoz@servicenow.com" },
+    { name = "Curtis Fox", email = "curtis.fox@servicenow.com" },
+    { name = "Amrutha Varshini Ramesh", email = "amrutha.ramesh@servicenow.com" },
+    { name = "Étienne Marcotte" },
+    { name = "Xing Han Lù" },
+    { name = "Nicolas Chapados" },
+    { name = "Spandana Gella", email = "spandana.gella@servicenow.com" },
+    { name = "Christopher Pal", email = "christopher.pal@servicenow.com" },
+    { name = "Alexandre Drouin", email = "alexandre.drouin@servicenow.com" },
+    { name = "Issam H. Laradji", email = "issam.laradji@servicenow.com" },
+]
 requires-python = ">=3.12"
 dependencies = [
     "cube-standard>=0.1.0rc8",
