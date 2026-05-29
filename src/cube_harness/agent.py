@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 from cube.core import ActionSchema, Observation, ValidatedConfig
 from pydantic import Field
 
-from cube_harness.core import AgentOutput, Trajectory
+from cube_harness.core import AgentOutput
 
 
 def apply_description_overrides(encoded_tools: list[dict], overrides: dict[str, str]) -> None:
@@ -66,26 +66,6 @@ class Agent(ABC):
         Perform a step given an observation and return the agent's output with actions.
         """
         pass
-
-    def reflect(self, trajectory: Trajectory, final_reward: float) -> AgentOutput | None:
-        """Hook called between episodes within a Rollout. Default: no-op.
-
-        Implementations may inspect the just-finished trajectory and final reward,
-        then update internal state read by subsequent ``step()`` calls (e.g. append
-        a reflection to a memory list spliced into future prompts).
-
-        When an implementation runs an LLM call as part of reflecting, it SHOULD
-        return an ``AgentOutput`` carrying the reflection's ``LLMCall`` (with
-        ``tag="reflection"``) and ``thoughts``. The Rollout then appends that
-        output as a synthetic trajectory step so the reflection is observable in
-        XRay, billing, and training-data extraction. Returning ``None`` means
-        "nothing to record" and the trajectory is unchanged.
-
-        Single-episode runs (``Episode.run``) never invoke this method; existing
-        agents that don't override it behave identically inside or outside a Rollout.
-        """
-        _ = trajectory, final_reward
-        return None
 
     def __repr__(self) -> str:
         return self.config.model_dump_json(indent=2, serialize_as_any=True)
