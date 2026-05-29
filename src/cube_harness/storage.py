@@ -12,7 +12,14 @@ import zstandard
 from cube.core import EnvironmentOutput
 from pydantic import BaseModel
 
-from cube_harness.core import Trajectory, TrajectoryStep
+from cube_harness.core import (
+    AgentEvent,
+    EvaluationEvent,
+    ToolCallEvent,
+    Trajectory,
+    TrajectoryEvent,
+    TrajectoryStep,
+)
 from cube_harness.episode_logs import get_log_path as get_episode_log_path
 from cube_harness.episode_logs import trajectory_log_id
 from cube_harness.episode_status import STATUS_FILENAME, EpisodeStatus
@@ -23,6 +30,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 EPISODES_DIR = "episodes"
+EVENTS_DIR = "events"
 TRAJECTORIES_DIR = "trajectories"
 EPISODE_METADATA = "episode.metadata.json"
 STEPS_DIR = "steps"
@@ -37,6 +45,8 @@ class Storage(Protocol):
     def save_trajectory(self, trajectory: Trajectory, allow_overwrite: bool = False) -> None: ...
 
     def save_step(self, step: TrajectoryStep, trajectory_id: str, step_num: int) -> None: ...
+
+    def save_event(self, event: TrajectoryEvent, trajectory_id: str, event_num: int) -> None: ...
 
     def save_episode_config(self, episode_config: "EpisodeConfig") -> None: ...
 
@@ -78,6 +88,31 @@ def _deserialize_step(raw: bytes) -> dict:
 def _step_filename(step_num: int, step: TrajectoryStep) -> str:
     suffix = "obs" if isinstance(step.output, EnvironmentOutput) else "act"
     return f"{step_num:03d}_{suffix}.msgpack.zst"
+
+
+def _event_kind(event: TrajectoryEvent) -> str:
+    if isinstance(event.output, AgentEvent):
+        return "agent"
+    if isinstance(event.output, ToolCallEvent):
+        return "tool_call"
+    if isinstance(event.output, EvaluationEvent):
+        return "eval"
+    raise TypeError(f"Unknown event output type: {type(event.output).__name__}")
+
+
+def _event_filename(event_num: int, event: TrajectoryEvent) -> str:
+    return f"{event_num:03d}_{_event_kind(event)}.msgpack.zst"
+
+
+def _serialize_event(event: TrajectoryEvent) -> bytes:
+    data = json.loads(event.model_dump_json())
+    packed = msgpack.packb(data, use_bin_type=True)
+    return _get_compressor().compress(packed)
+
+
+def _deserialize_event(raw: bytes) -> dict:
+    decompressed = _get_decompressor().decompress(raw)
+    return msgpack.unpackb(decompressed, raw=False)
 
 
 def _read_step_file(path: Path) -> dict | None:
@@ -158,14 +193,18 @@ class FileStorage:
 
         ep_dir.mkdir(parents=True, exist_ok=True)
         (ep_dir / STEPS_DIR).mkdir(exist_ok=True)
+        if trajectory.events:
+            (ep_dir / EVENTS_DIR).mkdir(exist_ok=True)
         self._saved_ids.add(trajectory.id)
 
-        trajectory_data = trajectory.model_dump(exclude={"steps"}, mode="json")
+        trajectory_data = trajectory.model_dump(exclude={"steps", "events"}, mode="json")
         with open(metadata_path, "w") as f:
             f.write(json.dumps(trajectory_data, indent=2))
 
         for i, step in enumerate(trajectory.steps):
             self._write_step(ep_dir, i, step)
+        for i, event in enumerate(trajectory.events):
+            (ep_dir / EVENTS_DIR / _event_filename(i, event)).write_bytes(_serialize_event(event))
 
         logger.info(f"Saved trajectory to {ep_dir}")
 
@@ -203,6 +242,37 @@ class FileStorage:
         filename = _step_filename(step_num, step)
         step_path = ep_dir / STEPS_DIR / filename
         step_path.write_bytes(_serialize_step(step))
+
+    # --- Event-stream layout (RFC: agent-owns-loop, Phase F) ---
+
+    def save_event(self, event: TrajectoryEvent, trajectory_id: str, event_num: int) -> None:
+        """Persist one TrajectoryEvent.
+
+        Files land at episodes/<trajectory_id>/events/<NNN>_<kind>.msgpack.zst
+        with kind ∈ {agent, tool_call, eval}. The episodes/ dir must
+        exist (call save_trajectory first); the events/ dir is created
+        lazily on first save.
+        """
+        ep_dir = self._episode_dir(trajectory_id)
+        if not ep_dir.exists():
+            raise ValueError(f"Episode directory does not exist: {ep_dir}. Call save_trajectory first.")
+        events_dir = ep_dir / EVENTS_DIR
+        events_dir.mkdir(exist_ok=True)
+        try:
+            (events_dir / _event_filename(event_num, event)).write_bytes(_serialize_event(event))
+        except Exception as e:
+            logger.exception(f"Error saving event to trajectory {trajectory_id}: {e}")
+            raise e
+
+    def load_event(self, trajectory_id: str, event_num: int) -> TrajectoryEvent:
+        ep_dir = self._episode_dir(trajectory_id)
+        events_dir = ep_dir / EVENTS_DIR
+        if not events_dir.exists():
+            raise FileNotFoundError(f"No events directory at {events_dir}")
+        for candidate in sorted(events_dir.iterdir()):
+            if candidate.name.startswith(f"{event_num:03d}_") and candidate.name.endswith(".msgpack.zst"):
+                return TrajectoryEvent.model_validate(_deserialize_event(candidate.read_bytes()))
+        raise FileNotFoundError(f"No event at {events_dir}/{event_num:03d}_*")
 
     # --- Load single trajectory ---
 
@@ -254,7 +324,19 @@ class FileStorage:
                 if step_data is not None:
                     steps.append(TrajectoryStep.model_validate(step_data))
 
+        # RFC: agent-owns-loop. New event-stream layout lives alongside
+        # the legacy steps/ dir during migration. Load whichever exists;
+        # if both are present (transition trajectories), load both.
+        events: list[TrajectoryEvent] = []
+        events_dir = ep_dir / EVENTS_DIR
+        if events_dir.exists():
+            for event_file in sorted(events_dir.iterdir()):
+                if not event_file.name.endswith(".msgpack.zst"):
+                    continue
+                events.append(TrajectoryEvent.model_validate(_deserialize_event(event_file.read_bytes())))
+
         trajectory_data["steps"] = steps
+        trajectory_data["events"] = events
         return Trajectory.model_validate(trajectory_data)
 
     def load_step(self, trajectory_id: str, step_index: int) -> TrajectoryStep:
