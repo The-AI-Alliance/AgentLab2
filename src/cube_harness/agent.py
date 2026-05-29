@@ -67,5 +67,25 @@ class Agent(ABC):
         """
         pass
 
+    def finalize(self, reward: float) -> AgentOutput | None:
+        """Called once at the end of each episode. Default: returns None (no-op).
+
+        ``reward`` is the final ``EnvironmentOutput.reward`` from the task. Implementations
+        may use this hook to persist memory (file writes), flush logs, record metrics, or
+        run end-of-episode reflection LLM calls.
+
+        When the implementation runs an LLM call inside ``finalize``, it SHOULD return an
+        ``AgentOutput`` carrying that ``LLMCall`` (with a tag of the agent's choice — e.g.
+        ``"reflection"`` or ``"finalize"``). ``Episode`` appends the returned ``AgentOutput``
+        as a synthetic trajectory step on the just-finished trajectory — making the
+        finalize-time LLM call observable in XRay, cost stats, and training-data extraction.
+        Returning ``None`` means "nothing to record" — pure side-effect agents (memory file
+        writes only) return ``None``.
+
+        See ``openspec/changes/multi-episode-rollouts/`` for the design.
+        """
+        _ = reward
+        return None
+
     def __repr__(self) -> str:
         return self.config.model_dump_json(indent=2, serialize_as_any=True)

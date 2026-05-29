@@ -414,3 +414,245 @@ class TestEpisode:
         assert len(archived) == 1
         current_dirs = [d for d in episodes_dir.iterdir() if d.is_dir() and ".archived_" not in d.name]
         assert len(current_dirs) == 1
+
+
+# ---------------------------------------------------------------------------
+# Episode invocation of Agent.finalize() — multi-episode-rollouts RFC.
+# ---------------------------------------------------------------------------
+
+
+class _FinalizeTrackingAgent(MockAgent):
+    """Records every finalize() call so tests can assert it fired with the right reward.
+
+    Class-level state (the lists) so tests can inspect after Episode.run() finishes —
+    Episode constructs a fresh agent per run, so instance state from the test setup
+    isn't visible to the running episode unless we use class state.
+    """
+
+    rewards_seen: list[float] = []
+    finalize_call_count: int = 0
+    finalize_return: AgentOutput | None = None  # what finalize() returns; tests set this
+
+    def finalize(self, reward: float) -> AgentOutput | None:
+        # Reference the base class explicitly (not type(self)) so subclasses still
+        # update the parent's counters — `type(self).x += 1` would create a new
+        # attribute on the subclass and leave the parent's count unchanged.
+        _FinalizeTrackingAgent.rewards_seen.append(reward)
+        _FinalizeTrackingAgent.finalize_call_count += 1
+        return _FinalizeTrackingAgent.finalize_return
+
+
+class _FinalizeTrackingAgentConfig(MockAgentConfig):
+    name: str = "finalize_tracking"
+
+    def make(self, action_set=None, **kwargs):
+        _ = action_set, kwargs
+        return _FinalizeTrackingAgent(config=self)
+
+
+def _reset_finalize_tracker() -> None:
+    """Reset the class-level state on _FinalizeTrackingAgent — call at the start of each test."""
+    _FinalizeTrackingAgent.rewards_seen = []
+    _FinalizeTrackingAgent.finalize_call_count = 0
+    _FinalizeTrackingAgent.finalize_return = None
+
+
+class TestEpisodeInvokesAgentFinalize:
+    """Episode calls agent.finalize(reward) after the per-turn loop exits.
+
+    Spec: openspec/changes/multi-episode-rollouts/ — `finalize` is invoked exactly once
+    per Episode.run() call, with the final EnvironmentOutput.reward. Non-None returns
+    are appended as synthetic trajectory steps. Called in a finally block so cleanup
+    (e.g. memory persistence) runs even on exception.
+    """
+
+    def test_finalize_called_exactly_once_per_run(self, tmp_dir, mock_cube_task_config) -> None:
+        """One Episode.run() → one finalize() invocation."""
+        _reset_finalize_tracker()
+        Episode(
+            id=0,
+            output_dir=tmp_dir,
+            agent_config=_FinalizeTrackingAgentConfig(),
+            task_config=mock_cube_task_config,
+            exp_name="finalize-test",
+            max_steps=5,
+            runtime_context=None,
+            storage=None,
+        ).run()
+        assert _FinalizeTrackingAgent.finalize_call_count == 1
+
+    def test_finalize_receives_final_reward(self, tmp_dir, mock_cube_task_config) -> None:
+        """The reward passed to finalize() is the final EnvironmentOutput.reward."""
+        _reset_finalize_tracker()
+        trajectory = Episode(
+            id=0,
+            output_dir=tmp_dir,
+            agent_config=_FinalizeTrackingAgentConfig(),
+            task_config=mock_cube_task_config,
+            exp_name="finalize-test",
+            max_steps=5,
+            runtime_context=None,
+            storage=None,
+        ).run()
+        # The reward finalize saw must match the trajectory's recorded final reward.
+        assert len(_FinalizeTrackingAgent.rewards_seen) == 1
+        assert _FinalizeTrackingAgent.rewards_seen[0] == trajectory.reward_info["reward"]
+
+    def test_non_none_return_appended_as_trajectory_step(self, tmp_dir, mock_cube_task_config) -> None:
+        """When finalize returns an AgentOutput, Episode appends it as a synthetic step."""
+        _reset_finalize_tracker()
+        sentinel = AgentOutput(actions=[], thoughts="end-of-episode reflection")
+        _FinalizeTrackingAgent.finalize_return = sentinel
+        ep = Episode(
+            id=0,
+            output_dir=tmp_dir,
+            agent_config=_FinalizeTrackingAgentConfig(),
+            task_config=mock_cube_task_config,
+            exp_name="finalize-test",
+            max_steps=5,
+            runtime_context=None,
+            storage=None,
+        )
+        trajectory = ep.run()
+        loaded = ep.storage.load_trajectory(trajectory.id)
+        # Last step in the trajectory should be the finalize AgentOutput we returned.
+        last_step = loaded.steps[-1]
+        assert isinstance(last_step.output, AgentOutput)
+        assert last_step.output.thoughts == "end-of-episode reflection"
+
+    def test_none_return_does_not_append_a_step(self, tmp_dir, mock_cube_task_config) -> None:
+        """A None return from finalize must NOT add a synthetic step."""
+        _reset_finalize_tracker()
+        _FinalizeTrackingAgent.finalize_return = None
+        ep = Episode(
+            id=0,
+            output_dir=tmp_dir,
+            agent_config=_FinalizeTrackingAgentConfig(),
+            task_config=mock_cube_task_config,
+            exp_name="finalize-test",
+            max_steps=5,
+            runtime_context=None,
+            storage=None,
+        )
+        # Baseline: same setup but with the default MockAgent (no finalize override).
+        # MockAgent's parent (Agent) has a default-no-op finalize returning None.
+        baseline_ep = Episode(
+            id=1,
+            output_dir=tmp_dir,
+            agent_config=MockAgentConfig(),
+            task_config=mock_cube_task_config,
+            exp_name="finalize-test",
+            max_steps=5,
+            runtime_context=None,
+            storage=None,
+        )
+        traj_tracking = ep.run()
+        traj_baseline = baseline_ep.run()
+        # Step counts should match: finalize returning None added nothing.
+        loaded_tracking = ep.storage.load_trajectory(traj_tracking.id)
+        loaded_baseline = baseline_ep.storage.load_trajectory(traj_baseline.id)
+        assert len(loaded_tracking.steps) == len(loaded_baseline.steps)
+
+    def test_default_finalize_does_not_add_step_to_existing_agents(
+        self, tmp_dir, mock_agent_config, mock_cube_task_config
+    ) -> None:
+        """Existing agents (using the default no-op finalize) get no extra trajectory step.
+
+        Critical for backward compatibility: ReAct/Genny/legacy agents that inherit the
+        default finalize must not see any change to their trajectory shape.
+        """
+        ep = Episode(
+            id=0,
+            output_dir=tmp_dir,
+            agent_config=mock_agent_config,
+            task_config=mock_cube_task_config,
+            exp_name="finalize-test",
+            max_steps=5,
+            runtime_context=None,
+            storage=None,
+        )
+        trajectory = ep.run()
+        loaded = ep.storage.load_trajectory(trajectory.id)
+        # The trajectory's last step should be an EnvironmentOutput (the final env state),
+        # NOT an AgentOutput from a no-op finalize call.
+        last_step = loaded.steps[-1]
+        assert isinstance(last_step.output, EnvironmentOutput)
+
+    def test_finalize_called_even_when_max_steps_reached(self, tmp_dir, mock_cube_task_config) -> None:
+        """Episode terminating via max_steps must still call finalize."""
+        _reset_finalize_tracker()
+
+        class _NeverDoneTaskConfig(type(mock_cube_task_config)):
+            pass
+
+        # Use a finalize-tracking config; max_steps=1 forces early termination.
+        Episode(
+            id=0,
+            output_dir=tmp_dir,
+            agent_config=_FinalizeTrackingAgentConfig(),
+            task_config=mock_cube_task_config,
+            exp_name="finalize-test",
+            max_steps=1,
+            runtime_context=None,
+            storage=None,
+        ).run()
+        assert _FinalizeTrackingAgent.finalize_call_count == 1
+
+    def test_finalize_called_on_exception(self, tmp_dir, mock_cube_task_config) -> None:
+        """If agent.step() raises, finalize() should still run as cleanup."""
+        _reset_finalize_tracker()
+
+        class _RaisingAgent(_FinalizeTrackingAgent):
+            def step(self, obs: Observation) -> AgentOutput:
+                raise RuntimeError("synthetic step failure")
+
+        class _RaisingAgentConfig(MockAgentConfig):
+            name: str = "raising"
+
+            def make(self, action_set=None, **kwargs):
+                _ = action_set, kwargs
+                return _RaisingAgent(config=self)
+
+        ep = Episode(
+            id=0,
+            output_dir=tmp_dir,
+            agent_config=_RaisingAgentConfig(),
+            task_config=mock_cube_task_config,
+            exp_name="finalize-test",
+            max_steps=5,
+            runtime_context=None,
+            storage=None,
+        )
+        with pytest.raises(RuntimeError, match="synthetic step failure"):
+            ep.run()
+        # Cleanup still fired finalize even though step() raised.
+        assert _FinalizeTrackingAgent.finalize_call_count == 1
+
+    def test_finalize_exception_does_not_mask_episode(self, tmp_dir, mock_cube_task_config) -> None:
+        """If finalize() itself raises, Episode logs it and continues (doesn't crash)."""
+        _reset_finalize_tracker()
+
+        class _BadFinalizeAgent(MockAgent):
+            def finalize(self, reward: float) -> AgentOutput | None:
+                raise RuntimeError("finalize blew up")
+
+        class _BadFinalizeConfig(MockAgentConfig):
+            name: str = "bad_finalize"
+
+            def make(self, action_set=None, **kwargs):
+                _ = action_set, kwargs
+                return _BadFinalizeAgent(config=self)
+
+        ep = Episode(
+            id=0,
+            output_dir=tmp_dir,
+            agent_config=_BadFinalizeConfig(),
+            task_config=mock_cube_task_config,
+            exp_name="finalize-test",
+            max_steps=5,
+            runtime_context=None,
+            storage=None,
+        )
+        # Should not propagate — Episode logs and continues to finalize the trajectory.
+        trajectory = ep.run()
+        assert trajectory is not None
