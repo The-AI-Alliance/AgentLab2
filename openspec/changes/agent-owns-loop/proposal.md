@@ -49,7 +49,7 @@ trajectories into typed event streams.
   signature** — drop-in replacements, mixable in a `Toolbox` alongside
   unmonitored tools. Agents call `execute_action(action) → Observation | StepError`
   without knowing or caring which tools are monitored. The wrappers emit
-  trajectory events and OTel spans on every call. The previous
+  trajectory events on every call. The previous
   `ToolWithTelemetry` shim was already deleted in commit `e760f9e5`
   together with the `openspec/specs/tool/` spec layer; this RFC re-creates
   the layer around `MonitoredTool`. Budget enforcement lives in
@@ -66,7 +66,7 @@ trajectories into typed event streams.
 - Defensive episode finalization: `Episode` wraps `agent.run` in a
   `try/except BaseException`, then runs `task.evaluate()`, persists final
   trajectory, and updates the experiment summary — regardless of how the agent
-  returned. Cross-turn state (trajectory, storage, summary, tracer) is owned
+  returned. Cross-turn state (trajectory, storage, summary) is owned
   by `Episode`; agents never see it directly.
 - `BudgetExceeded(BaseException)` propagates out of `MonitoredTool.execute_action`
   to terminate runaway loops. Subclassing `BaseException` (not `Exception`)
@@ -204,7 +204,7 @@ Why two surfaces:
 Internally, `record(output)` is a thin wrapper around `begin_turn()` — one
 implementation, two surfaces. No double-maintenance.
 
-Cross-turn state (trajectory, storage, summary, tracer) lives on `Episode`
+Cross-turn state (trajectory, storage, summary) lives on `Episode`
 and is bound into the `TurnRecorder` at construction. Agents never read or
 write that state directly.
 
@@ -223,7 +223,6 @@ class MonitoredTool(AsyncTool):
         budget: Budget,
         storage: Storage,
         summary: SummaryProcessor,
-        tracer: Tracer,
     ): ...
 
     @property
@@ -233,10 +232,9 @@ class MonitoredTool(AsyncTool):
     async def execute_action(self, action: Action) -> Observation | StepError:
         if self.budget.exhausted:
             raise BudgetExceeded(action=action)
-        with self.tracer.tool_span(action):
-            # Await directly when inner is AsyncTool;
-            # wrap with asyncio.to_thread when inner is sync Tool.
-            result = await self._invoke_inner(action)
+        # Await directly when inner is AsyncTool;
+        # wrap with asyncio.to_thread when inner is sync Tool.
+        result = await self._invoke_inner(action)
         self._record_tool_call_event(action, result)          # storage + summary + trajectory
         self.budget.tool_calls += 1
         return result                                          # unchanged
@@ -276,7 +274,6 @@ Every concern in today's `Episode._run_loop` has a clear new home.
 | Concern in today's loop | New owner | How |
 |---|---|---|
 | Tool dispatch (`tool.execute_action`) | `MonitoredTool` | Wraps inner Tool; same `execute_action` signature. |
-| Per-tool-call OTel span | `MonitoredTool` | One span per `execute_action` call. |
 | `ToolCallEvent` persistence (env-step save) | `MonitoredTool` | Records to trajectory + storage on every call. |
 | Per-call summary update (env-step counter, reward) | `MonitoredTool` | `summary.on_event(tool_call_event)`. |
 | Budget enforcement (`max_steps`, etc.) | `MonitoredTool` | Counts calls; raises `BudgetExceeded(BaseException)`. |
@@ -285,7 +282,7 @@ Every concern in today's `Episode._run_loop` has a clear new home.
 | `AgentEvent` persistence (agent-step save) | `TurnRecorder` | `record()` or `Turn.__exit__` flushes one AgentEvent. |
 | Per-turn summary update (LLM calls, tokens, cost) | `TurnRecorder` | Updates `summary` from `AgentEvent.llm_calls`. |
 | Agent output logging | `TurnRecorder` | Logs alongside the event flush. |
-| Per-turn OTel span (`tracer.step("turn_N")`) | `TurnRecorder` | Spans an `AgentEvent` lifetime via `begin_turn()`. |
+| Per-turn OTel span (`tracer.step("turn_N")`) | **Dropped** | Today's loop-level span goes away; agent-owns-loop has no central per-turn point to wrap. Per-turn data lives in `AgentEvent` (richer than a span name). The episode-level span (below) is preserved. |
 | Agent-side error capture (`agent.step` raised) | `TurnRecorder.record_failure` | Episode's `except` calls it after `agent.run` raises. |
 | `done` detection | `Task.step` (cube-standard, unchanged) | Returns `EnvironmentOutput.done`. Default agent reads it. |
 | Per-step `reward` | `Task.step` (cube-standard, unchanged) | Comes through `EnvironmentOutput.reward`. |
@@ -296,7 +293,7 @@ Every concern in today's `Episode._run_loop` has a clear new home.
 | Terminal `task.evaluate` | `Episode` (in `finally`) | `recorder.record_evaluation(reward, info)`. |
 | `task.close` | `Episode` (in `finally`) | |
 | Storage finalize | `Episode` (in `finally`) | |
-| Episode-level OTel span | `Episode` | Wraps the whole `try / except / finally`. |
+| Episode-level OTel span | `Episode` | Wraps the whole `try / except / finally` (preserved from today). |
 
 ### Connector taxonomy (forward-looking, Phase 2)
 
@@ -379,10 +376,9 @@ async def run(self) -> Trajectory:
 
     # Wrap each member of task.toolbox with MonitoredTool, sharing trajectory + budget.
     # task.toolbox is mutated in place so task.step also goes through monitored wrappers.
-    install_monitoring(task, trajectory, budget,
-                       self.storage, self.summary, self.tracer)
+    install_monitoring(task, trajectory, budget, self.storage, self.summary)
 
-    recorder = TurnRecorder(trajectory, self.storage, self.summary, self.tracer)
+    recorder = TurnRecorder(trajectory, self.storage, self.summary)
     try:
         initial = task.reset()
         recorder.record_reset(initial)            # Episode-only helper on recorder
@@ -399,12 +395,16 @@ async def run(self) -> Trajectory:
             recorder.record_evaluation(0.0, {"evaluate_failed": str(e)})
         await self.storage.finalize(trajectory)
         self.summary.on_episode_complete(trajectory, self.storage)
-        try:
-            task.close()
-        finally:
-            self.tracer.shutdown()
+        task.close()
     return trajectory
 ```
+
+Episode- and benchmark-level OTel spans (today's `tracer.episode(...)` around
+the `try` block, `tracer.benchmark(...)` higher up in `exp_runner`) and
+`tracer.shutdown()` in `finally` are preserved from today's `Episode.run` —
+elided from the pseudo-code above for clarity. This RFC does not add new
+OTel surface (no per-tool-call, no per-turn spans). The trajectory event
+stream is the harness's structured per-call/per-turn observability.
 
 The agent cannot prevent finalization. `trajectory` and `recorder` are
 owned by `Episode`; the agent receives `task` and `recorder`. The monitoring

@@ -264,7 +264,6 @@ class MonitoredTool(AsyncTool):
         budget: Budget,
         storage: Storage,
         summary: SummaryProcessor,
-        tracer: Tracer,
     )
 
     @property
@@ -273,8 +272,8 @@ class MonitoredTool(AsyncTool):
 
     async def execute_action(self, action: Action) -> Observation | StepError
     # 1. If self.budget.exhausted: raise BudgetExceeded(action=action).
-    # 2. Open OTel span; invoke inner.execute_action(action) — await
-    #    directly when inner is AsyncTool, asyncio.to_thread when sync.
+    # 2. Invoke inner.execute_action(action) — await directly when inner is
+    #    AsyncTool, asyncio.to_thread when sync.
     # 3. Append a ToolCallEvent (with the action and result) to trajectory;
     #    storage.save_event; summary.on_event; budget.tool_calls += 1.
     # 4. Return result (Observation | StepError) unchanged.
@@ -298,9 +297,9 @@ is sufficient.
   `EnvironmentOutput` and does NOT detect `done`. Those remain
   `Task.step`'s responsibility, which calls into the toolbox and wraps the
   result.
-- `MonitoredTool` is the only place where storage / summary / tracer hooks
-  fire for tool execution. Subclasses of `cube.tool.Tool` / `AsyncTool`
-  must NOT add storage calls.
+- `MonitoredTool` is the only place where storage / summary hooks fire for
+  tool execution. Subclasses of `cube.tool.Tool` / `AsyncTool` must NOT
+  add storage calls.
 - `BudgetExceeded` subclasses `BaseException` so `try / except Exception`
   does not swallow it. Bare `except:` in agents is forbidden by review
   (CC-003 vibe-coding rule).
@@ -318,10 +317,13 @@ is sufficient.
 
 - `MonitoredTool` and its budget counter are per-episode — re-using a
   `MonitoredTool` across episodes is a bug.
-- The OTel span attribute `gen_ai.tool.call.result` is emitted by
-  `MonitoredTool` (the old `ToolWithTelemetry`-based emission path was
-  removed by `e760f9e5`; this RFC restores per-call tool spans through
-  the new wrapper).
+- Per-tool-call OTel spans are NOT re-introduced. The previous
+  `ToolWithTelemetry`-based emission path was removed by `e760f9e5` with
+  no replacement consumer. The trajectory event stream (`ToolCallEvent`
+  per call) is the structured per-call observability — strictly richer
+  than a span. `cube_harness.metrics.tracer.tool_span(action)` remains
+  available for any future wrapper that wants to export spans to an
+  external collector.
 
 ---
 
@@ -342,10 +344,9 @@ async def run(self) -> Trajectory:
 
     # Wrap each member of task.toolbox with MonitoredTool, sharing trajectory + budget.
     # task.toolbox is mutated in place so task.step also goes through monitored wrappers.
-    install_monitoring(task, trajectory, budget,
-                       self.storage, self.summary, self.tracer)
+    install_monitoring(task, trajectory, budget, self.storage, self.summary)
 
-    recorder = TurnRecorder(trajectory, self.storage, self.summary, self.tracer)
+    recorder = TurnRecorder(trajectory, self.storage, self.summary)
     initial = task.reset()
     recorder.record_reset(initial)
     try:
@@ -362,12 +363,16 @@ async def run(self) -> Trajectory:
             recorder.record_evaluation(0.0, {"evaluate_failed": str(e)})
         await self.storage.finalize(trajectory)
         self.summary.on_episode_complete(trajectory, self.storage)
-        try:
-            task.close()
-        finally:
-            self.tracer.shutdown()
+        task.close()
     return trajectory
 ```
+
+Episode- and benchmark-level OTel handling (today's `tracer.episode(...)`
+span around the `try` block and `tracer.shutdown()` in the outer `finally`,
+plus `tracer.benchmark(...)` higher up in `exp_runner`) are preserved from
+today's `Episode.run` — elided from the pseudo-code above for clarity. This
+RFC adds NO new OTel surface: no per-tool-call span, no per-turn span. The
+trajectory event stream is the harness's structured observability.
 
 The `trajectory` lives on `Episode`. The agent receives `task` and
 `recorder` — the monitoring wrappers are already installed onto
