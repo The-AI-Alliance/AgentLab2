@@ -15,10 +15,16 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
-from litellm import Message
 
-from cube_harness.core import AgentOutput
-from cube_harness.llm import LLMConfig, LLMResponse, Usage
+# Skip the whole module when miniwob-cube isn't installed — the recipe imports
+# it at module level, so we'd ImportError before any test runs (e.g. tests.yml
+# CI doesn't install workspace cubes). Matches the recipe-import guard pattern.
+pytest.importorskip("miniwob_cube")
+
+from litellm import Message  # noqa: E402
+
+from cube_harness.core import AgentOutput  # noqa: E402
+from cube_harness.llm import LLMConfig, LLMResponse, Usage  # noqa: E402
 
 # recipes/ is not a package; import the recipe by path so we can pull
 # LaMerAgent / LaMerAgentConfig out of it.
