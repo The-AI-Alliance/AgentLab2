@@ -1,113 +1,206 @@
-# RFC: Multi-Episode Rollouts for Cross-Episode Memory Agents
+# RFC: Outcome-Aware Agents — Reward/Done in Observation + `Agent.finalize()`
 
 **Status:** DRAFT
 **Author:** Oleksiy Ostapenko
 **Date:** 2026-05-25
 **Base branch:** `dev`
+**Note on folder name:** the change folder is `multi-episode-rollouts/` for git
+history continuity; the design has since pivoted away from a dedicated `Rollout`
+class to the more general outcome-awareness approach below.
 
 ---
 
 ## RFC scope vs. additive changes
 
-Per the constitution's RFC process (post-`068a718f`): "Additive, backward-compatible changes (a new method, a new optional field) skip this — just keep the living spec accurate and describe the change in the PR."
+Per the constitution (Pillar I, post-`068a718f`): "Additive, backward-compatible changes (a new method, a new optional field) skip this — just keep the living spec accurate and describe the change in the PR." All four parts of this change are additive; none are RFC-bound by that rule. The doc remains for traceability and because part #1 is an **upstream** cube-standard change that needs its own review there.
 
-| Part | RFC-bound? |
-|---|---|
-| New `Rollout` layer (new spec) | **Yes** — net-new architectural layer |
-| `Agent.reflect()` default no-op | No — additive method with default impl |
-| `Episode.run_with(task, agent)` | No — additive method on existing layer |
-| Storage `rollout_id` / `episode_index_in_rollout` fields | No — additive optional fields |
-
-This document describes all four because they're co-designed; only the Rollout layer requires async review. Class signatures live in `deltas.md` — this doc covers placement and rationale.
+| Part | Layer | RFC-bound? |
+|---|---|---|
+| `Observation.reward: float \| None` and `Observation.done: bool \| None` | **cube-standard** (upstream) | Additive — but lands upstream; needs cube-standard review |
+| `Episode` populates `obs.reward` / `obs.done` when calling `agent.step()` | cube-harness | No — internal change, contract unchanged |
+| `Agent.finalize(terminal_obs: Observation) -> AgentOutput \| None` default no-op | cube-harness | No — additive method with default impl |
+| `Episode` calls `agent.finalize(terminal_obs)` after the loop exits; if it returns a non-None `AgentOutput`, appends it as a synthetic trajectory step | cube-harness | No — additive; default agents inherit a no-op |
+| `Episode.run(extra_metadata=None)` optional kwarg merged into `trajectory.metadata` | cube-harness | No — additive optional parameter |
 
 ---
 
 ## Design rationale (one paragraph)
 
-**Rollout stays a distinct class** (not a loop folded into `Episode`) — keeps the "one Episode = one Trajectory" invariant intact, preserves the existing Episode contract for all current callers, and code duplication is eliminated via the additive `Episode.run_with(task, agent)` (composition, not subclassing). **Reflection lives in `Agent.reflect()` for V1** — a default-no-op hook called by Rollout between non-final episodes. The cleaner alternative (drop the hook; agent reflects inside `step()` based on observed `reward` / `done`) is deferred: it requires an upstream cube-standard RFC to add those fields to `Observation`. Worth revisiting once that lands; the additive hook is the interim mechanism. See Alternatives for what was rejected and why.
+**Add the minimum mechanism that makes agents outcome-aware; let everything else (memory, reflection cadence, multi-episode orchestration) be the agent's or recipe's concern.** Two pieces of information are env-internal today: `reward` and `done`. Exposing them in `Observation` is broadly useful — meta-RL methods (LaMer-style reflection), online learning, retry-on-failure, reward-shaped behaviour, fail-fast logic. Adding `Agent.finalize(terminal_obs)` gives the agent one hook to see the *terminal* observation (the one it never receives via `step()` because the env returns it after the agent's last action). With those two additions, agents that want cross-episode adaptation manage their own memory (typically file-based, keyed however they like) and run their own reflection cadence inside `step()` or in `finalize()`. The framework adds **zero** orchestration classes — multi-episode runs are recipe-level for-loops over `Episode.run()`. That keeps the framework opinion-free and the agent-side complexity proportional to how sophisticated the agent wants to be.
 
 ---
 
 ## Problem
 
-cube-harness today runs one episode at a time: `Episode` constructs a fresh `Agent` via `AgentConfig.make()`, plays it against a `Task`, exits. There's no place for an agent instance to survive across episodes, no inter-episode hook, no cross-episode reward aggregate. Meta-RL methods that *adapt across multiple episodes against the same task* by carrying memory — e.g. **LaMer** ([arxiv 2512.16848](https://arxiv.org/abs/2512.16848)), +11–19pp over RL baselines on Sokoban / MineSweeper / Webshop — can't be expressed in the current API.
+Agents in cube-harness can't currently see two pieces of information the environment produces:
 
-The new abstraction is generic ("rollout of N episodes with persistent agent + reward discount"), not LaMer-specific — LaMer is the first concrete consumer, not the only one.
+- **`reward`** — the outcome signal. Lives on `EnvironmentOutput`. The framework consumes it (for trajectory recording, episode termination logic); the agent never receives it.
+- **`done`** — the env's episode-end signal. Same shape: env-side only.
+
+This blocks a whole class of agent designs:
+
+- **Meta-RL methods** that condition reflection on outcomes (LaMer — *arxiv 2512.16848*). The motivating example.
+- **Online learning** — agents that want to update behaviour based on reward signals within a run.
+- **Retry-on-failure** — an agent that's about to call `final_step` but sees `reward < threshold` could try one more thing.
+- **Outcome-aware logging** — agents that want to record their own per-task metrics.
+
+There's also no clean way for an agent to know "this is the end of the episode" — the framework breaks the episode loop, but the agent isn't called again to react to the terminal state.
 
 ## Scope
 
 ### In scope (V1)
 
-- **New layer** `Rollout` (`cube_harness/rollout.py`) — N episodes against the same task with a long-lived `Agent`.
-- **Agent API** — additive `reflect(trajectory, final_reward) -> None` default no-op on the base `Agent` ABC.
-- **Reward aggregation** — `RolloutResult.discounted_reward = Σ γ^k · r_k`.
-- **Storage** — trajectories carry optional `rollout_id` / `episode_index_in_rollout`.
-- **Validation** — MiniWob via cube-browser-tool's `SyncPlaywrightTool`. No cube changes.
-- **POC agent** — `LaMerAgent` (ReactAgent + memory + reflection) shipped as `recipes/lamer_miniwob.py`, not as a permanent agent.
+- **cube-standard (upstream RFC):** add `Observation.reward: float | None` and `Observation.done: bool | None` as additive optional fields. Default `None` (existing Observations unchanged; existing agents that don't read them are unaffected).
+- **cube-harness Episode:** when calling `agent.step(obs)`, populate `obs.reward` and `obs.done` from the *prior* `env_output`. First step of an episode (post-reset): both `None`.
+- **cube-harness Agent:** add `Agent.finalize(terminal_obs: Observation) -> AgentOutput | None` as a default-no-op method on the base ABC. Default returns `None`. Implementations that run an LLM call inside finalize (e.g. for end-of-episode reflection or persistence) return an `AgentOutput` carrying that call's `LLMCall` so it's observable in XRay / cost stats / training extraction. Existing agents (ReAct, Genny, legacy) inherit the no-op.
+- **cube-harness Episode:** after the per-turn loop exits (whether via `done=True` or `max_steps`), call `agent.finalize(terminal_obs)` once. `terminal_obs` is the post-final-action observation with `reward` and `done` populated. If finalize returns a non-None `AgentOutput`, Episode appends it as a synthetic trajectory step on the just-finished trajectory before persisting.
+- **cube-harness Episode:** add optional `extra_metadata: dict | None = None` kwarg to `Episode.run()`. When provided, merged into `trajectory.metadata` at trajectory-creation time. Lets recipes inject `rollout_id`, ablation labels, seeds, etc. into per-trajectory metadata for cross-trajectory filtering by downstream tools (training backends, analysis, XRay grouping).
+- **Demonstration recipe:** `recipes/lamer_miniwob.py` shows a LaMer-style agent using these primitives — file-based cross-episode memory, in-step reflection triggered by `obs.done == True`, finalize hook for memory persistence.
 
-### Out of scope (V2+)
+### Out of scope (orthogonal / deferred concerns, not design alternatives)
 
-- Ray parallelism over rollouts (sequential first; each Ray task = one whole rollout preserves the agent-doesn't-cross-process-boundaries invariant).
-- Cross-rollout / global memory persistence (requires external service — separate proposal).
-- Reward-model integration / meta-RL training loop (backend consumes `discounted_reward` like it consumes per-episode rewards today).
-- New cubes — MiniWob suffices.
+- **Reward aggregation across episodes.** Recipes compute whatever aggregate they want from per-episode trajectory rewards (discounted sum, mean, max, custom). Not a framework concern.
+- **Ray parallelism over multi-episode runs.** Existing `run_with_ray(exp)` over an Experiment whose Benchmark yields N copies of the same task covers this. No new parallelism primitive needed.
+- **Reward-model integration / meta-RL training loop.** Training backend's concern — consumes per-episode trajectory rewards as it does today.
+
+(Design alternatives — including `Rollout` class, `Agent.reflect()` hook, file-based memory as a framework concern — are in *Alternatives considered* below, with rejection reasons.)
 
 ## Design
 
-### Layer placement
+### Observation augmentation
 
+```python
+# cube-standard
+class Observation:
+    contents: list[Content]
+    reward: float | None = None     # NEW — additive, optional
+    done: bool | None = None        # NEW — additive, optional
 ```
-Experiment           ← unchanged: collection of tasks
-  └─ Rollout         ← NEW: N episodes against one task with persistent agent
-       └─ Episode    ← unchanged: one task attempt
-            └─ Agent.step() loop
+
+Both fields default `None`. An agent that doesn't read them is byte-identical in behaviour to today.
+
+### Episode flow
+
+```python
+# cube-harness Episode._run_loop (simplified)
+obs, info = task.reset()
+env_output = EnvironmentOutput(obs=obs, info=info)   # reward=0.0, done=False default
+trajectory.append(env_output)
+
+while not env_output.done and turns < max_steps:
+    obs_for_agent = _augment(env_output.obs, reward=env_output.reward, done=env_output.done)
+    agent_output = agent.step(obs_for_agent)         # ← agent sees prior reward/done
+    trajectory.append(agent_output)
+    env_output = task.step(agent_output.actions)
+    trajectory.append(env_output)
+    turns += 1
+
+# After loop: agent sees terminal state once
+terminal_obs = _augment(env_output.obs, reward=env_output.reward, done=env_output.done)
+finalize_output = agent.finalize(terminal_obs)   # ← default returns None
+if finalize_output is not None:
+    trajectory.append(finalize_output)            # ← LLM calls in finalize end up in the trajectory
 ```
 
-`Rollout` sits *between* `Experiment` and `Episode`. It **uses** `Episode` internally — `Episode` is not extended, because that conflates "one task attempt" with "N attempts with shared memory" and breaks the existing episode spec.
+Two invariants worth highlighting:
 
-Composition is realized via a small additive method on `Episode`: **`Episode.run_with(task, agent, extra_metadata=None) -> Trajectory`**. The existing `Episode.run()` keeps its current contract (constructs task + agent locally, closes the task at the end) — it's now a thin wrapper that calls `run_with()` with the constructed objects. `Rollout` calls `run_with()` directly with its own long-lived `task` and `agent`, threading rollout metadata (`rollout_id`, `episode_index_in_rollout`) through `extra_metadata`. This eliminates the duplicate episode loop that the first cut of `Rollout._run_episode` had to copy from `Episode._run_loop`.
+- The agent observes reward/done from the **prior** step's `env_output`, not the current step. So at step k, the agent sees what happened at step k-1.
+- `finalize()` is called exactly once per episode (after the loop exits), with the actual terminal observation that the agent never sees via `step()`. Always called, including on max-steps-hit.
 
-### Invariants (the architectural decisions)
+### `Agent.finalize()` semantics
 
-- **Same `Agent` instance handles all N episodes** in one rollout. That's the entire mechanism.
-- **`Task.reset()` between episodes** — already part of cube-standard's `Task` contract; no cube-standard change.
-- **`agent.reflect()` runs between non-final episodes** (`N-1` times). No reflect call after the last episode — nothing reads it.
-- **Agent never crosses a process boundary** inside `Rollout.run()`. Each rollout lives entirely in one worker. V2 Ray parallelism parallelizes whole rollouts.
+```python
+class Agent(ABC):
+    def finalize(self, terminal_obs: Observation) -> AgentOutput | None:
+        """Called once at the end of each episode. Default: returns None (no-op).
 
-### Cube-standard alignment
+        terminal_obs carries the final reward and (typically) done=True. Agents
+        may use this hook to persist memory, flush logs, record metrics, write
+        reflections, etc.
 
-`MiniWobTask.reset()` (`cubes/miniwob/src/miniwob_cube/task.py:37`) and `SolveArithmeticTask.reset()` (`cubes/arithmetic-cube/src/arithmetic_cube/task.py:24`) already satisfy what `Rollout` needs. Cubes whose `reset()` is expensive (Docker re-spin) pay that cost N times per rollout — per-cube concern.
+        When the agent runs an LLM call as part of finalize (e.g. end-of-episode
+        reflection), it should return an AgentOutput carrying that LLMCall (tag
+        of the caller's choice — e.g. "reflection" or "finalize"). Episode
+        appends the returned AgentOutput as a synthetic trajectory step on the
+        just-finished trajectory — making any finalize-time LLM call observable
+        in XRay, cost stats, and training-data extraction.
 
-Env note: needs `cube-standard>=0.1.0rc9` (`ConfigRegistry`) and `cube-browser-tool>=0.3.0` from cube-standard dev's `cube-tools/cube-browser-tool` subdirectory until it ships to PyPI.
+        Returning None means "nothing to record" — agents that only persist
+        state (memory file writes, log flushes) without LLM calls can return
+        None and rely on their own side effects.
+        """
+```
 
-### Storage and provenance
+Three properties:
 
-Trajectories produced inside a Rollout carry two new optional metadata fields (`rollout_id`, `episode_index_in_rollout`), both `None` outside a rollout. Existing files remain readable. XRay and the trajectory judge work unchanged on standalone trajectories; rollout-aware grouping in XRay is a follow-up.
+- Default returns `None` — existing agents unaffected.
+- Receives the terminal observation (with reward + done) — the one thing the agent never gets via `step()`.
+- When non-None: the returned `AgentOutput` becomes a synthetic trajectory step. Same mechanism XRay and cost stats already use for per-turn agent steps; works for free.
 
-### POC agent
+### `Episode.run(extra_metadata=...)` semantics
 
-See `recipes/lamer_miniwob.py`. ~100 lines on top of `ReactAgent`: `reflect()` writes to `self.memory: list[str]`, `choose_steps_to_render` splices the memory in just after the system prompt. Recipe-only — graduates to `src/cube_harness/agents/` only after validation.
+```python
+class Episode:
+    def run(self, extra_metadata: dict | None = None) -> Trajectory:
+        ...
+        # Inside _run_loop, when constructing the Trajectory:
+        trajectory.metadata = {
+            "task_id": ...,
+            "agent_name": ...,
+            "action_schemas": ...,
+            **(extra_metadata or {}),  # ← caller's keys merged in
+        }
+```
+
+Optional kwarg. Defaults to `None` (no extra metadata, behaviour unchanged). When provided, the dict's keys land in `trajectory.metadata` and persist to `episodes/<traj_id>/metadata.json`. Lets recipes inject:
+
+- `rollout_id` to group N trajectories produced by the same recipe loop.
+- Ablation / variant labels (`{"variant": "with_reflection"}`).
+- Seeds, experiment IDs, anything recipe-side worth filtering by later.
+
+The framework doesn't interpret these keys — they're recipe convention. Conflict resolution: caller's keys override built-in keys (recipe wins; allows e.g. overriding `agent_name` if needed, though discouraged).
+
+### Recipe pattern for multi-episode runs
+
+```python
+# recipes/lamer_miniwob.py (sketch)
+benchmark = MINIWOB_CONFIGS["default"].make()
+task_config = next(iter(benchmark.get_task_configs()))
+agent_config = LaMerAgentConfig(llm_config=LLMConfig(model_name="openai/gpt-4o"))
+
+with benchmark:
+    rollout_id = str(uuid.uuid4())
+    for k in range(n_episodes):
+        Episode(
+            id=k, output_dir=output_dir, agent_config=agent_config,
+            task_config=task_config, exp_name="lamer", max_steps=10,
+            storage=None, runtime_context=benchmark._runtime_context,
+        ).run(extra_metadata={"rollout_id": rollout_id, "episode_index": k})
+        # Memory persists across iterations via the agent's file I/O.
+        # extra_metadata threads rollout grouping into each trajectory for
+        # downstream filtering (training backend, XRay, analysis).
+```
+
+The agent (LaMerAgent) reads memory from a file in `__init__`, reflects on `obs.done == True` in `step()`, persists in `finalize()`. The framework has zero involvement in any of that — the loop is recipe code.
 
 ## Alternatives considered
 
-- **Extend `Episode` with an `n_episodes` loop (no separate `Rollout` class).** One concept handles both cases; smaller surface. Rejected: conflates "one task attempt" with "N attempts," requires changing `Episode.run()`'s return type or inventing fake merged trajectories, breaks XRay / eval log / trajectory judge assumptions (one Episode = one Trajectory), and forces every existing caller to think about `n_episodes=1`. Composition (Rollout uses `Episode.run_with`) keeps both layers single-purpose.
-- **Delegate reflection entirely to the agent; drop `Agent.reflect()` hook.** Agent detects episode boundaries from observation metadata and reflects inside `step()`. Cleaner separation of concerns (framework stays opinion-free; reflection cadence becomes an agent choice — every K steps, on failure, never). Rejected for V1: agent cannot currently see `reward` or `done` (both env-side fields on `EnvironmentOutput`, not on `Observation`), so this design requires an upstream RFC in cube-standard to add those fields to `Observation`. Worth revisiting once that lands — the additive `reflect()` hook is the interim mechanism. Also fuses the reflection LLM call into an act-step's `AgentOutput`, losing the separate-event semantics XRay and cost stats use.
-- **File-based cross-episode memory (no framework hook at all).** Agent reads/writes a per-task file at startup and after each attempt. Zero API change. Rejected: file-based concurrency is fragile under parallel rollouts (multiple workers, same task → race on the file), the reflection LLM call has no canonical place in any trajectory (invisible to XRay / cost / training-data extraction), and the path-keying scheme is left to each agent (no shared convention).
-- **MCP service for memory from day one.** Adds operational complexity (run a service, eventual consistency under parallelism) for no V1 value since LaMer's memory is rollout-scoped. The right design for *cross-rollout* persistence (V2). Rejected for V1.
-- **Carry memory in `EpisodeConfig`.** Threads mutable state through pickled configs — breaks the worker-serialization boundary. Rollout instead keeps the agent alive inside one worker. Rejected.
-- **Separate `MetaAgent` interface.** Over-engineering. Default no-op on `Agent` ABC adds one method and lets any existing agent opt in. Rejected.
+- **Add a dedicated `Rollout` class and `Agent.reflect()` hook (the prior V1 design).** Rejected: bakes meta-RL-specific orchestration into the framework. The Rollout class duplicates Episode's loop or requires an `Episode.run_with(task, agent)` helper just to share it. `reflect()` imposes a specific reflection cadence ("between episodes") on every agent. The current design generalizes: the same `reward`/`done`/`finalize` primitives serve meta-RL, online learning, retry-on-failure, and anything else outcome-aware — without specialized framework abstractions.
+- **Pass `EnvironmentOutput` to `step()` instead of `Observation`.** Rejected: bigger contract change (every existing agent's `step()` signature would need updating). The additive-fields-on-Observation approach keeps the existing contract intact.
+- **Episode.run_with(task, agent)** (composing rollout-style loops with a long-lived agent). Considered when a `Rollout` class was on the table. Dropped along with `Rollout`: with file-based memory, the agent doesn't need to live across episodes — each `Episode.run()` constructs a fresh agent which reads its memory from disk. The "agent persistence" requirement disappears, and so does the need for `run_with`.
+- **File-based memory as a framework concern.** Rejected: agents handle their own persistence. Different agents will key memory differently (per-task, per-rollout-id, per-config); a framework helper would either be too generic to be useful or too specific to be general. The framework provides `finalize()` as the hook; what to do with it is agent-side.
+- **Pass `terminal_obs` to a special last `step()` call instead of a separate `finalize()`.** Rejected: muddies `step()`'s purpose (action selection). A separate `finalize()` makes the "observe-only, no action" semantics explicit and frees the agent from returning a meaningless `AgentOutput`.
 
 ## Open questions
 
-1. **Reflection input granularity.** V1: latest `(trajectory, final_reward)` only; agent accumulates prior context in `self.memory`. Forward-compatible to expand signature.
-2. **Reward-aggregation location.** V1: `Rollout` computes `discounted_reward`. Backends wanting raw rewards still get `per_episode_rewards`.
-3. **Episode budget.** V1: `max_actions` is per-episode (existing semantics). Per-rollout meta-budget is a config-level extension.
-4. **XRay visualization.** V1: independent trajectories (no rollout grouping). Rollout-aware view is a follow-up — see `.notes_oo/todo.md`.
+1. **First-step semantics for `obs.reward` / `obs.done`.** At the very first `step()` of an episode (post-reset), there's no prior `env_output`. Should the agent see `reward=None, done=None`, or `reward=0.0, done=False`? V1: `None` for both, signaling "no prior step." Agents that want a default of `0.0` can normalise themselves.
+2. **`finalize()` on errors.** If the episode terminates via exception in `step()` or `task.step()`, should `finalize()` still be called? V1: yes — called in a `finally` block, so cleanup runs. Agents that want to distinguish should check `terminal_obs.done`.
+3. **Trajectory recording of `finalize()`-time LLM calls.** Resolved: `finalize()` returns `AgentOutput | None`. Non-None returns are appended as synthetic trajectory steps; pure side-effects (memory file writes, log flushes) return `None`. Agents pick per call.
+4. **Naming.** The change folder is `multi-episode-rollouts/` for git continuity; the design's scope has narrowed and broadened in different ways. Renaming the folder is optional cleanup.
 
 ## References
 
-- LaMer paper: [arxiv 2512.16848](https://arxiv.org/abs/2512.16848)
-- Schemas + ADDED/MODIFIED sections: `deltas.md`
-- Recipe template: `recipes/hello_miniwob.py`
-- Validation cube: `cubes/miniwob/src/miniwob_cube/task.py`
-- POC agent: `recipes/lamer_miniwob.py`
+- LaMer paper: [arxiv 2512.16848](https://arxiv.org/abs/2512.16848) — meta-RL via cross-episode reflection. The motivating use case; the current design's `reward`/`done`/`finalize` primitives let an agent implement LaMer without framework support.
+- cube-standard `Observation`: `cube.core.Observation` — the upstream type that gains `reward` and `done` fields.
+- Schemas + ADDED/MODIFIED sections: `deltas.md`.
+- POC agent: `recipes/lamer_miniwob.py` (file-based memory, in-step reflection, finalize hook).
