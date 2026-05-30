@@ -163,13 +163,18 @@ class Trajectory(TypedBaseModel):
 
     @property
     def n_agent_steps(self) -> int:
-        legacy = sum(1 for step in self.steps if isinstance(step.output, AgentOutput))
-        return legacy + self.n_agent_events
+        # When the events stream is populated, it is authoritative —
+        # `steps` may be a synthesized legacy view (see storage
+        # _events_to_legacy_steps) so adding both would double-count.
+        if self.events:
+            return self.n_agent_events
+        return sum(1 for step in self.steps if isinstance(step.output, AgentOutput))
 
     @property
     def n_env_steps(self) -> int:
-        legacy = sum(1 for step in self.steps if isinstance(step.output, EnvironmentOutput))
-        return legacy + self.n_tool_calls
+        if self.events:
+            return self.n_tool_calls
+        return sum(1 for step in self.steps if isinstance(step.output, EnvironmentOutput))
 
     @property
     def n_agent_events(self) -> int:

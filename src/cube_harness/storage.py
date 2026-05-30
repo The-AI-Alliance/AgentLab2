@@ -115,6 +115,56 @@ def _deserialize_event(raw: bytes) -> dict:
     return msgpack.unpackb(decompressed, raw=False)
 
 
+def _events_to_legacy_steps(events: list[TrajectoryEvent]) -> list[TrajectoryStep]:
+    """Materialize a legacy `steps` view from an event stream.
+
+    Used by FileStorage.load_trajectory to keep XRay and other
+    `trajectory.steps`-walking consumers working transparently while
+    Phase I (XRay's full event-card timeline) is in progress.
+
+    Mapping:
+      - AgentEvent     → TrajectoryStep(output=AgentOutput(...)) carrying
+                         the same actions / llm_calls / thoughts /
+                         profiling / error.
+      - ToolCallEvent  → TrajectoryStep(output=EnvironmentOutput) — the
+                         tool result's underlying env output.
+      - EvaluationEvent → omitted; the terminal reward lives in
+                         Trajectory.reward_info already.
+    """
+    from cube_harness.core import AgentEvent, AgentOutput, EvaluationEvent, ToolCallEvent
+
+    out: list[TrajectoryStep] = []
+    for ev in events:
+        body = ev.output
+        if isinstance(body, AgentEvent):
+            out.append(
+                TrajectoryStep(
+                    output=AgentOutput(
+                        actions=list(body.actions),
+                        llm_calls=list(body.llm_calls),
+                        error=body.error,
+                        profiling=dict(body.profiling),
+                        thoughts=body.thoughts,
+                    ),
+                    start_time=ev.start_time,
+                    end_time=ev.end_time,
+                )
+            )
+        elif isinstance(body, ToolCallEvent):
+            out.append(
+                TrajectoryStep(
+                    output=body.output,
+                    start_time=ev.start_time,
+                    end_time=ev.end_time,
+                )
+            )
+        elif isinstance(body, EvaluationEvent):
+            # EvaluationEvent terminal payload is reflected in
+            # trajectory.reward_info; no legacy step equivalent.
+            pass
+    return out
+
+
 def _read_step_file(path: Path) -> dict | None:
     if path.name.endswith(".msgpack.zst"):
         return _deserialize_step(path.read_bytes())
@@ -334,6 +384,17 @@ class FileStorage:
                 if not event_file.name.endswith(".msgpack.zst"):
                     continue
                 events.append(TrajectoryEvent.model_validate(_deserialize_event(event_file.read_bytes())))
+
+        # XRay backward-compat: when we have events but no legacy steps,
+        # synthesize a steps view so the existing XRay UI keeps rendering
+        # (Phase I: XRay's full event-card timeline is a follow-up; for
+        # now the legacy table view continues working without changes).
+        # AgentEvent → AgentOutput-shaped step; ToolCallEvent → env step
+        # carrying the underlying EnvironmentOutput; EvaluationEvent is
+        # not represented in the legacy steps view (it lives in
+        # reward_info already).
+        if events and not steps:
+            steps = _events_to_legacy_steps(events)
 
         trajectory_data["steps"] = steps
         trajectory_data["events"] = events

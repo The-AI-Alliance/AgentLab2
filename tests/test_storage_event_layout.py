@@ -161,7 +161,10 @@ def test_load_trajectory_handles_legacy_steps_only(tmp_path: Path) -> None:
 
 def test_load_trajectory_handles_mixed_formats(tmp_path: Path) -> None:
     """A trajectory mid-migration may end up with both steps/ AND events/.
-    Both must load and the counters fold them together."""
+    Both load — but the events stream takes precedence for the legacy
+    counters (RFC agent-owns-loop: events are the authoritative source;
+    storage materializes a legacy steps view from events for XRay
+    backward-compat, which would otherwise double-count)."""
     storage = FileStorage(tmp_path)
     parent = _agent_event()
     traj = Trajectory(
@@ -177,7 +180,9 @@ def test_load_trajectory_handles_mixed_formats(tmp_path: Path) -> None:
     storage.save_trajectory(traj)
 
     loaded = storage.load_trajectory("t-mixed")
-    assert loaded.n_env_steps == 1 + 1  # legacy env step + new tool-call event
+    # Events authoritative: n_env_steps == n_tool_calls (the legacy
+    # steps/ file is dropped from the count when events are present).
+    assert loaded.n_env_steps == 1  # one ToolCallEvent
     assert loaded.n_agent_events == 1
     assert loaded.n_tool_calls == 1
 
