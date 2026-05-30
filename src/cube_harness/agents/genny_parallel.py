@@ -79,8 +79,16 @@ class GennyParallel(Genny):
             # propagates as the first to fire, with the others cancelled
             # at the asyncio layer. We use return_exceptions=False
             # because we WANT BudgetExceeded to propagate to Episode.
+            #
+            # cube-standard Task exposes the toolbox as `tool` (the
+            # composite tool — `Toolbox` is-a `Tool`). Some downstream
+            # tasks aliased it as `toolbox`; prefer the canonical
+            # `tool` attribute.
+            toolbox = getattr(task, "tool", None) or getattr(task, "toolbox", None)
+            if toolbox is None:
+                raise RuntimeError("task has no .tool or .toolbox to dispatch parallel actions against")
             results = await asyncio.gather(
-                *(asyncio.to_thread(task.toolbox.execute_action, action) for action in agent_output.actions)
+                *(asyncio.to_thread(toolbox.execute_action, action) for action in agent_output.actions)
             )
 
             # Merge the parallel results into a single observation for

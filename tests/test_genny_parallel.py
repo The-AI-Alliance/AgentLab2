@@ -45,10 +45,11 @@ class _SleepyTool(AbstractTool):
 
 
 class _FakeTask:
-    """Minimal Task look-alike for GennyParallel: exposes `toolbox`."""
+    """Minimal Task look-alike for GennyParallel: exposes `.tool`
+    (matching cube-standard's Task.tool attribute)."""
 
     def __init__(self) -> None:
-        self.toolbox = _SleepyTool()
+        self.tool = _SleepyTool()
 
 
 class _ScriptedParallel(GennyParallel):
