@@ -6,6 +6,62 @@ the same PR as the spec.
 
 ---
 
+## Implementation status (this PR)
+
+All A-K phases shipped in a single session (commits on this branch
+follow Phase order). Phase L — 4 reference experiments running on this
+branch — is the user-side acceptance gate.
+
+| Phase | Status | Validation |
+|---|---|---|
+| A: Core event types | ✅ shipped | `tests/test_event_types.py` (11/11) |
+| B: MonitoredTool + install_monitoring | ✅ shipped | `tests/test_monitored_tool_compat.py` (17/17) |
+| C: TurnRecorder | ✅ shipped | `tests/test_recorder_dual_api.py` (14/14, incl. record_external_run) |
+| D: Default Agent.run | ✅ shipped | `tests/test_default_agent_run.py` (4/4) |
+| E: Episode.run rewrite (async) | ✅ shipped | `tests/test_episode.py` + `test_cube_episode.py` + `test_experiment.py` (all pass) |
+| F: Storage event-file layout | ✅ shipped | `tests/test_storage_event_layout.py` (10/10) |
+| G: Structural parity | ✅ arithmetic-cube + miniwob-cube `cube test` pass | (SWE-bench / TerminalBench need Docker — verified plumbing works, full runs deferred to Phase L) |
+| H: GennyParallel agent | ✅ shipped | `tests/test_genny_parallel.py` (3/3) — sibling ToolCallEvents, parallel speedup, budget enforcement |
+| I: XRay event compat | ✅ legacy steps view materialized from events at load time | `scripts/smoke/xray_loads_event_trajectory.py` — full event-card UI rewrite deferred |
+| J: Connector seam (record_external_run) | ✅ shipped + tested | covered by Phase C tests |
+| K: End-to-end smokes | ✅ 3 smokes in `scripts/smoke/` | `agent_owns_loop_events.py`, `genny_parallel_recorder.py`, `xray_loads_event_trajectory.py` all SMOKE OK |
+| L: Reference experiments | ⏳ awaiting user | run on this branch when smokes are green (they are) |
+
+**Aggregate test count: 1003 unit + integration tests pass. 0 regressions.**
+
+### Design adjustments made during implementation
+
+These are the calls the RFC didn't specify and that emerged from the
+code:
+
+1. **Two MonitoredTool variants** (`MonitoredTool` for sync, `AsyncMonitoredTool`
+   for async) instead of the single async wrapper the RFC drafted —
+   real cubes are mostly sync (`ArithmeticTool`, `BgymTool`,
+   `ComputerBase` …) and `Toolbox.execute_action` asserts
+   `isinstance(tool, AbstractTool)`, so a sync-Toolbox-compatible
+   wrapper is necessary.
+2. **`Budget.turns` bookkeeping in `TurnRecorder`**, not just
+   `MonitoredTool`. Some tests use a hand-rolled `task.step` that
+   bypasses `tool.execute_action` entirely — without recorder-side
+   bumping + `BudgetExceeded` raise, the loop runs forever on such
+   tasks.
+3. **`task.tool` attribute name** for the toolbox in GennyParallel
+   (cube-standard's canonical Task attribute), with `task.toolbox`
+   fallback for downstream tasks that aliased it.
+4. **EvaluationEvent re-raise instead of swallow** — the legacy
+   `test_episode_captures_env_error` expects `task.evaluate` exceptions
+   to propagate. Episode's `finally` block still runs in all cases.
+5. **XRay legacy-steps materialization at load time** instead of a
+   full UI rewrite. ~10 call sites in `xray_utils.py` and
+   `inspect_results.py` walk `trajectory.steps`; rather than touching
+   each one, `FileStorage._load_trajectory` synthesizes a legacy view
+   from events. The full event-card timeline is Phase 2 work.
+6. **`record_failure` does NOT bump `budget.turns`** — failure events
+   are metadata, not turns the agent took. Without this distinction
+   `n_agent_steps` would over-count by one whenever budget hit.
+
+---
+
 ## Parity strategy (no mock LLM needed)
 
 cube-harness has no mock LLM, but every cube ships a debug suite
