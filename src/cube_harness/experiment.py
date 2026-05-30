@@ -16,7 +16,12 @@ from cube_harness.agent import AgentConfig
 from cube_harness.core import Trajectory
 from cube_harness.episode import MAX_STEPS, Episode
 from cube_harness.episode_logs import trajectory_log_id
-from cube_harness.episode_status import RETRIABLE_STATUSES, EpisodeStatus, should_sweep_running_to_stale
+from cube_harness.episode_status import (
+    RETRIABLE_STATUSES,
+    EpisodeStatus,
+    should_sweep_queued_to_stale,
+    should_sweep_running_to_stale,
+)
 from cube_harness.eval_log import EvalLog, ExperimentRecord
 from cube_harness.storage import FileStorage
 
@@ -148,8 +153,12 @@ class Experiment(TypedBaseModel):
             except Exception:
                 logger.exception(f"Failed to load episode config {config_file}")
                 continue
-            # Existing trajectory (if any) will be archived on the next save_trajectory.
-            episode.allow_overwrite = status is not None
+            # A resume-selected episode is being re-run, so any existing trajectory
+            # (a partial from a crashed/killed/orphaned attempt) must be archived on
+            # the next save_trajectory. Deriving this from `status is not None` instead
+            # silently FileExistsErrors whenever a status file is absent but trajectory
+            # data remains — selection already means "re-run this", so always allow it.
+            episode.allow_overwrite = True
             episodes.append(episode)
 
         logger.info(f"Selected {len(episodes)} episode(s) to run (out of {len(config_files)} total) with resume=True")
@@ -317,8 +326,12 @@ def sweep_stale_statuses(
                 process_start_s=process_start_s,
             )
         elif status.status == "QUEUED":
-            if now - status.started_at > orphan_threshold_s:
-                is_stale = True
+            is_stale = should_sweep_queued_to_stale(
+                status,
+                now=now,
+                orphan_threshold_s=orphan_threshold_s,
+                process_start_s=process_start_s,
+            )
         if not is_stale:
             continue
         prior_state = status.status

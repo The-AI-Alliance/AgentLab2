@@ -132,6 +132,38 @@ def should_sweep_running_to_stale(
     return now - status.last_heartbeat_at > step_timeout_s + cancel_grace_s
 
 
+def should_sweep_queued_to_stale(
+    status: EpisodeStatus,
+    *,
+    now: float,
+    orphan_threshold_s: float,
+    process_start_s: float | None = None,
+) -> bool:
+    """Return True iff a QUEUED episode is orphaned and should become STALE.
+
+    A QUEUED claim has no heartbeat (the worker never entered `_run_loop`), so
+    liveness is judged from `started_at`:
+
+    - `started_at` predates `process_start_s` — the claim is from a prior,
+      now-dead driver process. A freshly started driver owns the output dir
+      exclusively, so any QUEUED it finds at round start was claimed before it
+      existed → reclaim regardless of age. This is the QUEUED analogue of
+      `should_sweep_running_to_stale`'s `process_start_s` check, and is what
+      makes a crash-then-resume pick the episode up instead of skipping it.
+    - `started_at` older than `orphan_threshold_s` — within the *same* driver,
+      Ray never picked the task up (dead / unschedulable worker). Bounded fallback.
+
+    This predicate is only consulted by the round-boundary `sweep_stale_statuses`,
+    never in the live `_poll_ray` loop, so it cannot false-cancel a task that is
+    legitimately waiting its turn behind busy workers — the failure mode that got
+    the live-loop time-based QUEUED timeout reverted (#445 → #458, fixed live by
+    the capacity gate in #459). Driver-identity, not elapsed time, is the signal.
+    """
+    if process_start_s is not None and status.started_at < process_start_s:
+        return True
+    return now - status.started_at > orphan_threshold_s
+
+
 def next_retry_count(prior: "EpisodeStatus | None") -> int:
     """Return the retry_count for a new attempt, given the prior status (if any).
 
