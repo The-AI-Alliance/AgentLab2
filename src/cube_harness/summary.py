@@ -6,7 +6,15 @@ from typing import TYPE_CHECKING
 from cube.core import EnvironmentOutput
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
-from cube_harness.core import AgentOutput, Trajectory, TrajectoryStep
+from cube_harness.core import (
+    AgentEvent,
+    AgentOutput,
+    EvaluationEvent,
+    ToolCallEvent,
+    Trajectory,
+    TrajectoryEvent,
+    TrajectoryStep,
+)
 
 if TYPE_CHECKING:
     from cube_harness.storage import FileStorage
@@ -57,6 +65,7 @@ class SummaryProcessor:
         self._summary_path = episode_dir / "episode_summary.jsonl"
         self._n_env_steps = 0
         self._n_agent_steps = 0
+        self._n_evaluations = 0
         self._total_actions = 0
         self._total_llm_calls = 0
         self._prompt_tokens = 0
@@ -113,6 +122,46 @@ class SummaryProcessor:
             self._done = step.output.done
 
         self._append(self._build_entry(step_num, EpisodeStatus.RUNNING))
+
+    def on_event(self, event: TrajectoryEvent) -> None:
+        """Accumulate per-event stats for the agent-owns-loop event model.
+
+        AgentEvent  → counts as one agent step (and folds llm/cost tally).
+        ToolCallEvent → counts as one env step; carries reward from the
+                        underlying EnvironmentOutput (zero at the tool
+                        boundary unless task.step wrapped it).
+        EvaluationEvent → records the terminal reward.
+
+        Errors on AgentEvent / ToolCallEvent are captured the same way
+        as in `on_step`.
+        """
+        # The summary-jsonl `turn` counter walks through events 1:1.
+        turn_n = self._n_agent_steps + self._n_env_steps + self._n_evaluations
+        out = event.output
+        if isinstance(out, AgentEvent):
+            self._n_agent_steps += 1
+            self._total_actions += len(out.actions)
+            self._total_llm_calls += len(out.llm_calls)
+            for llm_call in out.llm_calls:
+                if llm_call.usage:
+                    self._prompt_tokens += llm_call.usage.prompt_tokens
+                    self._completion_tokens += llm_call.usage.completion_tokens
+                    self._cached_tokens += llm_call.usage.cached_tokens
+                    self._cache_creation_tokens += llm_call.usage.cache_creation_tokens
+                    self._cost_usd += llm_call.usage.cost
+            if out.error is not None and self._error_type is None:
+                self._error_type = out.error.error_type
+        elif isinstance(out, ToolCallEvent):
+            self._n_env_steps += 1
+            self._reward = out.output.reward
+            self._done = out.output.done
+            if out.output.error is not None and self._error_type is None:
+                self._error_type = out.output.error.error_type
+        elif isinstance(out, EvaluationEvent):
+            self._n_evaluations += 1
+            # Terminal reward — overrides any previous (typically zero) value.
+            self._reward = out.reward
+        self._append(self._build_entry(turn_n, EpisodeStatus.RUNNING))
 
     @property
     def has_error(self) -> bool:

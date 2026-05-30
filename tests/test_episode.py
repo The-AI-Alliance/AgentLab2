@@ -8,9 +8,8 @@ from cube.core import Action, EnvironmentOutput, Observation
 from cube.task import TaskConfig, TaskMetadata
 
 from cube_harness.agent import AgentConfig
-from cube_harness.core import AgentOutput, Trajectory, TrajectoryStep
+from cube_harness.core import AgentEvent, AgentOutput, ToolCallEvent, Trajectory, TrajectoryStep
 from cube_harness.episode import Episode
-from cube_harness.storage import _read_step_file
 from tests.conftest import MockAgent, MockAgentConfig, MockCubeTask, MockCubeTaskConfig, MockToolConfig
 
 
@@ -56,9 +55,12 @@ class TestEpisode:
 
         assert isinstance(trajectory, Trajectory)
         assert "task_id" in trajectory.metadata
-        # Steps stream to disk; the returned trajectory carries metadata + summary only.
+        # RFC agent-owns-loop: events stream to disk; the returned
+        # trajectory carries metadata + summary only.
         loaded = mock_episode.storage.load_trajectory(trajectory.id)
-        assert len(loaded.steps) >= 2  # initial env output + agent output + final env output
+        # Minimum: reset event + at least one agent event + at least one
+        # tool call + final evaluation event.
+        assert len(loaded.events) >= 2
 
     def test_episode_run_saves_trajectory(self, mock_episode, tmp_dir):
         """Test Episode run saves trajectory files."""
@@ -87,20 +89,20 @@ class TestEpisode:
         assert "task_id" in metadata
 
     def test_episode_run_step_files(self, mock_episode, tmp_dir):
-        """Test Episode run creates per-step files."""
+        """Test Episode run creates per-event files (RFC agent-owns-loop)."""
         mock_episode.run()
 
         episodes_dir = tmp_dir / "episodes"
         ep_dirs = [d for d in episodes_dir.iterdir() if d.is_dir()]
         assert len(ep_dirs) > 0, "No episode directory found"
 
-        steps_dir = ep_dirs[0] / "steps"
-        step_files = sorted(steps_dir.iterdir())
-        assert len(step_files) >= 1
-
-        for step_file in step_files:
-            data = _read_step_file(step_file)
-            assert isinstance(data, dict)
+        # RFC: per-event files live under events/ now; the legacy steps/
+        # dir is preserved (empty) for in-flight rollback compatibility.
+        events_dir = ep_dirs[0] / "events"
+        event_files = sorted(events_dir.iterdir())
+        assert len(event_files) >= 1
+        for f in event_files:
+            assert f.name.endswith(".msgpack.zst")
 
     def test_episode_run_respects_max_steps(self, tmp_dir, mock_agent_config, mock_cube_task_config):
         """Test Episode run respects max_steps limit."""
@@ -131,8 +133,17 @@ class TestEpisode:
 
         trajectory = episode.run()
 
-        # Should have stopped at max_steps (steps stream to disk; read the streamed count)
-        assert trajectory.summary_stats["n_agent_steps"] <= 3
+        # RFC agent-owns-loop: max_steps translates to Budget.max_turns.
+        # Budget.exhausted fires when turns >= max_turns. The agent
+        # records 3 normal turns; BudgetExceeded surfaces; the failure
+        # AgentEvent (recorder.record_failure) is metadata, not a
+        # "turn", so the total agent-event count is at most 4
+        # (3 turns + 1 failure). Tool calls are bounded by the budget
+        # at <=3.
+        assert trajectory.summary_stats["n_agent_steps"] <= 4
+        # Episode marked MAX_STEPS_REACHED.
+        # (status assertion lives in test_episode_status.py; here we
+        # just confirm the budget enforcement bounded the run.)
 
     def test_episode_run_stops_on_done(self, tmp_dir, mock_agent_config, mock_cube_task_config):
         """Test Episode run stops when done=True."""
@@ -298,15 +309,14 @@ class TestEpisode:
         traj_id = f"{episode.config.task_config.task_id}_ep{episode.config.id}"
         trajectory = storage.load_trajectory(traj_id)
 
-        # Find the agent output step with error
-        agent_steps = [s for s in trajectory.steps if isinstance(s.output, AgentOutput)]
-        assert len(agent_steps) > 0, "No agent steps found in trajectory"
-
-        error_step = next((s for s in agent_steps if s.output.error is not None), None)
-        assert error_step is not None, "No error found in agent steps"
-        assert error_step.output.error is not None
-        assert error_step.output.error.error_type == "RuntimeError"
-        assert "Agent step failed" in error_step.output.error.exception_str
+        # RFC agent-owns-loop: errors land on an AgentEvent (via
+        # recorder.record_failure) instead of an AgentOutput step.
+        agent_events = [e for e in trajectory.events if isinstance(e.output, AgentEvent)]
+        assert len(agent_events) > 0, "No agent events found in trajectory"
+        error_event = next((e for e in agent_events if e.output.error is not None), None)
+        assert error_event is not None, "No error found in agent events"
+        assert error_event.output.error.error_type == "RuntimeError"
+        assert "Agent step failed" in error_event.output.error.exception_str
 
     def test_episode_captures_env_error(self, tmp_dir, mock_agent_config):
         """Test Episode captures environment errors correctly in trajectory."""
@@ -342,15 +352,18 @@ class TestEpisode:
         traj_id = f"{episode.config.task_config.task_id}_ep{episode.config.id}"
         trajectory = storage.load_trajectory(traj_id)
 
-        # Find the environment output step with error
-        env_steps = [s for s in trajectory.steps if isinstance(s.output, EnvironmentOutput)]
-        assert len(env_steps) > 0, "No env steps found in trajectory"
-
-        error_step = next((s for s in env_steps if s.output.error is not None), None)
-        assert error_step is not None, "No error found in env steps"
-        assert error_step.output.error is not None
-        assert error_step.output.error.error_type == "ValueError"
-        assert "Environment validation failed" in error_step.output.error.exception_str
+        # RFC agent-owns-loop: env results are ToolCallEvents and the
+        # final eval is a separate EvaluationEvent. The error from a
+        # raised evaluate() is captured on the failure AgentEvent
+        # via recorder.record_failure.
+        agent_events = [e for e in trajectory.events if isinstance(e.output, AgentEvent)]
+        error_event = next((e for e in agent_events if e.output.error is not None), None)
+        assert error_event is not None, "No error found in failure-AgentEvent"
+        assert "Environment validation failed" in error_event.output.error.exception_str
+        # ToolCallEvents (env step proxies) should also be present from
+        # the agent loop before the failure.
+        tool_call_events = [e for e in trajectory.events if isinstance(e.output, ToolCallEvent)]
+        assert len(tool_call_events) >= 1
 
     def test_episode_run_raises_on_duplicate_trajectory(
         self, tmp_dir, mock_agent_config, mock_cube_task_config

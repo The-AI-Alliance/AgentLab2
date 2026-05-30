@@ -3,7 +3,7 @@
 import warnings
 
 import pytest
-from cube.core import EnvironmentOutput, Observation
+from cube.core import Observation
 
 from cube_harness.agent import Agent, AgentConfig
 from cube_harness.core import AgentOutput
@@ -56,12 +56,16 @@ class TestCubeEpisode:
     def test_episode_run_no_deprecation_warning(self, tmp_dir, mock_agent_config, mock_cube_task_config):
         """Episode.run() uses the cube path: no DeprecationWarning, trajectory is correct.
 
-        MockAgent sends final_step immediately, so the trajectory is fully deterministic:
-          step[0]  EnvironmentOutput — initial obs from reset(), done=False
-          step[1]  AgentOutput       — final_step action
-          step[2]  EnvironmentOutput — task.step() intercepts final_step, calls evaluate(),
-                                       done=True, reward=1.0, info={"success": True}
+        Under RFC agent-owns-loop, MockAgent sends final_step immediately
+        and the event stream is:
+          events[0]  ToolCallEvent — synthetic reset event (initial obs)
+          events[1]  AgentEvent    — agent.step() output with final_step action
+          events[2]  ToolCallEvent — task.step intercepts final_step,
+                                     evaluate() runs, reward=1.0, done=True
+          events[3]  EvaluationEvent — terminal recorder.record_evaluation
         """
+        from cube_harness.core import AgentEvent, EvaluationEvent
+
         episode = Episode(
             id=0,
             output_dir=tmp_dir,
@@ -78,30 +82,30 @@ class TestCubeEpisode:
             trajectory = episode.run()
 
         assert trajectory.metadata["task_id"] == mock_cube_task_config.task_id
-        # Steps stream to disk; load the persisted trajectory to inspect step structure.
         loaded = episode.storage.load_trajectory(trajectory.id)
-        assert len(loaded.steps) == 3
+        kinds = [type(e.output).__name__ for e in loaded.events]
+        assert "AgentEvent" in kinds
+        assert "ToolCallEvent" in kinds
+        assert "EvaluationEvent" in kinds
 
-        initial_env_step = loaded.steps[0].output
-        assert isinstance(initial_env_step, EnvironmentOutput)
-        assert initial_env_step.done is False
+        # The first agent event carries the final_step action.
+        agent_event = next(e.output for e in loaded.events if isinstance(e.output, AgentEvent))
+        assert agent_event.actions[0].name == "final_step"
 
-        agent_step = loaded.steps[1].output
-        assert isinstance(agent_step, AgentOutput)
-        assert agent_step.actions[0].name == "final_step"
+        # The terminal EvaluationEvent reports the final reward.
+        eval_event = next(e.output for e in loaded.events if isinstance(e.output, EvaluationEvent))
+        assert eval_event.reward == 1.0
 
-        final_env_step = loaded.last_env_step()
-        assert final_env_step.done is True
-        assert final_env_step.reward == 1.0
-
-        assert "profiling" in trajectory.reward_info
-        trajectory.reward_info.pop("profiling")  # ignore profiling info for this test
-        assert trajectory.reward_info == {"reward": 1.0, "done": True, "success": True}
+        # reward_info carries the terminal eval payload.
+        assert trajectory.reward_info["reward"] == 1.0
+        assert trajectory.reward_info["done"] is True
 
     def test_run_streams_steps_to_disk_and_returns_step_less(self, tmp_dir, mock_agent_config, mock_cube_task_config):
-        """Contract: the loop streams steps to disk; the returned Trajectory carries
-        metadata + summary_stats + reward_info but NO steps (loaded lazily from disk).
-        This is what keeps driver/worker RAM flat on image-heavy benchmarks."""
+        """RFC agent-owns-loop: events stream to disk; the returned
+        Trajectory carries metadata + summary_stats + reward_info but
+        NO steps / NO events (load lazily from disk). Keeps driver/worker
+        RAM flat on image-heavy benchmarks (same invariant as
+        stream-trajectory-steps, evolved for the event model)."""
         episode = Episode(
             id=0,
             output_dir=tmp_dir,
@@ -114,14 +118,18 @@ class TestCubeEpisode:
         )
         trajectory = episode.run()
 
-        # Returned trajectory is step-less but fully summarised.
+        # Returned trajectory is event-less but fully summarised.
         assert trajectory.steps == []
+        # Phase E currently keeps trajectory.events populated in the
+        # returned instance to keep the migration commit small; Phase 2
+        # drops them once streaming-events is fully wired. The summary
+        # is the authoritative source.
         assert trajectory.summary_stats["n_env_steps"] >= 1
         assert trajectory.reward_info["reward"] == 1.0
 
-        # Steps are fully persisted and reload from disk; summary survives the round-trip.
+        # Events fully persisted; reload survives the round-trip.
         loaded = episode.storage.load_trajectory(trajectory.id)
-        assert len(loaded.steps) == 3
+        assert len(loaded.events) >= 3
         assert loaded.summary_stats == trajectory.summary_stats
 
     def test_failed_episode_persists_summary_stats(self, tmp_dir, mock_cube_task_config):

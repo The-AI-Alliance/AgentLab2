@@ -141,10 +141,17 @@ class TurnRecorder:
         trajectory: Trajectory,
         storage: object | None = None,
         summary: "SummaryProcessor | None" = None,
+        budget: object | None = None,
     ) -> None:
         self.trajectory = trajectory
         self.storage = storage
         self.summary = summary
+        # Budget is `cube_harness.tool.Budget` but we keep the type loose
+        # to avoid the circular import (tool imports recorder transitively
+        # through MonitoredTool's state). When set, every flushed
+        # AgentEvent bumps budget.turns so MonitoredTool's
+        # max-turns check fires correctly.
+        self.budget = budget
         self._current_turn_id: str | None = None
         self._n_turns_emitted = 0
 
@@ -230,6 +237,10 @@ class TurnRecorder:
         appears in the trajectory and the post-mortem (XRay, summary).
         Accepts BaseException because Budget/Episode-level signals
         (BudgetExceeded, EpisodeDone) extend BaseException.
+
+        A failure event is NOT a normal turn — it doesn't bump
+        budget.turns (we're already past the budget) and it doesn't
+        update current_turn_id. We append directly.
         """
         # StepError.from_exception requires Exception, not BaseException.
         # Wrap BaseException-only signals so the trajectory still records
@@ -244,7 +255,7 @@ class TurnRecorder:
             )
         event = AgentEvent(error=err)
         ts = time.time()
-        self._flush_agent_event(event, ts, ts)
+        self._append_event(TrajectoryEvent(output=event, start_time=ts, end_time=ts))
 
     def record_evaluation(self, reward: float, info: dict | None = None) -> None:
         """Terminal `task.evaluate()` result. Emitted exactly once by Episode."""
@@ -261,7 +272,21 @@ class TurnRecorder:
 
     def _flush_agent_event(self, event: AgentEvent, start: float, end: float) -> None:
         self._n_turns_emitted += 1
+        if self.budget is not None:
+            # Bump budget.turns so MonitoredTool's exhausted check fires
+            # on the right boundary (one LLM turn = one increment).
+            self.budget.turns += 1
         self._append_event(TrajectoryEvent(output=event, start_time=start, end_time=end))
+        # Enforce budget AFTER the flush so the AgentEvent that took us
+        # past max_turns is recorded before we abort the run. This
+        # mirrors what MonitoredTool does on tool dispatch, but covers
+        # the case where the task's step() bypasses the toolbox entirely
+        # (e.g. tests with hand-rolled task.step that doesn't dispatch
+        # to tool.execute_action).
+        if self.budget is not None and self.budget.exhausted:
+            from cube_harness.tool import BudgetExceeded  # local import: avoid recorder<->tool cycle
+
+            raise BudgetExceeded()
 
     def _append_event(self, te: TrajectoryEvent) -> None:
         self.trajectory.events.append(te)
