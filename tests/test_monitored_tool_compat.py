@@ -196,6 +196,35 @@ def test_async_toolbox_with_mixed_monitored_and_unmonitored() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_monitored_tool_forwards_direct_method_calls_to_inner() -> None:
+    """Regression: cube-standard tasks call @tool_action methods directly
+    (e.g. terminalbench2's `task.tool.bash(...)`) for setup / verification
+    / oracle paths. Those direct calls must reach the inner tool — they
+    are NOT agent tool calls and must not be recorded as ToolCallEvents.
+    Without __getattr__ delegation, `monitored_tool.bash(...)` raises
+    AttributeError as soon as Episode installs monitoring."""
+
+    class _BashLikeTool(AbstractTool):
+        @property
+        def action_set(self) -> list[ActionSchema]:
+            return [ActionSchema(name="run", description="x", parameters={"type": "object", "properties": {}})]
+
+        def execute_action(self, action: Action) -> Observation:
+            return Observation.from_text("noop")
+
+        def bash(self, cmd: str, timeout: int = 0) -> str:
+            return f"bash:{cmd}:t{timeout}"
+
+    traj = Trajectory(id="t")
+    budget = Budget(max_turns=5)
+    wrapped = MonitoredTool(_BashLikeTool(), traj, budget)
+    # The direct method call must reach the inner tool unchanged.
+    assert wrapped.bash("echo ok", timeout=15) == "bash:echo ok:t15"
+    # And it must NOT have recorded a ToolCallEvent — those direct
+    # method calls aren't agent tool calls.
+    assert traj.n_tool_calls == 0
+
+
 def test_wrap_tool_picks_sync_or_async_by_inner_type() -> None:
     traj = Trajectory(id="t")
     budget = Budget(max_turns=5)

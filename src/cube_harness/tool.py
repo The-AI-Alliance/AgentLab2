@@ -245,6 +245,23 @@ class MonitoredTool(AbstractTool):
         )
         return result
 
+    def __getattr__(self, name: str) -> object:
+        # Forward direct attribute / method access to the wrapped tool.
+        # cube-standard's `@tool_action`-decorated methods (`tool.bash`,
+        # `tool.read`, …) are called DIRECTLY by tasks for setup,
+        # verification, and oracle paths — those paths are not agent
+        # tool calls and should NOT be recorded as `ToolCallEvent`s.
+        # Without this delegate, terminalbench2's `task.tool.bash(...)`
+        # would AttributeError as soon as Episode installs monitoring.
+        # `__getattr__` only fires for attrs Python didn't find on
+        # MonitoredTool itself, so `execute_action` / `action_set` /
+        # `reset` / `close` keep going through the monitored path.
+        if name.startswith("_") or name == "inner":
+            # Don't proxy dunders or our own state — that produces
+            # infinite recursion on partially-constructed instances.
+            raise AttributeError(name)
+        return getattr(self.inner, name)
+
 
 # ---------------------------------------------------------------------------
 # Async MonitoredTool — wraps AbstractAsyncTool, exposes async execute_action
@@ -303,6 +320,15 @@ class AsyncMonitoredTool(AbstractAsyncTool):
             self._state.summary,
         )
         return result
+
+    def __getattr__(self, name: str) -> object:
+        # Same rationale as MonitoredTool.__getattr__: cube-standard
+        # tasks call @tool_action methods directly (`tool.bash(...)`)
+        # for setup / verification / oracle paths, separate from the
+        # agent's `execute_action` calls.
+        if name.startswith("_") or name == "inner":
+            raise AttributeError(name)
+        return getattr(self.inner, name)
 
 
 # ---------------------------------------------------------------------------
