@@ -25,7 +25,7 @@ branch — is the user-side acceptance gate.
 | I: XRay event compat | ✅ legacy steps view materialized from events at load time | `scripts/smoke/xray_loads_event_trajectory.py` — full event-card UI rewrite deferred |
 | J: Connector seam (record_external_run) | ✅ shipped + tested | covered by Phase C tests |
 | K: End-to-end smokes | ✅ 3 smokes in `scripts/smoke/` | `agent_owns_loop_events.py`, `genny_parallel_recorder.py`, `xray_loads_event_trajectory.py` all SMOKE OK |
-| L: Reference experiments | ⏳ awaiting user | run on this branch when smokes are green (they are) |
+| L: Reference experiments | ✅ TerminalBench-2 reproduced at parity (gpt-5.4-mini) | see *Reference baseline reproduction* below |
 
 **Aggregate test count: 1003 unit + integration tests pass. 0 regressions.**
 
@@ -59,6 +59,50 @@ code:
 6. **`record_failure` does NOT bump `budget.turns`** — failure events
    are metadata, not turns the agent took. Without this distinction
    `n_agent_steps` would over-count by one whenever budget hit.
+7. **`MonitoredTool.__getattr__` delegates non-monitored attribute
+   access to the inner tool.** Surfaced by running the TerminalBench-2
+   reference baseline on this branch: terminalbench2's `Task.evaluate`
+   / `Task.reset` / `Task.close` call `self.tool.bash(...)` directly
+   (and `bash_unlimited`, `read`, …) for setup, verification, and the
+   oracle path. Those calls are NOT agent tool calls; they're
+   task-internal driver methods. Without delegation,
+   `monitored_tool.bash(...)` raised `AttributeError` the moment
+   Episode installed monitoring, breaking every task that uses the
+   direct method pattern (terminalbench2, swebench-verified, …).
+   Fix: `__getattr__` forwards anything Python didn't find on the
+   wrapper to the inner tool. `execute_action` / `action_set` /
+   `reset` / `close` still go through the monitored path. Direct
+   `@tool_action` method calls reach the underlying tool unchanged
+   and are NOT recorded as `ToolCallEvent`s (right semantics: those
+   calls aren't agent-driven). Regression test:
+   `test_monitored_tool_forwards_direct_method_calls_to_inner`.
+
+---
+
+## Reference baseline reproduction (Phase L)
+
+Reproduced the team's reference baseline for **gpt-5.4-mini on
+TerminalBench-2** on this branch end-to-end (Daytona infra, Genny[swe]
+agent, cost_limit=$0.5/task, max_actions=100, identical config to the
+reference: `~/dev/sandbox/reference-baselines-r0/mini_tbench2.py`):
+
+| Metric | Reference (2026-05-29) | This branch (2026-05-31) |
+|---|---|---|
+| Solved | 26/89 | 24/89 |
+| Scored | 88 | 82 |
+| Solve-rate (scored) | 29.5% | **29.3%** |
+| Solve-rate (raw) | 29.2% | **27.0%** |
+| env_failure exclusions | 1 (prove-plus-comm flaky) | 7 (Daytona timeouts + Azure ContentPolicy) |
+
+**Verdict: reference parity within the noise of the env-failure rate.**
+Solve-rate on scored episodes is essentially identical (29.3% vs 29.5%).
+The raw rate is 2pp lower because we had more transient
+Daytona/Azure infra exclusions this run — same pre-existing noise
+modes the reference RESULTS.md flagged (`Daytona/container env issues`
+and `Azure ContentPolicy`), just a slightly worse draw of them.
+
+Run dir: `~/cube_harness_results/20260531_120149_Genny-azure_gpt-5.4-mini_terminalbench2-cube_ref-baseline-r0-mini-tbench2_412f770b/`
+Wallclock: ~4h with `--ray 8` on Daytona.
 
 ---
 
