@@ -32,16 +32,25 @@ delete the dead code the original phases couldn't touch.
 | N: EpisodeView lazy loader + per-view cache | ✅ shipped | `tests/test_episode_view.py` (12/12, V2 + V2-steps + crashed-mid-run) |
 | O: Write metadata-at-start + finalize_episode(meta) | ✅ shipped | episode.py rewrites |
 | P: Storage migration (load_episode, list_episodes, V1 upgrade) | ✅ shipped | covered by test_episode_view + test_storage |
-| P2: Episode + MonitoredTool + TurnRecorder + EpisodeRecord migration | ✅ shipped | 1028 unit tests pass |
-| Q (scoped): load_trajectory wraps load_episode (XRay/utils/inspect_results unchanged) | 🟡 in progress | full pytest |
-| Q-full: XRay event-card rewrite (drop legacy shim) | ⏭ deferred to follow-up PR `agent-owns-loop-xray` | — |
-| R: Investigator migration to EpisodeView | ⏭ deferred to follow-up PR | — |
-| S: make_fake_episode test helper | ⏭ deferred to follow-up PR (needed when test_xray_utils migrates) | — |
-| T (scoped): slim Trajectory; drop streaming/events/dead helpers + save_trajectory + save_step | 🟡 in progress | grep audit |
+| P2: Episode + MonitoredTool + TurnRecorder + EpisodeRecord migration | ✅ shipped | 1022 unit tests pass |
+| Q (scoped): load_trajectory wraps load_episode (XRay/utils/inspect_results unchanged) | ✅ shipped | smokes + cube debug suites |
+| T (scoped): slim Trajectory; drop events / streaming / event-stream helpers from Trajectory | ✅ shipped | core/storage diff = -200 LOC |
+| Smokes | ✅ green | agent_owns_loop_events, genny_parallel_recorder, xray_loads_event_trajectory, streaming_trajectory |
+| Cube debug suites | ✅ green | arithmetic-cube, miniwob-cube, workarena-cube |
+| Q-full: XRay event-card rewrite (drop legacy shim) | ⏭ follow-up PR `agent-owns-loop-xray` | — |
+| R: Investigator migration to EpisodeView | ⏭ follow-up PR | — |
+| S: make_fake_episode test helper | ⏭ follow-up PR (needed when test_xray_utils migrates) | — |
 
-**Aggregate test count: 1028 unit tests pass through Phase P. Target after
-Phase Q+T cleanup: same count (Trajectory consumers keep working through
-the thin load_trajectory shim).**
+**Final aggregate this PR: 1022 unit tests pass + 4 smokes + 3 cube
+debug suites green. Net: 1019 starting → 1022 (3 new EpisodeView /
+metadata tests; legacy event-stream-on-Trajectory tests deleted as
+their assertions moved to test_episode_view).**
+
+### Cube-standard companion (PR #152)
+
+No further changes needed. The companion proposal already says the
+right thing — Trajectory was never in cube-standard. Mergeable, all
+CI green; mark ready alongside this PR when reviewed.
 
 ### Design adjustments made during implementation
 
