@@ -1,3 +1,5 @@
+from typing import Any
+
 from cube.container import Container
 from cube.tool import Tool, ToolConfig, tool_action
 
@@ -23,6 +25,12 @@ class ArithmeticTool(Tool):
         """
         self._submitted = answer
         return f"Answer {answer} submitted."
+
+    @tool_action
+    def _unknown_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        # TirAgent maps hallucinated/unknown tool calls to this sentinel; return feedback
+        # instead of letting cube.tool raise, so RL rollouts stay alive. Mirrors math-tool-use.
+        return f"Unknown tool '{name}' with arguments {arguments}. Use submit_answer(answer: int)."
 
     @property
     def last_answer(self) -> int | None:
