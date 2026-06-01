@@ -4,6 +4,7 @@ import logging
 import threading
 import time
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
@@ -14,6 +15,8 @@ from pydantic import BaseModel
 
 from cube_harness.core import (
     AgentEvent,
+    AgentOutput,
+    EpisodeMetadata,
     EvaluationEvent,
     ToolCallEvent,
     Trajectory,
@@ -189,6 +192,232 @@ def _resolve_llm_call_file(output_dir: Path, step_id: str, llm_call_id: str) -> 
     return output_dir / "llm_calls" / f"{step_id}_{llm_call_id}.json"
 
 
+# --- EpisodeView lazy loader (RFC: agent-owns-loop scope expansion) -------
+
+
+@dataclass
+class _EventIndexEntry:
+    """One slot in `EpisodeView._index`.
+
+    `kind` is the canonical event kind (`agent` / `tool_call` / `eval`)
+    regardless of on-disk layout. For V1 / V2-steps legacy layouts the
+    entry points at a `_act.msgpack.zst` or `_obs.msgpack.zst` file; the
+    view synthesizes a `TrajectoryEvent` on decode. For V2-events the
+    file is already an event."""
+
+    num: int
+    kind: str  # 'agent' | 'tool_call' | 'eval'
+    path: Path
+    legacy: bool = False
+    legacy_parent_num: int | None = None  # only set for legacy obs entries
+
+
+class EpisodeView:
+    """Lazy reader for one episode directory.
+
+    Replaces in-memory `Trajectory` for every consumer that walks events.
+    `metadata` is loaded eagerly (one JSON read); events are decoded
+    from disk on demand and cached in an internal `dict[int, TrajectoryEvent]`
+    scoped to the view's lifetime (AgentLab pattern: no LRU, no eviction —
+    when the view is GC'd the cache goes with it).
+
+    Use via:
+
+        view = storage.load_episode(id)
+        view.metadata.summary_stats           # cheap
+        for event in view: ...                # lazy, one decode at a time
+        view[i]                               # random access, cached
+        len(view)                             # from index, no decode
+    """
+
+    def __init__(
+        self,
+        storage: "FileStorage",
+        trajectory_id: str,
+        metadata: EpisodeMetadata,
+        index: list[_EventIndexEntry],
+    ) -> None:
+        self.storage = storage
+        self.id = trajectory_id
+        self.metadata = metadata
+        self._index = index
+        self._cache: dict[int, TrajectoryEvent] = {}
+
+    @property
+    def n_agent_events(self) -> int:
+        """Number of AgentEvent entries — read from the index, no decode."""
+        return sum(1 for e in self._index if e.kind == "agent")
+
+    @property
+    def n_tool_calls(self) -> int:
+        """Number of ToolCallEvent entries — read from the index, no decode."""
+        return sum(1 for e in self._index if e.kind == "tool_call")
+
+    @property
+    def n_evaluations(self) -> int:
+        """Number of EvaluationEvent entries (≤1 per episode) — index-only."""
+        return sum(1 for e in self._index if e.kind == "eval")
+
+    @property
+    def is_complete(self) -> bool:
+        """True once the episode finalized (`metadata.end_time` is set)."""
+        return self.metadata.is_complete
+
+    @property
+    def summary_stats(self) -> dict | None:
+        """Shortcut to `metadata.summary_stats`."""
+        return self.metadata.summary_stats
+
+    @property
+    def reward_info(self) -> dict:
+        """Shortcut to `metadata.reward_info`."""
+        return self.metadata.reward_info
+
+    def __len__(self) -> int:
+        return len(self._index)
+
+    def __getitem__(self, i: int) -> TrajectoryEvent:
+        """Decode event at index `i`, caching by index for repeat access."""
+        if i < 0:
+            i = len(self._index) + i
+        if not 0 <= i < len(self._index):
+            raise IndexError(i)
+        if i not in self._cache:
+            self._cache[i] = self._decode(i)
+        return self._cache[i]
+
+    def __iter__(self) -> Iterator[TrajectoryEvent]:
+        for i in range(len(self._index)):
+            yield self[i]
+
+    def iter_events(self) -> Iterator[TrajectoryEvent]:
+        """Alias for `iter(view)` — explicit-method form for readability."""
+        return iter(self)
+
+    def events_of_turn(self, turn_id: str) -> list[TrajectoryEvent]:
+        """All `ToolCallEvent`s sharing a `turn_id`. Decodes one pass."""
+        return [e for e in self if isinstance(e.output, ToolCallEvent) and e.output.turn_id == turn_id]
+
+    def last_env_output(self) -> EnvironmentOutput | None:
+        """Most recent `ToolCallEvent.output`, or None if no tool call ran.
+
+        Walks the index in reverse (cheap — kind is in the entry) and
+        decodes only the matching event."""
+        for i in range(len(self._index) - 1, -1, -1):
+            if self._index[i].kind == "tool_call":
+                ev = self[i]
+                if isinstance(ev.output, ToolCallEvent):
+                    return ev.output.output
+        return None
+
+    def _decode(self, i: int) -> TrajectoryEvent:
+        entry = self._index[i]
+        if entry.legacy:
+            step_data = _deserialize_step(entry.path.read_bytes())
+            step = TrajectoryStep.model_validate(step_data)
+            return self._step_to_event(step, entry)
+        data = _deserialize_event(entry.path.read_bytes())
+        return TrajectoryEvent.model_validate(data)
+
+    @staticmethod
+    def _step_to_event(step: TrajectoryStep, entry: _EventIndexEntry) -> TrajectoryEvent:
+        """Synthesize a TrajectoryEvent from a legacy step file.
+
+        Used by V2-steps and V1-jsonl layouts. Parent / turn ids are
+        derived from the step number (deterministic, so siblings line
+        up across decodes).
+        """
+        if isinstance(step.output, AgentOutput):
+            agent_event = AgentEvent.from_agent_output(step.output)
+            # Override the default UUID with a deterministic id so child
+            # ToolCallEvents can reference it across decodes.
+            agent_event = agent_event.model_copy(update={"id": _legacy_agent_id(entry.num)})
+            return TrajectoryEvent(output=agent_event, start_time=step.start_time, end_time=step.end_time)
+        if isinstance(step.output, EnvironmentOutput):
+            parent_id = (
+                _legacy_agent_id(entry.legacy_parent_num) if entry.legacy_parent_num is not None else "__reset__"
+            )
+            tool_event = ToolCallEvent(
+                parent_event_id=parent_id,
+                output=step.output,
+                turn_id=parent_id,
+            )
+            return TrajectoryEvent(output=tool_event, start_time=step.start_time, end_time=step.end_time)
+        raise TypeError(f"Unexpected legacy step output type: {type(step.output).__name__}")
+
+
+def _legacy_agent_id(num: int) -> str:
+    """Deterministic AgentEvent.id for V1/V2-steps legacy episodes."""
+    return f"legacy_agent_{num:03d}"
+
+
+def _build_events_index(events_dir: Path) -> list[_EventIndexEntry]:
+    """Scan events/ and build an index entry per `NNN_<kind>.msgpack.zst`."""
+    entries: list[_EventIndexEntry] = []
+    for path in sorted(events_dir.iterdir()):
+        if not path.name.endswith(".msgpack.zst"):
+            continue
+        stem = path.name[: -len(".msgpack.zst")]
+        num_str, _, kind = stem.partition("_")
+        try:
+            num = int(num_str)
+        except ValueError:
+            continue
+        if kind not in ("agent", "tool_call", "eval"):
+            continue
+        entries.append(_EventIndexEntry(num=num, kind=kind, path=path))
+    return entries
+
+
+def _build_legacy_steps_index(steps_dir: Path) -> list[_EventIndexEntry]:
+    """Scan a legacy `steps/` dir and build event-shaped index entries.
+
+    `_act.msgpack.zst` files become `agent` entries; `_obs.msgpack.zst`
+    files become `tool_call` entries whose `legacy_parent_num` references
+    the most recent `_act` step.
+    """
+    entries: list[_EventIndexEntry] = []
+    last_agent_num: int | None = None
+    for path in sorted(steps_dir.iterdir()):
+        if not path.name.endswith(".msgpack.zst"):
+            continue
+        stem = path.name[: -len(".msgpack.zst")]
+        num_str, _, suffix = stem.partition("_")
+        try:
+            num = int(num_str)
+        except ValueError:
+            continue
+        if suffix.startswith("act"):
+            entries.append(_EventIndexEntry(num=num, kind="agent", path=path, legacy=True))
+            last_agent_num = num
+        elif suffix.startswith("obs"):
+            entries.append(
+                _EventIndexEntry(
+                    num=num,
+                    kind="tool_call",
+                    path=path,
+                    legacy=True,
+                    legacy_parent_num=last_agent_num,
+                )
+            )
+    return entries
+
+
+def _episode_metadata_from_dict(data: dict, fallback_id: str) -> EpisodeMetadata:
+    """Coerce a raw dict (from disk JSON) into an `EpisodeMetadata`.
+
+    Tolerant of legacy `trajectory.json` files that may carry extra
+    fields (`steps`, `events`, `streaming`, …): only fields declared on
+    `EpisodeMetadata` are read. Missing `id` falls back to `fallback_id`
+    (used when loading a crashed-mid-run dir whose metadata wasn't yet
+    written).
+    """
+    allowed = set(EpisodeMetadata.model_fields)
+    filtered = {k: v for k, v in data.items() if k in allowed}
+    filtered.setdefault("id", fallback_id)
+    return EpisodeMetadata.model_validate(filtered)
+
+
 class FileStorage:
     def __init__(self, output_dir: str | Path) -> None:
         self.output_dir = Path(output_dir)
@@ -286,6 +515,52 @@ class FileStorage:
         if ep_dir.exists():
             self._archive_episode(ep_dir)
 
+    # --- EpisodeMetadata write-at-start API (RFC: agent-owns-loop scope expansion) ---
+
+    def save_metadata(self, meta: EpisodeMetadata, allow_overwrite: bool = False) -> None:
+        """Write `episode.metadata.json` for this episode.
+
+        Called twice per episode: at START with `end_time=None` and stub
+        summary fields, then at END via `finalize_episode` with the
+        final summary. Both calls go through this method.
+
+        First call for a given id creates the directory + the metadata
+        file. Second+ call for the same id (tracked via `_saved_ids`)
+        is treated as a re-save and is always allowed — that's how the
+        start → end pattern works.
+
+        First call for a NEW id when the directory already exists on
+        disk (a retry / overwrite scenario) requires `allow_overwrite=True`
+        to archive the old episode before writing.
+        """
+        ep_dir = self._episode_dir(meta.id)
+        metadata_path = ep_dir / EPISODE_METADATA
+        is_resave = meta.id in self._saved_ids
+
+        if not is_resave and ep_dir.exists() and metadata_path.exists():
+            if not allow_overwrite:
+                raise FileExistsError(
+                    f"Episode '{meta.id}' already exists at {ep_dir}. "
+                    "Use allow_overwrite=True to archive and overwrite."
+                )
+            self._archive_episode(ep_dir)
+
+        ep_dir.mkdir(parents=True, exist_ok=True)
+        self._saved_ids.add(meta.id)
+
+        metadata_path.write_text(json.dumps(meta.model_dump(mode="json"), indent=2))
+        logger.info(f"Saved episode metadata to {ep_dir}")
+
+    def finalize_episode(self, meta: EpisodeMetadata) -> None:
+        """Write the final episode metadata at episode end.
+
+        Idempotent re-save: the same `episode.metadata.json` file is
+        overwritten with the complete `end_time` + `summary_stats` +
+        `reward_info`. Always allowed because `_saved_ids` records the
+        start-write.
+        """
+        self.save_metadata(meta)
+
     def save_step(self, step: TrajectoryStep, trajectory_id: str, step_num: int) -> None:
         ep_dir = self._episode_dir(trajectory_id)
         if not ep_dir.exists():
@@ -331,6 +606,155 @@ class FileStorage:
             if candidate.name.startswith(f"{event_num:03d}_") and candidate.name.endswith(".msgpack.zst"):
                 return TrajectoryEvent.model_validate(_deserialize_event(candidate.read_bytes()))
         raise FileNotFoundError(f"No event at {events_dir}/{event_num:03d}_*")
+
+    # --- EpisodeView lazy load (RFC: agent-owns-loop scope expansion) ---
+
+    def load_episode(self, trajectory_id: str) -> EpisodeView:
+        """Cheap lazy view onto an episode directory.
+
+        Reads only `episode.metadata.json` (or its V1 equivalent) and
+        the directory listing for events/ (or steps/). No event
+        payloads are decoded; iteration / `view[i]` pays per-event I/O
+        on demand.
+
+        Auto-detects layout in this order:
+
+        - V2 with `episode.metadata.json` + `events/` → standard.
+        - V2 with `episode.metadata.json` + `steps/` (no `events/`) →
+          legacy-upgrade view; iterator synthesizes events from step files.
+        - V2 with `episode.metadata.json` + neither dir → empty view
+          (e.g., crashed before any tool call).
+        - V1 jsonl (`<id>.metadata.json` + `<id>.jsonl`) → legacy V1
+          upgrade view (eager-loads the jsonl into a synthetic index
+          since V1 has no per-step files to lazy-decode).
+        - Mid-run crash with `events/` but no metadata file → stub
+          metadata view with `is_complete=False`.
+        """
+        ep_dir = self._episode_dir(trajectory_id)
+        metadata_path = ep_dir / EPISODE_METADATA
+
+        if metadata_path.exists():
+            return self._load_v2_episode_view(ep_dir, trajectory_id)
+        # Mid-run crash: events/ exists but metadata wasn't written yet.
+        if (ep_dir / EVENTS_DIR).exists() or (ep_dir / STEPS_DIR).exists():
+            return self._load_v2_episode_view(ep_dir, trajectory_id, stub_metadata=True)
+        # V1 layout (top-level <id>.metadata.json + <id>.jsonl).
+        return self._v1_load_episode_view(trajectory_id)
+
+    def _load_v2_episode_view(
+        self,
+        ep_dir: Path,
+        trajectory_id: str,
+        stub_metadata: bool = False,
+    ) -> EpisodeView:
+        """Build EpisodeView for a V2-layout episode (events/ or steps/)."""
+        metadata_path = ep_dir / EPISODE_METADATA
+        if stub_metadata:
+            data: dict = {"id": trajectory_id}
+        else:
+            with open(metadata_path) as f:
+                data = json.load(f)
+        # status.json + failure.txt land inside metadata.metadata for XRay.
+        self._maybe_inject_failure_text(ep_dir, data)
+        self._maybe_inject_episode_status(ep_dir, data)
+        meta = _episode_metadata_from_dict(data, trajectory_id)
+        index = self._build_v2_index(ep_dir)
+        return EpisodeView(self, trajectory_id, meta, index)
+
+    def _build_v2_index(self, ep_dir: Path) -> list[_EventIndexEntry]:
+        """Build the EpisodeView index for a V2 layout.
+
+        Prefer events/ when present; fall back to steps/ (legacy-upgrade)
+        when only steps/ exists. Returns [] if neither dir is on disk —
+        a crashed-before-any-event episode is a valid view.
+        """
+        events_dir = ep_dir / EVENTS_DIR
+        if events_dir.exists():
+            return _build_events_index(events_dir)
+        steps_dir = ep_dir / STEPS_DIR
+        if steps_dir.exists():
+            return _build_legacy_steps_index(steps_dir)
+        return []
+
+    def _v1_load_episode_view(self, trajectory_id: str) -> EpisodeView:
+        """Build EpisodeView for a V1 jsonl-layout episode.
+
+        V1 has no per-step files to lazy-decode, so this eager-loads
+        the jsonl into a synthetic index that points at a series of
+        in-memory TrajectoryStep objects. Acceptable: V1 episodes are
+        historical and bounded in size.
+        """
+        metadata_path, steps_path = self._v1_resolve_trajectory_paths(trajectory_id)
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"Episode metadata not found: {metadata_path}")
+        with open(metadata_path) as f:
+            data = json.load(f)
+        if "metadata" not in data:
+            data = {"id": trajectory_id, "metadata": data}
+        meta = _episode_metadata_from_dict(data, trajectory_id)
+
+        # V1 jsonl: parse it into in-memory steps, then map to a synthetic
+        # index whose entries point at TrajectoryStep payloads via a side
+        # dict on the storage (one-shot for this view).
+        view = EpisodeView(self, trajectory_id, meta, [])
+        if steps_path.exists():
+            v1_steps: list[TrajectoryStep] = []
+            with open(steps_path) as f:
+                for i, line in enumerate(f):
+                    if line.strip():
+                        step_data = json.loads(line)
+                        step_data = self._v1_resolve_llm_call_refs(step_data, trajectory_id, i)
+                        if "output" not in step_data and ("obs" in step_data or "actions" in step_data):
+                            step_data = {"output": step_data}
+                        v1_steps.append(TrajectoryStep.model_validate(step_data))
+            last_agent_num: int | None = None
+            for i, step in enumerate(v1_steps):
+                if isinstance(step.output, AgentOutput):
+                    entry = _EventIndexEntry(num=i, kind="agent", path=steps_path, legacy=True)
+                    last_agent_num = i
+                elif isinstance(step.output, EnvironmentOutput):
+                    entry = _EventIndexEntry(
+                        num=i,
+                        kind="tool_call",
+                        path=steps_path,
+                        legacy=True,
+                        legacy_parent_num=last_agent_num,
+                    )
+                else:
+                    continue
+                view._index.append(entry)
+                # Pre-populate the cache since V1 has no per-event files.
+                view._cache[len(view._index) - 1] = EpisodeView._step_to_event(step, entry)
+        return view
+
+    def list_episodes(self) -> list[EpisodeMetadata]:
+        """Cheap study-scan: one JSON read per episode dir, no events.
+
+        Used by study aggregation, EpisodeRecord generation, Atlas
+        indexing — everything that needs a list of episodes but not
+        their events.
+        """
+        results: list[EpisodeMetadata] = []
+        for ep_dir in self._episode_dirs():
+            try:
+                with open(ep_dir / EPISODE_METADATA) as f:
+                    data = json.load(f)
+                self._maybe_inject_failure_text(ep_dir, data)
+                self._maybe_inject_episode_status(ep_dir, data)
+                results.append(_episode_metadata_from_dict(data, ep_dir.name))
+            except Exception as e:
+                logger.error(f"Failed to load episode metadata {ep_dir.name}: {e}")
+        for metadata_file in self._v1_metadata_files():
+            trajectory_id = self._v1_traj_id_from_file(metadata_file)
+            try:
+                with open(metadata_file) as f:
+                    data = json.load(f)
+                if "metadata" not in data:
+                    data = {"id": trajectory_id, "metadata": data}
+                results.append(_episode_metadata_from_dict(data, trajectory_id))
+            except Exception as e:
+                logger.error(f"Failed to load V1 episode metadata {trajectory_id}: {e}")
+        return results
 
     # --- Load single trajectory ---
 

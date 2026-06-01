@@ -211,6 +211,36 @@ class Trajectory(TypedBaseModel):
         return sum(1 for e in self.events if isinstance(e.output, EvaluationEvent))
 
 
+class EpisodeMetadata(TypedBaseModel):
+    """The scalar metadata of an episode — persisted as `episode.metadata.json`.
+
+    Replaces the metadata half of the legacy `Trajectory` class (RFC
+    `agent-owns-loop` scope expansion). The event list itself never lives
+    here — events stream to `events/*.msgpack.zst` and are read back lazily
+    via `EpisodeView` (cube_harness.storage).
+
+    Written twice per episode:
+
+    1. At episode START with `end_time=None` and stub summary fields.
+       Makes crashed-mid-run episodes loadable: the file exists on disk
+       and `EpisodeView.is_complete` returns False until step 2 happens.
+    2. At episode END with the final `end_time`, `summary_stats`, and
+       `reward_info`. Overwrites the same file.
+    """
+
+    id: str
+    metadata: dict = Field(default_factory=dict)
+    start_time: float | None = None
+    end_time: float | None = None
+    summary_stats: dict | None = None
+    reward_info: dict = Field(default_factory=dict)
+
+    @property
+    def is_complete(self) -> bool:
+        """True once `finalize_episode` has filled `end_time`."""
+        return self.end_time is not None
+
+
 class ActionSpace(frozenset[Callable]):
     """A set of action callables representing a subset of an action space.
 
