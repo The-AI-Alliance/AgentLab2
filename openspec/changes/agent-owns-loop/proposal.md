@@ -237,6 +237,108 @@ The three parameters:
 - **`recorder`** — what the agent reports out. Telemetry-only. Agents
   emit LLM calls, thoughts, response text, profiling.
 
+### User experience: writing an agent
+
+This is the bit reviewers usually want to see concretely. The contract
+above is small but it's an **inversion-of-control change** versus
+today's `step(obs) -> AgentOutput`:
+
+| Before | After |
+|---|---|
+| Return `AgentOutput` from `step(obs)` | Own the `while True` loop yourself |
+| Episode called `task.step(actions)` for you | You call `task.toolbox.execute_action(a)` or `task.astep(actions)` directly |
+| Sync world | `async def run` is the signature contract |
+| Termination: empty actions or `done` | Termination: `return` from `run`, or `BudgetExceeded` raises |
+
+#### A. Parallel tool-call agent — the canonical case
+
+```python
+class ParallelAgent(Agent):
+    def __init__(self, config, llm):
+        super().__init__(config)
+        self.llm = llm
+
+    async def run(self, initial_obs, task, recorder):
+        obs = initial_obs
+        while True:
+            # 1. LLM call + record the turn. begin_turn() is the
+            # granular API — accumulate fields, flush as one AgentEvent
+            # on __exit__. Use record(AgentOutput) for the coarse path.
+            with recorder.begin_turn() as turn:
+                call = await self.llm.acall(self._prompt(obs))
+                turn.add_llm_call(call)
+                turn.add_response_text(call.output.content or "")
+                actions = self._parse(call.output.content)
+                for action in actions:
+                    turn.add_action(action)
+
+            if not actions:
+                return  # agent stops
+
+            # 2. Parallel dispatch — N concurrent tool calls. Each lands
+            # as a ToolCallEvent sharing the parent turn's id as turn_id;
+            # XRay renders them as horizontal sibling lanes. Budget +
+            # storage hooks fire inside each MonitoredTool.execute_action.
+            results = await asyncio.gather(*(
+                task.toolbox.execute_action(a) for a in actions
+            ))
+
+            # 3. Merge tool results into the next obs.
+            obs = self._merge(results)
+```
+
+That's the full agent. ~25 lines. No `task.reset()`, no
+`task.evaluate()`, no `task.close()`, no storage calls, no summary
+processor — Episode owns those.
+
+#### B. Sync agent (option 1) — `async def` with no awaits inside
+
+You **cannot** declare `def run` (non-async); the harness `await`s
+the result. But you CAN declare `async def run` and just do sync work
+inside. No awaits required:
+
+```python
+class SyncBodyAgent(Agent):
+    async def run(self, initial_obs, task, recorder):
+        obs = initial_obs
+        while True:
+            call = self.llm.call(self._prompt(obs))                # sync
+            actions = self._parse(call.output.content)
+            recorder.record(AgentOutput(actions=actions, llm_calls=[call]))
+            if not actions:
+                return
+            env_output = task.step(actions)                        # sync
+            if env_output.done:
+                return
+            obs = env_output.obs
+```
+
+Caveat: the event loop is blocked for the whole episode duration.
+Acceptable when the episode is the only thing in the process (Ray
+worker, single-process debug). Problematic when concurrency matters.
+
+#### C. Sync agent (option 2) — own a fully sync loop via `to_thread`
+
+When you want sync semantics without blocking the loop:
+
+```python
+class TrueSyncAgent(Agent):
+    async def run(self, initial_obs, task, recorder):
+        await asyncio.to_thread(self._sync_run, initial_obs, task, recorder)
+
+    def _sync_run(self, initial_obs, task, recorder):
+        # Pure sync world. The event loop is unblocked during this call.
+        ...
+```
+
+#### D. Don't override `run` at all — keep your `step()` and inherit
+
+When all you have is a sync `step()`, override nothing. The base class
+`Agent.run` wraps your `step` in `asyncio.to_thread`, drives the
+gym-style loop for you, and calls `task.astep(actions)`. This is how
+`ReactAgent` and `Genny` work today, unchanged. Use this for any agent
+that doesn't need parallel tool calls or streaming.
+
 ### `TurnRecorder`
 
 ```python
