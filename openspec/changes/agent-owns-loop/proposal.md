@@ -1,11 +1,38 @@
-# RFC: Agent Owns the Loop — Event-Stream Trajectories & Monitored Tools
+# RFC: Agent Owns the Loop — Event-Stream Trajectories, Monitored Tools, Lazy Episodes
 
 **Status:** DRAFT
 **Author:** Alexandre Lacoste
 **Reviewer:** TBD
-**Date:** 2026-05-13
+**Date:** 2026-05-13 (revised 2026-06-01)
 
-**Cross-repo:** also `cube-standard/openspec/changes/agent-owns-loop/` (small companion).
+**Cross-repo:** also `cube-standard/openspec/changes/agent-owns-loop/` (small companion — no API changes there).
+
+## Scope expansion (2026-06-01)
+
+The original RFC restructured the loop around `Agent.run` + `MonitoredTool` + event-stream
+trajectories. Phases A–L of that work shipped on this branch. While running the
+reference baseline (TerminalBench-2, gpt-5.4-mini, 29.3% — parity) we discovered
+two structural debts that should be paid in this same PR rather than a follow-up:
+
+1. **`Trajectory` is no longer a useful in-memory abstraction.** Under streaming
+   it carries empty `events: []` and `steps: []` lists; the actual data lives in
+   `events/*.msgpack.zst` on disk. Every defensive `if events: ... else: ...` branch
+   in core/storage was paying upkeep for a vestigial container. Replace with
+   `EpisodeMetadata` (pure metadata) + `EpisodeView` (lazy reader) — modeled on
+   AgentLab's loader pattern.
+
+2. **XRay was not actually rewritten.** Phase I shipped a `_events_to_legacy_steps`
+   materialization shim so the *legacy* UI rendered new-format trajectories. Parallel
+   `ToolCallEvent` siblings collapsed into a flat sequence. The promised event-card
+   timeline with horizontal lanes is still owed. Bundle here so the XRay rewrite
+   pays the lazy-loader cost (random access via `view[i]`) and we can delete the
+   shim outright.
+
+This expansion also lets us delete the `Trajectory.streaming` flag, the legacy
+`TrajectoryStep` union from the public API, and ~200 lines of dual-path
+load logic in storage. Net code reduction, simpler invariants, no half-finished
+migration. The cube-standard companion needs no further changes — Trajectory
+was never in cube-standard.
 
 ---
 
@@ -76,8 +103,23 @@ trajectories into typed event streams.
   naturally. `MonitoredTool` does not raise on done.
 - One reference agent that overrides `run()` with parallel tool calls
   (`agents/parallel_tool_agent.py` or evolution of Genny).
+- `Trajectory` class removed. Replaced by `EpisodeMetadata` (pydantic record
+  persisted at `episode.metadata.json`) + `EpisodeView` (lazy reader bound to
+  storage + episode id). `Episode.run` returns `EpisodeView`. The
+  per-run object never holds the event list in memory.
+- `episode.metadata.json` is now written at episode START with stub fields
+  (`end_time=None`), then updated at END with the final summary. Crashed
+  runs are loadable: `EpisodeView` interprets `end_time=None` plus
+  `status.json` as "in-flight or failed" and renders what's on disk.
+- `EpisodeRecord.from_view(view)` replaces `from_trajectory(traj)` —
+  reads only `view.metadata`, no event I/O. Study-aggregation stays O(1)
+  per episode.
 - XRay rewrite: render each event as a card coloured by event kind, with tabs
-  that follow the selected event (see Design).
+  that follow the selected event (see Design). Consume the lazy
+  `EpisodeView` — random-access events decode on demand. Drop the
+  `_events_to_legacy_steps` shim entirely.
+- Investigator migrated to `view.iter_events()`. The materialization shim
+  has no remaining consumer.
 - Integration test: same task, gym-style agent (default `run`) and
   parallel-tool agent (overridden `run`) both produce valid trajectories that
   load in XRay and pass the verifier.
@@ -369,16 +411,18 @@ The trade-off is acceptable: connectors trade fine-grained traces for
 ### `Episode.run` (lifecycle owner)
 
 ```python
-async def run(self) -> Trajectory:
+async def run(self) -> EpisodeView:
     task = self.task_config.make(...)
-    trajectory = Trajectory(id=..., events=[])
+    meta = EpisodeMetadata(id=self.id, metadata={...}, start_time=now(), end_time=None)
+    self.storage.save_metadata(meta)              # WRITE-AT-START: crashed runs are loadable
     budget = Budget(max_turns=self.max_steps, ...)
 
-    # Wrap each member of task.toolbox with MonitoredTool, sharing trajectory + budget.
-    # task.toolbox is mutated in place so task.step also goes through monitored wrappers.
-    install_monitoring(task, trajectory, budget, self.storage, self.summary)
+    # Wrap each member of task.toolbox with MonitoredTool, sharing the
+    # storage/summary/budget. Events stream to disk via storage.save_event;
+    # nothing is accumulated in memory.
+    install_monitoring(task, budget, self.storage, self.summary)
 
-    recorder = TurnRecorder(trajectory, self.storage, self.summary)
+    recorder = TurnRecorder(self.storage, self.summary, trajectory_id=self.id)
     try:
         initial = task.reset()
         recorder.record_reset(initial)            # Episode-only helper on recorder
@@ -393,10 +437,15 @@ async def run(self) -> Trajectory:
             recorder.record_evaluation(reward, info)
         except Exception as e:
             recorder.record_evaluation(0.0, {"evaluate_failed": str(e)})
-        await self.storage.finalize(trajectory)
-        self.summary.on_episode_complete(trajectory, self.storage)
+        meta = meta.model_copy(update={
+            "end_time": now(),
+            "reward_info": recorder.reward_info,
+            "summary_stats": self.summary.snapshot(),
+        })
+        self.storage.finalize_episode(meta)       # UPDATE-AT-END: same file, full data
+        self.summary.on_episode_complete(meta, self.storage)
         task.close()
-    return trajectory
+    return self.storage.load_episode(self.id)     # lazy view onto what we just wrote
 ```
 
 Episode- and benchmark-level OTel spans (today's `tracer.episode(...)` around
@@ -445,12 +494,10 @@ class TrajectoryEvent(TypedBaseModel):
     output: AgentEvent | ToolCallEvent | EvaluationEvent
     start_time: float
     end_time: float
-
-class Trajectory(TypedBaseModel):
-    id: str
-    events: list[TrajectoryEvent]      # was: steps
-    ...
 ```
+
+`Trajectory` (a Pydantic class holding `events` + metadata) is **deleted**.
+Two replacement abstractions take its place — see *Storage & Loaders* below.
 
 Why this shape:
 
@@ -467,29 +514,123 @@ Why this shape:
 
 Storage filenames evolve from `000_obs.msgpack.zst` / `001_act.msgpack.zst` to
 `000_agent.msgpack.zst` / `001_tool_call.msgpack.zst` / `002_eval.msgpack.zst`.
-Old V2 layouts remain loadable via a migration shim.
+Old V2 layouts (steps/) remain loadable via the legacy-upgrade view.
+
+### Storage & Loaders — `EpisodeMetadata` + `EpisodeView`
+
+The `Trajectory` pydantic class is deleted. Two abstractions replace it.
+
+```python
+class EpisodeMetadata(TypedBaseModel):
+    """Persisted at episode.metadata.json. Written at episode start with
+    end_time=None and stub summary fields; updated at episode end with
+    the final summary. Tiny — never holds events."""
+    id: str
+    metadata: dict                       # task_id, agent_config dict, infra, …
+    start_time: float | None
+    end_time: float | None               # None until episode finalizes
+    summary_stats: dict | None           # filled at end
+    reward_info: dict                    # filled at end (mirrors final EvaluationEvent)
+```
+
+```python
+class EpisodeView:
+    """Lazy reader bound to (Storage, trajectory_id).
+
+    Holds `.metadata` eagerly (one JSON read). Events are decoded from
+    disk on demand — never held in a list. Random access via view[i]
+    populates an internal dict cache scoped to the view's lifetime.
+    """
+    storage: Storage
+    id: str
+    metadata: EpisodeMetadata            # eager
+    _cache: dict[int, TrajectoryEvent]   # populated on access; cleared with the view
+
+    def __len__(self) -> int             # from directory listing — cheap
+    def __getitem__(self, i: int) -> TrajectoryEvent
+    def __iter__(self) -> Iterator[TrajectoryEvent]    # decodes one at a time
+    def iter_events(self) -> Iterator[TrajectoryEvent] # alias for __iter__
+    # Convenience shortcuts to .metadata fields:
+    @property
+    def summary_stats(self) -> dict | None
+    @property
+    def reward_info(self) -> dict
+    @property
+    def is_complete(self) -> bool  # metadata.end_time is not None
+```
+
+Modeled on AgentLab's `Result`/`Episode` loader pattern:
+
+- **Studies of 500 episodes never touch bulk data** — `list_episodes()`
+  returns `list[EpisodeMetadata]` (one cheap JSON read each). DataFrame
+  aggregation, Atlas indexing, and EpisodeRecord generation use metadata
+  only.
+- **Only episodes you actually inspect pay event I/O** — XRay's data
+  layer iterates `view`, decoding one event per render.
+- **Crash-safe loading.** The metadata file is written upfront with
+  `end_time=None`; on crash, `view.is_complete == False` and XRay
+  renders what's on disk plus the `status.json` failure summary.
+
+Storage protocol changes:
+
+```python
+class Storage(Protocol):
+    def save_metadata(self, meta: EpisodeMetadata) -> None
+    def save_event(self, event: TrajectoryEvent, trajectory_id: str, n: int) -> None
+    def load_episode(self, trajectory_id: str) -> EpisodeView   # replaces load_trajectory
+    def finalize_episode(self, meta: EpisodeMetadata) -> None   # writes final metadata + summary
+    def list_episodes(self) -> list[EpisodeMetadata]            # cheap study scan
+```
+
+Legacy V1 (steps/-layout) episodes load through `EpisodeView` with a
+synthesis layer: `AgentOutput` steps map to `AgentEvent`s,
+`EnvironmentOutput` steps map to `ToolCallEvent`s parented to the most
+recent agent event. Synthesized events live only in the iterator — never
+rewritten to disk.
+
+### Internal cache policy
+
+`EpisodeView._cache` is a plain `dict[int, TrajectoryEvent]`. AgentLab's
+pattern: no LRU, no eviction. RAM is bounded by ONE episode (~thousands of
+events tops at SWE-bench scale). When XRay opens a new episode it
+constructs a new `EpisodeView`; the old one is GC'd along with its cache.
 
 ### XRay rewrite
 
-- Timeline: one card per `TrajectoryEvent`. Colours by kind: `agent` (LLM /
-  thoughts / response text), `tool_call` (one per action), `evaluation`
-  (final). Parallel `tool_call` siblings share a `turn_id` and render in
-  horizontal lanes within a turn group.
-- Selection: clicking a card sets `selected_event`. The viewer derives
-  `last_agent_event = max(e for e in events if e.kind == 'agent' and e.start_time <= selected.start_time)`
-  and `last_observation_event` similarly.
-- Tabs:
-  - **Reasoning / Chat** — renders `last_agent_event` (thoughts, response_text,
-    intended actions, LLM messages).
+The viewer is rebuilt around the event stream and consumes the lazy
+`EpisodeView`. The `_events_to_legacy_steps` shim is **deleted** — there
+is no remaining caller after this PR.
+
+- **Data layer:** `view = storage.load_episode(id)`. The viewer iterates
+  once to build a lightweight index `event_index -> kind` (~bytes per
+  event, no payloads). Each card lazy-loads its full event body when
+  rendered via `view[i]`. The view's internal cache keeps re-renders fast
+  without holding the whole trajectory; switching episodes constructs a
+  new view and the old cache is GC'd.
+- **Timeline:** one card per `TrajectoryEvent`. Colours by kind: `agent`
+  (LLM / thoughts / response text), `tool_call` (one per action),
+  `evaluation` (final). Parallel `tool_call` siblings share a `turn_id`
+  and render in horizontal lanes within a turn group.
+- **Selection:** clicking a card sets `selected_event_index`. The viewer
+  derives `last_agent_event_index` and `last_observation_event_index` by
+  walking back from the selection (cached in the view).
+- **Tabs:**
+  - **Reasoning / Chat** — renders the AgentEvent at
+    `last_agent_event_index` (thoughts, response_text, intended actions,
+    LLM messages).
   - **Observation** — renders the obs from `selected_event` if it's a
-    `tool_call`, else `last_observation_event`. Screenshots are content
-    inside the observation, not a separate tab.
+    `tool_call`, else from `last_observation_event`. Screenshots are
+    content inside the observation, not a separate tab.
   - **Turn observations** — all `tool_call` events sharing the selected
     event's `turn_id`. Empty for non-tool events.
   - **Profiling** — per-event timing breakdown (already supported via
     `AgentEvent.profiling`).
   - Header strip always shows: `Event X / N — kind, turn=…, t=…s`.
+- **Crashed/in-flight episodes** (`view.is_complete == False`): timeline
+  renders what's on disk; banner shows the `status.json` failure summary.
 - Drop the standalone screenshot tab; it's redundant with Observation.
+- Drop the legacy steps/ pairing logic (env+agent paired into a single
+  navigation unit) — navigation is per-event.
 
 ### RPC layer
 
@@ -515,22 +656,36 @@ already available (likely yes, follow-up if not).
 
 ## Migration
 
-- Old `Trajectory` / `TrajectoryStep` types remain importable as deprecated
-  aliases for one release. Loaders convert old `EnvironmentOutput`-as-step
-  records into synthetic `ToolCallEvent`s and `AgentOutput`-as-step into
-  `AgentEvent`s so existing experiment dirs render in the new XRay.
-- Existing agents (`ReactAgent`, `Genny`) keep their `step()` and run via the
-  default `Agent.run` — no agent-side changes required for backwards compat.
-- The new reference agent that exercises parallel tool calls ships in the
-  same PR as a guarantee that the new path actually works.
+- **`Trajectory` is deleted.** No deprecation alias. Callers that imported
+  it move to `EpisodeMetadata` (for fields) or `EpisodeView` (for iteration).
+  In-tree callers are migrated in this PR (storage, episode, experiment,
+  EpisodeRecord, XRay, investigator, ~30 tests).
+- **Legacy on-disk episodes remain loadable.** `EpisodeView` detects
+  `events/` vs `steps/` at open time. For steps/-layout episodes, the
+  iterator synthesizes `AgentEvent` / `ToolCallEvent` from
+  `AgentOutput` / `EnvironmentOutput` step files on the fly. No
+  on-disk rewrite — synthesis is read-time only.
+- **`trajectory.json` (V1 metadata file)** is still read by the legacy
+  loader. New writes always use `episode.metadata.json`. The V1 reader
+  path stays for backward compat with archived runs.
+- Existing agents (`ReactAgent`, `Genny`, `GennyParallel`) keep their
+  `step()` / `run()` — no agent-side changes for backward compat.
+- `EpisodeRecord.from_trajectory(traj)` → `EpisodeRecord.from_view(view)`.
+  Body reads `view.metadata` only — no event I/O.
+- Tests that hand-built `Trajectory(id=..., steps=[...])` migrate to
+  `make_fake_episode(events=[...]) -> EpisodeView`, a new test helper
+  that writes events to a `TmpStorage` and returns a real lazy view.
+  Tests then exercise the actual load path, not a mock.
 
 ---
 
 ## Risks
 
-- **XRay rewrite is the largest single piece.** Mitigated by shipping the
-  migration shim so old data still renders, and by an integration test that
-  loads a known trajectory and asserts the expected tabs render content.
+- **XRay rewrite is the largest single piece.** Mitigated by: (a) the
+  legacy V1 reader path stays, so old experiment dirs still load; (b)
+  smoke `xray_loads_event_trajectory.py` is updated to assert the full
+  event-card UI renders content from both a fresh events/ trajectory and
+  a legacy steps/ trajectory; (c) manual `make xray` check against both.
 - **Behaviour drift in default `Agent.run` vs. today's loop.** Mitigated by
   routing today's loop through the same hook helpers — diff is structural,
   not behavioural.
@@ -539,6 +694,11 @@ already available (likely yes, follow-up if not).
   trivial update. Documented in the agent spec.
 - **Storage format change** — addressed by reading both formats and writing
   only the new one. One release window for tooling to catch up.
+- **`Trajectory` deletion breaks out-of-tree code that imported it.** No
+  deprecation alias is shipped: the type lived in `cube_harness.core` for
+  ~2 years but in-tree callers were always thin (mostly fixture
+  construction in tests). Out-of-tree callers move to `EpisodeView` for
+  iteration or `EpisodeMetadata` for fields. Documented in PR notes.
 
 ---
 

@@ -36,12 +36,20 @@ See companion: `cube-standard/openspec/changes/agent-owns-loop/deltas.md`.
 
 ## MODIFIED — `openspec/specs/core/spec.md`
 
-### Trajectory becomes an event list
+### Trajectory class removed; replaced by EpisodeMetadata + EpisodeView
 
-`TrajectoryStep` is renamed to `TrajectoryEvent`. Its `output` union expands
-from `EnvironmentOutput | AgentOutput` to `AgentEvent | ToolCallEvent | EvaluationEvent`.
+`Trajectory` (the Pydantic class) is **deleted** from `cube_harness.core`.
+Two new abstractions replace it: `EpisodeMetadata` (pure metadata,
+persisted as `episode.metadata.json`) lives in `cube_harness.core`;
+`EpisodeView` (lazy reader over a storage handle) lives in
+`cube_harness.storage`.
+
+`TrajectoryStep` (the legacy `EnvironmentOutput | AgentOutput` union) is
+removed from the public API. The type remains internally in the V1
+load-upgrade path but is not exported from `cube_harness.core`.
 
 ```python
+# In cube_harness.core
 class AgentEvent(TypedBaseModel):
     id: str                            # references target for ToolCallEvent.agent_event_id
     actions: list[Action]              # intended tool calls; each Action.id is the link
@@ -66,28 +74,51 @@ class TrajectoryEvent(TypedBaseModel):
     start_time: float
     end_time: float
 
-class Trajectory(TypedBaseModel):
+class EpisodeMetadata(TypedBaseModel):
+    """Persisted at episode.metadata.json. Written at episode start with
+    end_time=None and stub fields; updated at episode end with the
+    final summary."""
     id: str
-    events: list[TrajectoryEvent]      # was: steps: list[TrajectoryStep]
-    metadata: dict
+    metadata: dict                     # task_id, agent_config dict, infra, …
     start_time: float | None
-    end_time: float | None
-    reward_info: dict                  # kept for back-compat; mirrors final EvaluationEvent
+    end_time: float | None             # None until the episode finalizes
     summary_stats: dict | None
+    reward_info: dict                  # mirrors the final EvaluationEvent
 ```
 
-### Helpers
+### `EpisodeView` (in `cube_harness.storage`)
 
-- `Trajectory.last_env_output() -> EnvironmentOutput | None` (replaces
-  `last_env_step()`): walks events in reverse, returns the most recent
-  `ToolCallEvent.output`, or `None` if none.
-- `Trajectory.events_of_turn(turn_id) -> list[TrajectoryEvent]`: all sibling
-  events sharing a `turn_id`.
-- `Trajectory.n_agent_events`, `n_tool_calls`, `n_evaluations` properties.
-- `Trajectory.steps` and `n_agent_steps`/`n_env_steps` remain as deprecated
-  read-only aliases for one release. `steps` is a computed view that pairs
-  `AgentEvent` + first `ToolCallEvent` for each turn so legacy callers don't
-  break in-tree.
+```python
+class EpisodeView:
+    """Lazy reader for an episode directory.
+
+    Holds .metadata eagerly (one JSON read). Events live on disk; the
+    view decodes them on demand and caches in a per-view dict. Iteration,
+    random access, and len() are all supported.
+    """
+    storage: Storage
+    id: str
+    metadata: EpisodeMetadata          # eager
+    # private: _cache: dict[int, TrajectoryEvent], _index: list[Path]
+
+    def __len__(self) -> int           # from events/ directory listing
+    def __getitem__(self, i: int) -> TrajectoryEvent
+    def __iter__(self) -> Iterator[TrajectoryEvent]
+    def iter_events(self) -> Iterator[TrajectoryEvent]   # alias for __iter__
+    def events_of_turn(self, turn_id: str) -> list[TrajectoryEvent]
+    @property
+    def summary_stats(self) -> dict | None
+    @property
+    def reward_info(self) -> dict
+    @property
+    def is_complete(self) -> bool      # metadata.end_time is not None
+    @property
+    def n_agent_events(self) -> int    # one directory scan, no decode
+    @property
+    def n_tool_calls(self) -> int
+    @property
+    def n_evaluations(self) -> int
+```
 
 ### Invariants (replaces old #1, #2)
 
@@ -101,6 +132,9 @@ class Trajectory(TypedBaseModel):
 4. `AgentEvent.id` is unique within a trajectory.
 5. `turn_id` is unique per `AgentEvent`; all `ToolCallEvent`s spawned from one
    `AgentEvent` share the same `turn_id`.
+6. `EpisodeView` never accumulates the full event list in memory; the
+   per-view cache is bounded by accessed events and is freed when the
+   view is GC'd.
 
 ### Gotchas
 
@@ -109,6 +143,14 @@ class Trajectory(TypedBaseModel):
   switch to the new event types.
 - `AgentOutput` itself remains as the return type of `Agent.step()` — it is
   internally converted into an `AgentEvent` by `TurnRecorder.record()`.
+- Migrating from `traj.steps[i]` to `view[i]` changes element types: the
+  former gave `TrajectoryStep`, the latter gives `TrajectoryEvent`. Inspect
+  `event.output` to discriminate `AgentEvent` / `ToolCallEvent` /
+  `EvaluationEvent`.
+- The view's internal cache is unbounded *within one episode*. Callers
+  that iterate every event of a SWE-bench-scale episode and then keep
+  the view alive will hold all events in memory — drop the view when
+  done.
 
 ---
 
@@ -437,46 +479,88 @@ directories remain loadable via the migration shim (see storage delta).
 
 ## MODIFIED — `openspec/specs/storage/spec.md`
 
-### Event-file naming
+### Episode directory layout
 
-V2 layout's `steps/` directory is renamed `events/`. Files become
-`{nnn:03d}_{kind}.msgpack.zst` where `kind ∈ {agent, tool_call, eval}`.
-`status.json`, `episode.metadata.json`, `episode_config.json`, `failure.txt`,
-`logs/` are unchanged.
+```
+episodes/<trajectory_id>/
+├── episode.metadata.json   # EpisodeMetadata: id, metadata, start_time,
+│                           # end_time (None mid-run), summary_stats,
+│                           # reward_info. Written at episode START, updated at END.
+├── episode_config.json     # TaskConfig + AgentConfig + EpisodeConfig (input)
+├── status.json             # running/completed/failed + retry_count
+├── events/                 # one file per TrajectoryEvent
+│   ├── 000_agent.msgpack.zst
+│   ├── 001_tool_call.msgpack.zst
+│   ├── 002_tool_call.msgpack.zst    # parallel sibling, same turn_id
+│   ├── 003_eval.msgpack.zst
+│   └── …
+├── failure.txt             # optional: exception text on crash
+└── logs/                   # per-episode stdout/stderr
+```
+
+V1 archived episodes use `trajectory.json` (the old metadata file name) and
+`steps/*_obs.msgpack.zst` / `*_act.msgpack.zst`. Both are kept readable;
+all new writes use the V2 layout above.
 
 ### New protocol methods
 
 ```python
 class Storage(Protocol):
+    # New write API:
+    def save_metadata(self, meta: EpisodeMetadata) -> None
     def save_event(self, event: TrajectoryEvent, trajectory_id: str, event_num: int) -> None
+    def finalize_episode(self, meta: EpisodeMetadata) -> None
+
+    # New read API:
+    def load_episode(self, trajectory_id: str) -> EpisodeView
     def load_event(self, trajectory_id: str, event_num: int) -> TrajectoryEvent
-    def finalize(self, trajectory: Trajectory) -> None
-    # ... existing methods ...
+    def list_episodes(self) -> list[EpisodeMetadata]    # cheap study scan
+
+    # ... existing methods (save_config, archive_episode, etc.) ...
 ```
 
-`save_step` and `load_step` remain as deprecated aliases that read/write the
-new event files using a kind inference rule (kind embedded in filename).
+Removed: `save_trajectory(trajectory: Trajectory, …)`, `load_trajectory(id) -> Trajectory`,
+`finalize(trajectory: Trajectory)`. Their old in-tree callers move to the
+new API in this PR.
 
-### Migration
+### Write-at-start semantics
 
-`FileStorage.load_trajectory` auto-detects layout:
+`save_metadata` is called by `Episode.run` **at episode start** with
+`end_time=None` and stub summary fields. This makes crashed runs loadable
+by XRay (the file exists; events that did land are renderable; status.json
+disambiguates "in-flight" from "failed").
 
-1. If `events/` exists: load `_agent`, `_tool_call`, `_eval` files in order.
-2. Else if `steps/` exists: load `_obs` / `_act` files, then convert in-memory:
-   - `_act` (AgentOutput) → `AgentEvent` (with synthetic `id`, empty
-     `response_text`).
-   - `_obs` (EnvironmentOutput) → `ToolCallEvent` (with synthetic
-     `agent_event_id` referencing the prior `AgentEvent`, synthetic
-     `action_id`, synthetic `turn_id`).
-3. New writes are always `events/`.
+`finalize_episode` is called in `Episode.run`'s `finally` block with the
+final `EpisodeMetadata` (`end_time`, `summary_stats`, `reward_info` filled).
+It overwrites the same `episode.metadata.json`.
+
+### Lazy load via `EpisodeView`
+
+`load_episode(id)` is **cheap**: one JSON read for the metadata,
+directory listing of `events/`, no event-payload I/O. The returned view
+decodes events on demand via `view[i]` / iteration.
+
+`load_episode` auto-detects layout at open time:
+
+1. If `events/` exists + `episode.metadata.json` exists → standard V2 view.
+2. If `events/` exists + only `status.json` exists (mid-run crash before
+   metadata first-write) → stub metadata view, `is_complete == False`.
+3. If `steps/` exists (V1 archive) → legacy-upgrade view; iteration
+   synthesizes events on the fly: `_act` (AgentOutput) → `AgentEvent`,
+   `_obs` (EnvironmentOutput) → `ToolCallEvent` parented to the most
+   recent agent event.
+
+`list_episodes()` reads only `episode.metadata.json` per episode dir.
+Used for study aggregation, EpisodeRecord generation, Atlas indexing.
 
 ### Invariants (additions)
 
-- Event files are immutable after write. `finalize` writes a
-  `trajectory.metadata.json` that summarises the event count and final
-  `EvaluationEvent`.
-- The conversion in step 2 above is best-effort and round-trippable for
-  trajectories that obeyed the old alternation invariant.
+- Event files are immutable after write.
+- `episode.metadata.json` is written **at episode start**; the same file
+  is overwritten **at episode end** with the final summary. No other
+  callers write to it.
+- `EpisodeView` never materializes the full event list. Its internal
+  cache is per-view (GC'd with the view).
 
 ### Summary
 
@@ -488,6 +572,17 @@ field names remain as JSON aliases.
 ---
 
 ## MODIFIED — `openspec/specs/analyze/spec.md`
+
+### Data layer: lazy EpisodeView
+
+XRay's data layer is rebuilt around `EpisodeView`. When the user opens an
+episode, the viewer calls `storage.load_episode(id)` (cheap: metadata
++ directory listing) and iterates once to build a lightweight
+`event_index -> kind` table. Card rendering then accesses
+`view[selected_index]` (decode on demand, cached in the view).
+
+The `_events_to_legacy_steps` materialization shim from Phase I is
+**deleted** — there is no remaining consumer after this PR.
 
 ### Event-card timeline
 
@@ -502,29 +597,39 @@ group (parent `AgentEvent` above, siblings below).
 
 ### Selection model
 
-- `selected_event` is the user's last click.
-- `last_agent_event` = the most recent `AgentEvent` with
-  `start_time <= selected_event.start_time`.
-- `last_observation_event` = the most recent `ToolCallEvent` matching the same rule.
+- `selected_event_index` is the user's last click.
+- `last_agent_event_index` = the largest index <= `selected_event_index`
+  pointing at an `AgentEvent`.
+- `last_observation_event_index` = the same rule for `ToolCallEvent`.
+- Indices are derived from the cheap `event_index -> kind` table — no
+  payload I/O.
 
 ### Tabs
 
-- **Reasoning / Chat** — `last_agent_event.thoughts`, `response_text`,
-  `llm_calls`, intended `actions`.
+- **Reasoning / Chat** — payload of `view[last_agent_event_index]`
+  (thoughts, response_text, llm_calls, intended actions).
 - **Observation** — if `selected_event` is a `tool_call`, render
-  `selected_event.output`; else render `last_observation_event.output`.
-  Screenshots, AXTree, and HTML are all surfaces inside the obs renderer; no
-  separate screenshot tab.
+  `view[selected_event_index].output`; else render
+  `view[last_observation_event_index].output`. Screenshots, AXTree, and
+  HTML are all surfaces inside the obs renderer; no separate screenshot tab.
 - **Turn observations** — list of all `tool_call` events sharing
-  `selected_event`'s `turn_id` (empty when no turn). Useful for parallel tool
-  calls.
+  `selected_event`'s `turn_id` (empty when no turn). Useful for parallel
+  tool calls.
 - **Profiling** — per-event `profiling` timing breakdown.
 - Header always reads: `Event X / N — kind={agent|tool_call|eval}, turn=<id>, t=<s>s`.
+
+### Crashed / in-flight episodes
+
+If `view.is_complete == False` (no `end_time` in metadata), the timeline
+renders what's on disk and shows a banner reading the `status.json`
+failure summary. No special-case loader path; the same EpisodeView API
+is used.
 
 ### Invariants
 
 - Read-only (unchanged).
-- Loads both `events/` (new) and `steps/` (legacy) layouts via storage shim.
+- Loads both `events/` (V2 fresh + V2 crashed-mid-run) and `steps/`
+  (legacy V1) layouts via `EpisodeView`'s open-time detection.
 - Stale background-loader generations still self-abort (unchanged).
 
 ### Removed
@@ -533,25 +638,61 @@ group (parent `AgentEvent` above, siblings below).
   Observation tab (screenshots are obs content, not a separate concern).
 - "UI step" pairing logic (env+agent paired into a single navigation unit) is
   removed — navigation is per-event.
+- `_events_to_legacy_steps` materialization shim — no consumer remains.
+- Any code path that expected `trajectory.steps[i]` — replaced by
+  `view[i]` (different element type: `TrajectoryEvent`).
 
 ### Gotchas
 
 - Trajectories with very wide parallel tool calls (e.g. 20+ siblings in one
   turn) will overflow the horizontal lane layout. Out of scope for v1;
   acceptable to fall back to a vertical list above some threshold.
+- `EpisodeView`'s cache is bounded by the events the viewer accessed. If
+  the user scrubs through every event on a SWE-bench-scale episode, the
+  whole trajectory ends up in RAM for the lifetime of the view. Acceptable
+  — switching episodes constructs a new view and GC's the old cache.
 
 ---
 
+## MODIFIED — `openspec/specs/analyze/spec.md` (Investigator)
+
+The investigator's per-trajectory blame pipeline walks
+`view.iter_events()` instead of `traj.steps`. Each tool call's
+`ToolCallEvent.output` carries the same observation + reward + info the
+legacy `EnvironmentOutput` step did; each `AgentEvent` carries the same
+intended actions + LLM calls + thoughts the legacy `AgentOutput` step
+did. The diff is type-level, not behavior-level.
+
+`InvestigatorContext.trajectory: Trajectory` → `InvestigatorContext.view:
+EpisodeView`. Per-step blame uses `view[i]`; cross-step pattern detection
+uses `for event in view:`. No new code paths.
+
 ## REMOVED
 
-- `Trajectory.steps` direct field — replaced by `Trajectory.events`. The
-  field name `steps` is kept as a computed alias for one release; element
-  type changes from `EnvironmentOutput | AgentOutput` to
-  `AgentEvent | ToolCallEvent | EvaluationEvent`. The streamed-to-disk
-  semantics introduced by `stream-trajectory-steps` (`steps=[]` on a
-  runner-produced trajectory) are preserved.
+The following are **deleted outright** (no deprecation alias):
+
+- `class Trajectory` (from `cube_harness.core`) — replaced by
+  `EpisodeMetadata` + `EpisodeView`.
+- `class TrajectoryStep` (the `EnvironmentOutput | AgentOutput` union) —
+  removed from the public API. The legacy V1 reader uses it internally
+  but it is not exported.
+- `Trajectory.streaming` flag — no longer needed; events are always
+  streamed to disk by `MonitoredTool` / `TurnRecorder` and never
+  accumulated.
+- `Trajectory.steps` field/alias — replaced by `EpisodeView` iteration.
+- `Trajectory.last_env_step`, `last_env_output`, `n_agent_steps`,
+  `n_env_steps`, `events_of_turn` (methods) — moved to `EpisodeView`
+  where they belong. Their old form on `Trajectory` is gone.
+- `_events_to_legacy_steps` (storage materialization shim) — no
+  consumer remains after the XRay rewrite.
+- `Storage.save_trajectory` / `load_trajectory` / `finalize(trajectory)`
+  — replaced by `save_metadata` / `load_episode` / `finalize_episode(meta)`.
+- `EpisodeRecord.from_trajectory(traj)` — replaced by
+  `from_view(view)`.
 - "Trajectory steps alternate" invariant in `core/spec.md`.
 - Standalone screenshot tab in XRay.
+- Every defensive `if trajectory.events: ... else: ...` branch in
+  storage and core — the dual-path code went away with the class.
 
 (`ToolWithTelemetry` / `AsyncToolWithTelemetry` were already removed by
 `e760f9e5` — listed here for historical context only, not by this RFC.)
