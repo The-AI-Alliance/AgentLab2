@@ -1,7 +1,7 @@
 from typing import Callable
 from uuid import uuid4
 
-from cube.core import Action, EnvironmentOutput, StepError, TypedBaseModel
+from cube.core import Action, EnvironmentOutput, Observation, StepError, TypedBaseModel
 from pydantic import BaseModel, Field
 
 from cube_harness.llm import LLMCall
@@ -77,30 +77,54 @@ class AgentEvent(TypedBaseModel):
 
 
 class ToolCallEvent(TypedBaseModel):
-    """One tool invocation — the action and its env response.
+    """One tool invocation — agent's action and what came back to the agent.
 
-    `parent_event_id` references the originating `AgentEvent.id`.
-    `action_id` references one of that agent event's `actions[i].id`.
-    `turn_id` groups parallel siblings of a single agent turn (it equals
-    the parent `AgentEvent.id` by default — agents emitting N parallel
-    tool calls in one turn share that `turn_id`).
+    The agent receives `obs` (or `error`) from `MonitoredTool.execute_action`.
+    Reward / done / info are NOT part of this event:
+
+    - `done` propagates as a `TaskDone(BaseException)` raised by
+      `MonitoredTool` when `task.finished()` returns True. There is no
+      `done` field anywhere in the trajectory.
+    - Step-wise reward (when `task.validate_per_step=True`) lives on a
+      separate `EvaluationEvent` whose `parent_event_id` references this
+      `ToolCallEvent.id` and whose `is_terminal` is False.
+
+    Back-references:
+
+    - `parent_event_id` references the originating `AgentEvent.id`.
+    - `action_id` references one of that agent event's `actions[i].id`.
+    - `turn_id` groups parallel siblings of a single agent turn (it equals
+      the parent `AgentEvent.id` by default — agents emitting N parallel
+      tool calls in one turn share that `turn_id`).
     """
 
+    id: str = Field(default_factory=_new_event_id)
     parent_event_id: str
     action_id: str | None = None  # echoes Action.id; nullable for legacy actions
-    output: EnvironmentOutput
+    obs: Observation = Field(default_factory=Observation)  # empty when error is set
+    error: StepError | None = None
     turn_id: str
 
 
 class EvaluationEvent(TypedBaseModel):
-    """Terminal `task.evaluate()` result.
+    """`task.evaluate()` result. Step-wise OR terminal.
 
-    Episode emits exactly one of these in `finally`, regardless of how
-    `agent.run` returned.
+    Emitted in two flavors:
+
+    - **Terminal** (`is_terminal=True`, `parent_event_id=None`): Episode
+      emits exactly one of these in `finally`, regardless of how
+      `agent.run` returned.
+    - **Step-wise** (`is_terminal=False`, `parent_event_id=<ToolCallEvent.id>`):
+      `MonitoredTool` emits one after each tool call when
+      `task.validate_per_step=True`. Carries the per-step reward / info
+      so step-eval data is preserved on disk without bleeding back to
+      the agent (the agent only ever sees `obs` from `execute_action`).
     """
 
     reward: float
     info: dict = Field(default_factory=dict)
+    is_terminal: bool = False
+    parent_event_id: str | None = None
 
 
 TrajectoryEventOutput = AgentEvent | ToolCallEvent | EvaluationEvent

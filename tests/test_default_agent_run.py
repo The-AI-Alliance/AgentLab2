@@ -12,7 +12,7 @@ the captured event stream rather than walking an in-memory list.
 
 import asyncio
 
-from cube.core import Action, ActionSchema, EnvironmentOutput, Observation
+from cube.core import Action, ActionSchema, Observation
 from cube.tool import AbstractTool
 
 from cube_harness.agent import Agent, AgentConfig
@@ -42,23 +42,24 @@ class _CounterTool(AbstractTool):
 
 class _MockTask:
     """Minimal Task look-alike: exposes `toolbox` (a single Tool, the
-    counter), `step(actions)` returning an EnvironmentOutput, and a
-    `done_after_n` knob so we can deterministically end the loop."""
+    counter) and a `finished(obs)` hook that returns True after N counter
+    increments. MonitoredTool polls `finished()` after each tool call
+    and raises TaskDone — that's how the loop terminates under the
+    agent-owns-loop design."""
 
     def __init__(self, done_after_n: int = 3) -> None:
         self.counter = 0
         self.done_after_n = done_after_n
         self.toolbox = _CounterTool(self)
+        self.accept_agent_stop = True
+        self.validate_per_step = False
 
-    def step(self, actions: list[Action]) -> EnvironmentOutput:
-        # Forward each action to the toolbox (which is a single tool).
-        last_obs = Observation()
-        for action in actions:
-            result = self.toolbox.execute_action(action)
-            assert isinstance(result, Observation)
-            last_obs = result
-        done = self.counter >= self.done_after_n
-        return EnvironmentOutput(obs=last_obs, reward=1.0 if done else 0.0, done=done, info={})
+    def finished(self, obs=None) -> bool:
+        _ = obs
+        return self.counter >= self.done_after_n
+
+    def obs_postprocess(self, obs: Observation) -> Observation:
+        return obs
 
 
 class _CounterAgentConfig(AgentConfig):
@@ -128,17 +129,26 @@ def _setup(task, budget: Budget) -> tuple[TurnRecorder, _FakeStorage]:
 
 
 def test_default_run_completes_when_task_signals_done() -> None:
+    """task.finished() returning True triggers TaskDone from MonitoredTool;
+    Episode catches it normally. The unit test catches here since there's
+    no Episode to drive."""
+    from cube_harness.tool import TaskDone
+
     task = _MockTask(done_after_n=3)
     budget = Budget(max_turns=100)
     recorder, storage = _setup(task, budget)
 
     agent = _CounterAgent(_CounterAgentConfig())
-    asyncio.run(agent.run(initial_obs=Observation(), task=task, recorder=recorder))
+    try:
+        asyncio.run(agent.run(initial_obs=Observation(), toolbox=task.toolbox, recorder=recorder))
+    except TaskDone:
+        pass  # expected: task.finished() returned True after 3 counter increments
 
     outputs = storage.outputs()
     n_agent = sum(1 for e in outputs if isinstance(e, AgentEvent))
     n_tool = sum(1 for e in outputs if isinstance(e, ToolCallEvent))
-    # Three rounds: each emits one AgentEvent + one ToolCallEvent.
+    # Three rounds: each emits one AgentEvent + one ToolCallEvent. The
+    # 3rd tool call's MonitoredTool raises TaskDone AFTER recording.
     assert n_agent == 3
     assert n_tool == 3
     assert task.counter == 3
@@ -161,7 +171,7 @@ def test_default_run_terminates_on_empty_actions() -> None:
     budget = Budget(max_turns=10)
     recorder, storage = _setup(task, budget)
     agent = _NoopAgent(_CounterAgentConfig())
-    asyncio.run(agent.run(initial_obs=Observation(), task=task, recorder=recorder))
+    asyncio.run(agent.run(initial_obs=Observation(), toolbox=task.toolbox, recorder=recorder))
     outputs = storage.outputs()
     assert sum(1 for e in outputs if isinstance(e, AgentEvent)) == 1
     assert sum(1 for e in outputs if isinstance(e, ToolCallEvent)) == 0
@@ -171,10 +181,15 @@ def test_default_run_terminates_on_empty_actions() -> None:
 def test_default_run_records_parent_event_id_on_tool_calls() -> None:
     """Each ToolCallEvent in the stream must reference the AgentEvent
     that spawned it (Phase A/B/C back-reference invariant)."""
+    from cube_harness.tool import TaskDone
+
     task = _MockTask(done_after_n=2)
     budget = Budget(max_turns=10)
     recorder, storage = _setup(task, budget)
-    asyncio.run(_CounterAgent(_CounterAgentConfig()).run(Observation(), task, recorder))
+    try:
+        asyncio.run(_CounterAgent(_CounterAgentConfig()).run(Observation(), task.toolbox, recorder))
+    except TaskDone:
+        pass
 
     agent_event_ids: list[str] = []
     for ev in storage.outputs():
@@ -199,7 +214,7 @@ def test_default_run_propagates_budget_exceeded() -> None:
     # The second tool call (turn 2) raises.
     raised: list[BaseException] = []
     try:
-        asyncio.run(agent.run(initial_obs=Observation(), task=task, recorder=recorder))
+        asyncio.run(agent.run(initial_obs=Observation(), toolbox=task.toolbox, recorder=recorder))
     except BaseException as e:  # noqa: BLE001
         raised.append(e)
     assert any(isinstance(e, BudgetExceeded) for e in raised)

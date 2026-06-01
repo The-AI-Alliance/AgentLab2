@@ -152,15 +152,19 @@ class SummaryProcessor:
             if out.error is not None and self._error_type is None:
                 self._error_type = out.error.error_type
         elif isinstance(out, ToolCallEvent):
+            # ToolCallEvent now carries only obs + error (reward lives on
+            # the sibling EvaluationEvent; done is a TaskDone signal).
             self._n_env_steps += 1
-            self._reward = out.output.reward
-            self._done = out.output.done
-            if out.output.error is not None and self._error_type is None:
-                self._error_type = out.output.error.error_type
+            if out.error is not None and self._error_type is None:
+                self._error_type = out.error.error_type
         elif isinstance(out, EvaluationEvent):
             self._n_evaluations += 1
-            # Terminal reward — overrides any previous (typically zero) value.
+            # Terminal evaluation: overrides reward, marks done.
+            # Step-wise evaluation: also surfaces the reward so the
+            # summary tracks the latest validate_per_step result.
             self._reward = out.reward
+            if out.is_terminal:
+                self._done = True
         self._append(self._build_entry(turn_n, EpisodeStatus.RUNNING))
 
     @property

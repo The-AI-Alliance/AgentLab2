@@ -31,9 +31,9 @@ def _agent_event(turn_index: int = 0) -> TrajectoryEvent:
 
 
 def _tool_call_event(parent_id: str, env_output: EnvironmentOutput | None = None) -> TrajectoryEvent:
-    obs = env_output or EnvironmentOutput(obs=Observation.from_text("ok"), reward=0.0)
+    env = env_output or EnvironmentOutput(obs=Observation.from_text("ok"), reward=0.0)
     return TrajectoryEvent(
-        output=ToolCallEvent(parent_event_id=parent_id, output=obs, turn_id=parent_id),
+        output=ToolCallEvent(parent_event_id=parent_id, obs=env.obs, error=env.error, turn_id=parent_id),
         start_time=2.0,
         end_time=2.5,
     )
@@ -185,7 +185,11 @@ class TestTrajectoryViewIteration:
         view = storage.load_episode("t1")
         last = view.last_env_output()
         assert last is not None
-        assert last.reward == 1.0
+        # ToolCallEvent now carries only obs+error; the legacy
+        # EnvironmentOutput wrapper that last_env_output returns has
+        # reward=0.0 by construction (rewards live on sibling
+        # EvaluationEvents). The last obs is what matters here.
+        assert last.obs.contents[0].data == "final"
 
     def test_last_env_output_none_when_no_tool_calls(self, tmp_path) -> None:
         storage = FileStorage(tmp_path)

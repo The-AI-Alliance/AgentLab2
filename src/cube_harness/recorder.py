@@ -269,7 +269,8 @@ class TurnRecorder:
         event = ToolCallEvent(
             parent_event_id=RESET_PARENT_EVENT_ID,
             action_id=RESET_PARENT_EVENT_ID,
-            output=initial,
+            obs=initial.obs,
+            error=initial.error,
             turn_id=RESET_PARENT_EVENT_ID,
         )
         ts = time.time()
@@ -304,9 +305,16 @@ class TurnRecorder:
         ts = time.time()
         self._append_event(TrajectoryEvent(output=event, start_time=ts, end_time=ts))
 
-    def record_evaluation(self, reward: float, info: dict | None = None) -> None:
-        """Terminal `task.evaluate()` result. Emitted exactly once by Episode."""
-        ev = EvaluationEvent(reward=float(reward), info=dict(info or {}))
+    def record_evaluation(self, reward: float, info: dict | None = None, *, is_terminal: bool = True) -> None:
+        """Record a `task.evaluate()` result.
+
+        - Terminal flavor (`is_terminal=True`, default): Episode emits
+          exactly one of these in `finally` after `agent.run` returns.
+        - Step-wise flavor: `MonitoredTool` emits via the lower-level
+          `_record_step_evaluation` helper directly (skips this method)
+          so it can pass `parent_event_id`. This API surfaces the
+          terminal-eval path only."""
+        ev = EvaluationEvent(reward=float(reward), info=dict(info or {}), is_terminal=is_terminal)
         ts = time.time()
         self._append_event(TrajectoryEvent(output=ev, start_time=ts, end_time=ts))
 

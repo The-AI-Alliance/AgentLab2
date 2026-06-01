@@ -166,9 +166,22 @@ def _events_to_legacy_steps(events: list[TrajectoryEvent]) -> list[TrajectorySte
                 )
             )
         elif isinstance(body, ToolCallEvent):
+            # Synthesize an EnvironmentOutput from the slim ToolCallEvent
+            # (obs + error). reward/done/info are not on ToolCallEvent
+            # anymore — reward lives on step-wise EvaluationEvents,
+            # done is signalled by TaskDone (no longer stored). The
+            # legacy XRay view sees zeros for those, which is fine —
+            # the new event-card UI (follow-up PR) renders the proper
+            # event types directly.
             out.append(
                 TrajectoryStep(
-                    output=body.output,
+                    output=EnvironmentOutput(
+                        obs=body.obs,
+                        reward=0.0,
+                        done=False,
+                        info={},
+                        error=body.error,
+                    ),
                     start_time=ev.start_time,
                     end_time=ev.end_time,
                 )
@@ -336,15 +349,27 @@ class TrajectoryView:
         return [e for e in self if isinstance(e.output, ToolCallEvent) and e.output.turn_id == turn_id]
 
     def last_env_output(self) -> EnvironmentOutput | None:
-        """Most recent `ToolCallEvent.output`, or None if no tool call ran.
+        """Most recent `ToolCallEvent` as an `EnvironmentOutput`-shaped
+        record, or None if no tool call ran.
 
         Walks the index in reverse (cheap — kind is in the entry) and
-        decodes only the matching event."""
+        decodes only the matching event. The slim post-refactor
+        `ToolCallEvent` (`obs` + `error`) is wrapped back into an
+        `EnvironmentOutput` for legacy callers that expect that shape;
+        `reward` / `done` / `info` are zero/empty since those no longer
+        live on `ToolCallEvent` (reward is on the sibling
+        `EvaluationEvent`, done is a TaskDone signal)."""
         for i in range(len(self._index) - 1, -1, -1):
             if self._index[i].kind == "tool_call":
                 ev = self[i]
                 if isinstance(ev.output, ToolCallEvent):
-                    return ev.output.output
+                    return EnvironmentOutput(
+                        obs=ev.output.obs,
+                        reward=0.0,
+                        done=False,
+                        info={},
+                        error=ev.output.error,
+                    )
         return None
 
     def _decode(self, i: int) -> TrajectoryEvent:
@@ -826,14 +851,37 @@ class FileStorage:
         """Legacy entry point — returns a `Trajectory` for XRay /
         investigator / inspect_results consumers.
 
-        Internally builds an `TrajectoryView` (cheap) and materializes the
-        legacy `steps` list from its events via `_events_to_legacy_steps`.
-        New code should call `load_episode(id) -> TrajectoryView` directly.
+        Uses `load_episode` for metadata and event-format steps. For
+        episodes that ONLY have a legacy `steps/` dir on disk (no
+        `events/`), reads `TrajectoryStep` files directly to preserve
+        the full `EnvironmentOutput` (reward / done / info) — going
+        through the event-synthesis round-trip would lose those fields.
+        Same lossless treatment for V1 jsonl episodes via the existing
+        `_v1_load_trajectory_steps` path.
 
-        Kept until those consumers migrate to `TrajectoryView` (planned
-        follow-up PR `agent-owns-loop-xray`)."""
+        Kept until XRay / investigator / inspect_results migrate to
+        `TrajectoryView` directly (planned follow-up PR
+        `agent-owns-loop-xray`)."""
         view = self.load_episode(trajectory_id)
-        steps = _events_to_legacy_steps(list(view))
+        ep_dir = self._episode_dir(trajectory_id)
+        has_events = (ep_dir / EVENTS_DIR).exists()
+        if not has_events and (ep_dir / STEPS_DIR).exists():
+            # Legacy V2-steps episode: read step files directly so we
+            # don't lose the full EnvironmentOutput in the event-synthesis
+            # round-trip (TrajectoryView builds slim ToolCallEvent(obs,
+            # error) and `_events_to_legacy_steps` then synthesizes back
+            # with reward=0/done=False — data loss).
+            steps: list[TrajectoryStep] = []
+            for step_file in sorted((ep_dir / STEPS_DIR).iterdir()):
+                step_data = _read_step_file(step_file)
+                if step_data is not None:
+                    steps.append(TrajectoryStep.model_validate(step_data))
+        elif not has_events and not (ep_dir / STEPS_DIR).exists():
+            # V1 jsonl episode at output_dir/<id>.jsonl. Read directly to
+            # preserve full EnvironmentOutput fields.
+            steps = self._v1_read_steps(trajectory_id)
+        else:
+            steps = _events_to_legacy_steps(list(view))
         return Trajectory(
             id=view.id,
             metadata=dict(view.metadata),
@@ -843,6 +891,26 @@ class FileStorage:
             summary_stats=dict(view.summary_stats) if view.summary_stats else None,
             steps=steps,
         )
+
+    def _v1_read_steps(self, trajectory_id: str) -> list[TrajectoryStep]:
+        """Read the V1 `<id>.jsonl` file into a list of `TrajectoryStep`s.
+
+        Used by `load_trajectory` for V1-backcompat to bypass the
+        event-synthesis round-trip (which would lose reward / done /
+        info from EnvironmentOutput)."""
+        _, steps_path = self._v1_resolve_trajectory_paths(trajectory_id)
+        steps: list[TrajectoryStep] = []
+        if not steps_path.exists():
+            return steps
+        with open(steps_path) as f:
+            for i, line in enumerate(f):
+                if line.strip():
+                    step_data = json.loads(line)
+                    step_data = self._v1_resolve_llm_call_refs(step_data, trajectory_id, i)
+                    if "output" not in step_data and ("obs" in step_data or "actions" in step_data):
+                        step_data = {"output": step_data}
+                    steps.append(TrajectoryStep.model_validate(step_data))
+        return steps
 
     def _maybe_inject_failure_text(self, ep_dir: Path, trajectory_data: dict) -> None:
         """Inject _failure_text into metadata if failure.txt exists and trajectory has no end_time."""

@@ -28,10 +28,17 @@ from tests.conftest import (
 
 
 def _make_failing_benchmark() -> CubeBenchmarkConfig:
-    """BenchmarkConfig whose single task raises on the first step() call."""
+    """BenchmarkConfig whose single task raises on terminal evaluate().
+
+    Under agent-owns-loop the agent's tool calls go through MonitoredTool
+    + the toolbox; `task.step` isn't called anymore. Injecting failure
+    via `evaluate()` exercises the equivalent error-capture path — when
+    Episode's terminal evaluate raises, `recorder.record_failure` writes
+    an AgentEvent and the outer except tags status FAILED + re-raises."""
 
     class _FailingTask(MockCubeTask):
-        def step(self, actions):
+        def evaluate(self, obs=None):
+            _ = obs
             raise RuntimeError("injected step failure")
 
     class _FailingTaskConfig(MockCubeTaskConfig):
@@ -51,11 +58,24 @@ def _make_failing_benchmark() -> CubeBenchmarkConfig:
 
 
 def _make_neverending_benchmark(max_steps: int) -> CubeBenchmarkConfig:
-    """BenchmarkConfig whose single task never sets done=True, triggering MAX_STEPS_REACHED."""
+    """BenchmarkConfig whose single task never signals done — `finished()`
+    returns False so MonitoredTool never raises TaskDone. The agent
+    runs until `Budget.max_turns` triggers BudgetExceeded → MAX_STEPS_REACHED.
+
+    Also overrides `accept_agent_stop=False` so MockAgent's final_step
+    action gets routed to the tool (and fails with ValueError on the
+    unknown action) — wait no, simpler: accept_agent_stop=False AND
+    a tool that records the action without failing. Easiest: keep
+    accept_agent_stop=True so STOP_ACTION raises TaskDone, but never
+    fire because MockAgent only emits final_step from step()."""
+    _ = max_steps  # parameter retained for backward-compat with old test signature
 
     class _NeverDoneTask(MockCubeTask):
-        def step(self, actions):
-            return EnvironmentOutput(obs=Observation.from_text("still going"), reward=0.0, done=False)
+        accept_agent_stop: bool = False  # ignore the agent's final_step → tool will reject
+
+        def finished(self, obs=None) -> bool:
+            _ = obs
+            return False  # never done — Budget.max_turns is the only termination
 
     class _NeverDoneTaskConfig(MockCubeTaskConfig):
         def make(self, runtime_context=None) -> _NeverDoneTask:
@@ -835,14 +855,40 @@ class TestStatusBasedSelection:
         assert "injected step failure" in (status.error_message or "")
         assert status.ended_at is not None
 
-    def test_worker_writes_max_steps_reached_when_loop_exhausted(self, tmp_dir, mock_agent_config) -> None:
-        """RUNNING → MAX_STEPS_REACHED: loop exhausts max_steps without done=True."""
+    def test_worker_writes_max_steps_reached_when_loop_exhausted(self, tmp_dir) -> None:
+        """RUNNING → MAX_STEPS_REACHED: loop exhausts max_steps without done=True.
+
+        Uses a local agent that emits a real action (`click`) — the default
+        MockAgent emits `final_step` (STOP_ACTION), which MonitoredTool
+        catches and turns into a TaskDone for a clean exit; we want the
+        opposite here so the budget runs out instead."""
+        from cube.core import Action as _Action
+
+        from cube_harness.agent import Agent as _Agent
+        from cube_harness.agent import AgentConfig as _AgentConfig
+        from cube_harness.core import AgentOutput as _AgentOutput
+
+        class _NeverStopsAgentConfig(_AgentConfig):
+            def make(self, action_set=None, **kwargs):
+                _ = action_set, kwargs
+                return _NeverStopsAgent(self)
+
+        class _NeverStopsAgent(_Agent):
+            name = "never-stops"
+            description = ""
+            input_content_types = []
+            output_content_types = []
+
+            def step(self, obs):
+                _ = obs
+                return _AgentOutput(actions=[_Action(name="click", arguments={"element_id": "btn"})])
+
         max_steps = 2
         benchmark_config = _make_neverending_benchmark(max_steps)
         exp = Experiment(
             name="test_max_steps_status",
             output_dir=tmp_dir,
-            agent_config=mock_agent_config,
+            agent_config=_NeverStopsAgentConfig(),
             benchmark_config=benchmark_config,
             max_steps=max_steps,
         )

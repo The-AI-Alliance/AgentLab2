@@ -8,6 +8,7 @@ from cube.benchmark import Benchmark, RuntimeContext
 from cube.core import EnvironmentOutput, TypedBaseModel
 from cube.resource import IncompatibleInfraError
 from cube.task import TaskConfig
+from cube.tool import Toolbox
 from opentelemetry.trace import StatusCode
 from termcolor import colored
 
@@ -21,7 +22,7 @@ from cube_harness.metrics.tracer import get_tracer
 from cube_harness.recorder import EventCounter, TurnRecorder
 from cube_harness.storage import FileStorage, Storage, TrajectoryView
 from cube_harness.summary import SummaryProcessor
-from cube_harness.tool import Budget, BudgetExceeded, install_monitoring
+from cube_harness.tool import Budget, BudgetExceeded, TaskDone, install_monitoring
 
 logger = logging.getLogger(__name__)
 
@@ -232,18 +233,38 @@ class Episode:
                     event_counter=event_counter,
                 )
 
-                # 4. Record the initial obs as a synthetic ToolCallEvent
+                # 4. Compose the toolbox the agent will see: the task's
+                # (now-monitored) tools + the agent's own non-monitored
+                # tools (memory, scratchpad, …). From the agent's POV,
+                # everything is just a tool — no `task` reference leaks.
+                task_tool = getattr(task, "tool", None) or getattr(task, "toolbox", None)
+                own_tools = [cfg.make() for cfg in self.config.agent_config.own_tool_configs]
+                if isinstance(task_tool, Toolbox) and own_tools:
+                    toolbox = Toolbox([*task_tool.tools, *own_tools])
+                elif own_tools:
+                    # Single task tool + own tools → wrap into a Toolbox.
+                    toolbox = Toolbox([task_tool, *own_tools]) if task_tool is not None else Toolbox(own_tools)
+                else:
+                    # No own tools — pass the task's tool/toolbox through.
+                    toolbox = task_tool
+
+                # 5. Record the initial obs as a synthetic ToolCallEvent
                 # whose parent is the RESET sentinel.
                 recorder.record_reset(initial)
                 logger.info(colored("Episode started — reset done", "blue"))
 
-                # 5. Drive the agent. agent.run is the canonical entry.
+                # 6. Drive the agent. agent.run is the canonical entry.
                 try:
-                    await agent.run(initial.obs, task, recorder)
+                    await agent.run(initial.obs, toolbox, recorder)
                 except BudgetExceeded as e:
                     logger.info(colored(f"Budget exceeded: {e}", "yellow"))
                     recorder.record_failure(e)
                     max_steps_reached = True
+                except TaskDone:
+                    # Clean episode end from the task side — agent emitted
+                    # STOP_ACTION or task.finished() returned True. Not a
+                    # failure; just proceed to finalization.
+                    logger.info(colored("Task finished", "blue"))
                 except Exception as e:
                     # Agent / env exceptions during the run. Permanent
                     # provider errors propagate after finalization so the
@@ -252,13 +273,23 @@ class Episode:
                     recorder.record_failure(e)
                     raise
 
-                # 6. Terminal evaluation. cube-standard's Task.evaluate
+                # 7. Terminal evaluation. cube-standard's Task.evaluate
                 # accepts obs=None — tasks track their own final state
                 # internally (`self._latest_obs` set inside their own
                 # `step()`). Errors propagate so callers see the real
                 # exception; `finally` still finalizes the metadata.
-                reward, info = task.evaluate()
-                recorder.record_evaluation(reward, info)
+                # is_terminal=True distinguishes this from any step-wise
+                # EvaluationEvents emitted by MonitoredTool during the run.
+                # If evaluate raises, record the failure as an AgentEvent
+                # (so the trajectory carries the error) before re-raising —
+                # the outer except below tags status and propagates to the
+                # runner.
+                try:
+                    reward, info = task.evaluate()
+                except Exception as e:
+                    recorder.record_failure(e)
+                    raise
+                recorder.record_evaluation(reward, info, is_terminal=True)
 
                 # Finalize: write the TrajectoryMetadata at episode end
                 # with summary_stats + reward_info + end_time, then

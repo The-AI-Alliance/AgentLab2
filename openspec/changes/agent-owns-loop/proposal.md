@@ -195,14 +195,22 @@ class Agent(ABC):
     async def run(
         self,
         initial_obs: Observation,
-        task: Task,                        # cube-standard Task; task.toolbox is monitored
+        toolbox: Toolbox,                  # composed: task's monitored tools + agent-own tools
         recorder: TurnRecorder,
     ) -> None:
-        """Default impl reproduces today's gym-style loop.
+        """Default impl drives a one-action-per-call loop on top of self.step.
 
-        Termination: BudgetExceeded raised by monitored tools propagates;
-        EnvironmentOutput.done from task.step terminates naturally; agent
-        can also return.
+        From the agent's POV the only environment surface is
+        `toolbox.execute_action(action) -> Observation | StepError`.
+        The toolbox is opaque: tasks' actions and the agent's own
+        tools (memory, scratchpad) live side-by-side. Dispatch by
+        action name routes each call automatically.
+
+        Termination:
+          - `self.step` returns empty actions (graceful done).
+          - `TaskDone` (BaseException) raised by MonitoredTool — task
+            finished or agent emitted STOP_ACTION. Propagates to Episode.
+          - `BudgetExceeded` (BaseException) raised by MonitoredTool.
         """
         obs = initial_obs
         while True:
@@ -210,30 +218,34 @@ class Agent(ABC):
             recorder.record(agent_output)
             if not agent_output.actions and not agent_output.error:
                 return  # graceful done
-            env_output = await task.astep(agent_output.actions)  # may raise BudgetExceeded
-            if env_output.done:
-                return
-            obs = env_output.obs
+            for action in agent_output.actions:
+                result = await toolbox.execute_action(action)
+                if isinstance(result, StepError):
+                    return
+                obs = result
 ```
 
-Agents that want parallel tool calls override `run()` and use
-`task.toolbox` directly:
+Agents that want parallel tool calls override `run()` and call the
+toolbox directly:
 ```python
 results = await asyncio.gather(*(
-    task.toolbox.execute_action(a) for a in actions
+    toolbox.execute_action(a) for a in actions
 ))  # each is Observation | StepError; monitoring fires inside each call
 ```
 
-Agents that don't override get backwards-compatible gym behaviour for free.
+Agents that don't override get the one-at-a-time default for free.
 
 The three parameters:
 - **`initial_obs`** — the observation from `task.reset()`, supplied by `Episode`.
-- **`task`** — the live `cube.task.Task`. `task.toolbox` has been wrapped
-  with `MonitoredTool`s by `Episode` before `agent.run` is called, so any
-  path through tools (whether `task.astep(...)` or
-  `task.toolbox.execute_action(...)`) emits monitoring. Agents are
-  conventionally expected to call `astep` / tools / `aevaluate` only; not
-  `reset` / `close` (those are `Episode`'s).
+- **`toolbox`** — a `cube.tool.Toolbox` (or single-tool `AbstractTool`)
+  composed by Episode: the task's tools wrapped in `MonitoredTool` +
+  the agent's own (non-monitored) tools from
+  `AgentConfig.own_tool_configs`. The agent calls
+  `toolbox.execute_action(action)` for ANY tool — the same call site
+  whether the action is the task's `bash` or the agent's `remember`.
+  No `task` reference reaches the agent. Done detection, step-wise
+  evaluation, and obs_postprocess are absorbed by MonitoredTool —
+  the agent's view is `Observation | StepError`.
 - **`recorder`** — what the agent reports out. Telemetry-only. Agents
   emit LLM calls, thoughts, response text, profiling.
 
@@ -246,7 +258,7 @@ today's `step(obs) -> AgentOutput`:
 | Before | After |
 |---|---|
 | Return `AgentOutput` from `step(obs)` | Own the `while True` loop yourself |
-| Episode called `task.step(actions)` for you | You call `task.toolbox.execute_action(a)` or `task.astep(actions)` directly |
+| Episode called `task.step(actions)` for you | You call `toolbox.execute_action(a)` — no `task` reference |
 | Sync world | `async def run` is the signature contract |
 | Termination: empty actions or `done` | Termination: `return` from `run`, or `BudgetExceeded` raises |
 
@@ -258,7 +270,7 @@ class ParallelAgent(Agent):
         super().__init__(config)
         self.llm = llm
 
-    async def run(self, initial_obs, task, recorder):
+    async def run(self, initial_obs, toolbox, recorder):
         obs = initial_obs
         while True:
             # 1. LLM call + record the turn. begin_turn() is the
@@ -279,17 +291,60 @@ class ParallelAgent(Agent):
             # as a ToolCallEvent sharing the parent turn's id as turn_id;
             # XRay renders them as horizontal sibling lanes. Budget +
             # storage hooks fire inside each MonitoredTool.execute_action.
+            # TaskDone / BudgetExceeded propagate through asyncio.gather
+            # to Episode's outer except.
             results = await asyncio.gather(*(
-                task.toolbox.execute_action(a) for a in actions
+                toolbox.execute_action(a) for a in actions
             ))
 
             # 3. Merge tool results into the next obs.
             obs = self._merge(results)
 ```
 
-That's the full agent. ~25 lines. No `task.reset()`, no
-`task.evaluate()`, no `task.close()`, no storage calls, no summary
-processor — Episode owns those.
+That's the full agent. ~25 lines. No `task` reference at all — no
+`task.reset`, no `task.evaluate`, no `task.close`, no storage calls.
+Episode owns lifecycle; MonitoredTool absorbs cube-standard's
+`Task.step` semantics (STOP_ACTION, obs_postprocess, validate_per_step,
+finished) transparently.
+
+#### A2. Agent with its own (non-monitored) tools
+
+The toolbox is composed — the agent can declare its own tools in
+`AgentConfig.own_tool_configs` and call them through the same
+`toolbox.execute_action` surface:
+
+```python
+class AgentWithMemory(Agent):
+    """Memory tool is just another tool in the toolbox. The agent
+    doesn't know which tools are task-side vs its own; dispatch by
+    action name routes each call."""
+
+    async def run(self, initial_obs, toolbox, recorder):
+        obs = initial_obs
+        while True:
+            with recorder.begin_turn() as turn:
+                call = await self.llm.acall(self._prompt(obs))
+                turn.add_llm_call(call)
+                actions = self._parse(call.output.content)
+                for a in actions:
+                    turn.add_action(a)
+            if not actions:
+                return
+            # `remember` is the agent's own (non-monitored) tool;
+            # `bash` is the task's (monitored) tool. Same call site.
+            obs = await toolbox.execute_action(actions[0])
+
+# AgentConfig:
+class MyAgentConfig(AgentConfig):
+    own_tool_configs: list[ToolConfig] = Field(
+        default_factory=lambda: [MemoryToolConfig(), ScratchpadToolConfig()]
+    )
+```
+
+Episode merges: `Toolbox([*task.tool.tools, *agent_own_tools])`.
+Agent-owned tools are NOT wrapped in MonitoredTool — they don't
+appear in the trajectory and don't trigger `task.finished()` polling.
+Treat them as private agent infrastructure.
 
 #### B. Sync agent (option 1) — `async def` with no awaits inside
 
@@ -299,7 +354,7 @@ inside. No awaits required:
 
 ```python
 class SyncBodyAgent(Agent):
-    async def run(self, initial_obs, task, recorder):
+    async def run(self, initial_obs, toolbox, recorder):
         obs = initial_obs
         while True:
             call = self.llm.call(self._prompt(obs))                # sync
@@ -307,10 +362,11 @@ class SyncBodyAgent(Agent):
             recorder.record(AgentOutput(actions=actions, llm_calls=[call]))
             if not actions:
                 return
-            env_output = task.step(actions)                        # sync
-            if env_output.done:
-                return
-            obs = env_output.obs
+            for action in actions:
+                result = toolbox.execute_action(action)            # sync
+                if isinstance(result, StepError):
+                    return
+                obs = result
 ```
 
 Caveat: the event loop is blocked for the whole episode duration.
@@ -323,10 +379,10 @@ When you want sync semantics without blocking the loop:
 
 ```python
 class TrueSyncAgent(Agent):
-    async def run(self, initial_obs, task, recorder):
-        await asyncio.to_thread(self._sync_run, initial_obs, task, recorder)
+    async def run(self, initial_obs, toolbox, recorder):
+        await asyncio.to_thread(self._sync_run, initial_obs, toolbox, recorder)
 
-    def _sync_run(self, initial_obs, task, recorder):
+    def _sync_run(self, initial_obs, toolbox, recorder):
         # Pure sync world. The event loop is unblocked during this call.
         ...
 ```
@@ -335,9 +391,10 @@ class TrueSyncAgent(Agent):
 
 When all you have is a sync `step()`, override nothing. The base class
 `Agent.run` wraps your `step` in `asyncio.to_thread`, drives the
-gym-style loop for you, and calls `task.astep(actions)`. This is how
-`ReactAgent` and `Genny` work today, unchanged. Use this for any agent
-that doesn't need parallel tool calls or streaming.
+one-at-a-time toolbox dispatch for you. This is how `ReactAgent` and
+`Genny` work — they still emit one action per `step()` and the default
+loop dispatches it through the toolbox; MonitoredTool fires TaskDone
+when the task signals done.
 
 ### `TurnRecorder`
 
@@ -381,6 +438,31 @@ implementation, two surfaces. No double-maintenance.
 Cross-turn state (trajectory, storage, summary) lives on `Episode`
 and is bound into the `TurnRecorder` at construction. Agents never read or
 write that state directly.
+
+### `TaskDone` — end-of-episode signal
+
+cube-standard's gym contract carried `done` inside `EnvironmentOutput`.
+With `Agent.run` taking a `Toolbox` (not a `Task`), the `done` flag
+disappears from the agent's surface. The replacement:
+
+```python
+class TaskDone(BaseException):
+    """Raised by MonitoredTool when the task indicates the episode is
+    over. Fires on two paths:
+
+    - Agent emitted STOP_ACTION and `task.accept_agent_stop=True`.
+    - `task.finished(obs)` returned True after the inner tool call.
+
+    Like BudgetExceeded, subclasses BaseException so agent code's
+    `try / except Exception` doesn't swallow it. Episode catches it in
+    its outer `except TaskDone:` and finalizes normally."""
+```
+
+MonitoredTool internally calls `task.finished(obs)` after every
+successful tool dispatch; on True, raises `TaskDone`. Same for
+`STOP_ACTION` — checked BEFORE dispatch, raised before any inner
+call. From the agent's POV, control flow simply unwinds out of
+`toolbox.execute_action` when the task decides it's done.
 
 ### `MonitoredTool` / `MonitoredToolbox`
 
@@ -549,26 +631,36 @@ async def run(self) -> TrajectoryView:
     self.storage.save_metadata(meta)              # WRITE-AT-START: crashed runs are loadable
     budget = Budget(max_turns=self.max_steps, ...)
 
-    # Wrap each member of task.toolbox with MonitoredTool, sharing the
-    # storage/summary/budget. Events stream to disk via storage.save_event;
-    # nothing is accumulated in memory.
-    install_monitoring(task, budget, self.storage, self.summary)
+    # Wrap each member of task.tool with MonitoredTool, baking in the
+    # task ref so wrappers absorb cube-standard Task.step semantics
+    # (STOP_ACTION, obs_postprocess, validate_per_step, finished).
+    # Events stream to disk via storage.save_event; nothing in memory.
+    install_monitoring(task, trajectory_id=self.id, budget=..., storage=..., summary=...)
+
+    # Compose the toolbox the agent sees: monitored task tools + the
+    # agent's own (non-monitored) tools from agent_config.own_tool_configs.
+    own_tools = [cfg.make() for cfg in self.config.agent_config.own_tool_configs]
+    toolbox = Toolbox([*task.tool.tools, *own_tools]) if own_tools else task.tool
 
     recorder = TurnRecorder(self.storage, self.summary, trajectory_id=self.id)
     try:
         initial = task.reset()
         recorder.record_reset(initial)            # Episode-only helper on recorder
-        await self.agent.run(initial.obs, task, recorder)
+        await self.agent.run(initial.obs, toolbox, recorder)
     except BudgetExceeded as e:
         recorder.record_failure(e)
-    except BaseException as e:
+    except TaskDone:
+        pass                                       # clean end — task said done
+    except Exception as e:
         recorder.record_failure(e)
+        raise
     finally:
         try:
-            reward, info = task.evaluate()        # cube-standard: obs optional
-            recorder.record_evaluation(reward, info)
+            reward, info = task.evaluate()        # terminal eval, obs optional
+            recorder.record_evaluation(reward, info, is_terminal=True)
         except Exception as e:
-            recorder.record_evaluation(0.0, {"evaluate_failed": str(e)})
+            recorder.record_failure(e)
+            raise
         meta = meta.model_copy(update={
             "end_time": now(),
             "reward_info": recorder.reward_info,
@@ -587,13 +679,13 @@ elided from the pseudo-code above for clarity. This RFC does not add new
 OTel surface (no per-tool-call, no per-turn spans). The trajectory event
 stream is the harness's structured per-call/per-turn observability.
 
-The agent cannot prevent finalization. `trajectory` and `recorder` are
-owned by `Episode`; the agent receives `task` and `recorder`. The monitoring
-wrappers are installed onto `task.toolbox` once, so any tool invocation —
-whether via `task.astep(actions)` or direct `task.toolbox.execute_action(action)`
-— routes through monitoring. `record_reset` / `record_failure` /
-`record_evaluation` are Episode-only helpers on `TurnRecorder` (not actively
-hidden from agents, but conventionally Episode's).
+The agent cannot prevent finalization. The agent receives `toolbox`
+and `recorder` — the `task` reference never leaks. The monitoring
+wrappers are installed onto `task.tool`'s leaves once, baking the
+task ref in for `Task.step`-equivalent semantics (STOP, postprocess,
+done detection, step-eval). `record_reset` / `record_failure` /
+`record_evaluation` are Episode-only helpers on `TurnRecorder` (not
+actively hidden from agents, but conventionally Episode's).
 
 Note: `task.evaluate()` is called with no obs in `finally`. Tasks that need
 the final obs to evaluate must track it internally (cube-standard's `Task`
@@ -613,14 +705,18 @@ class AgentEvent(TypedBaseModel):
     error: StepError | None
 
 class ToolCallEvent(TypedBaseModel):
-    agent_event_id: str                # parent AgentEvent.id
-    action_id: str                     # references one of agent_event.actions[i].id
-    output: EnvironmentOutput          # obs / reward / done / info / error
+    id: str                            # for step-wise EvaluationEvent.parent_event_id back-ref
+    parent_event_id: str               # the parent AgentEvent.id
+    action_id: str | None              # references one of agent_event.actions[i].id
+    obs: Observation                   # what came back to the agent (empty when error)
+    error: StepError | None            # set when execute_action returned a StepError
     turn_id: str                       # groups sibling parallel calls
 
 class EvaluationEvent(TypedBaseModel):
     reward: float
     info: dict
+    is_terminal: bool                  # True iff this is Episode's final evaluate
+    parent_event_id: str | None        # for step-wise: the ToolCallEvent.id; None for terminal
 
 class TrajectoryEvent(TypedBaseModel):
     output: AgentEvent | ToolCallEvent | EvaluationEvent
@@ -636,13 +732,24 @@ Why this shape:
 - **`AgentEvent` carries both the actions list and the assistant's response
   text**, so XRay can display what the agent "said" alongside what it fired —
   even when several tool calls land in parallel.
+- **`ToolCallEvent` carries only `obs` + `error`** — the agent's view of
+  what came back. `reward` / `done` / `info` are NOT here:
+  - `done` is signalled by the `TaskDone(BaseException)` exception
+    raised by MonitoredTool. No `done` field in the trajectory.
+  - Step-wise `reward` / `info` (when `task.validate_per_step=True`)
+    live on a sibling `EvaluationEvent` with `is_terminal=False` and
+    `parent_event_id` referencing the `ToolCallEvent.id`.
+  - The terminal `reward` / `info` is an `EvaluationEvent` with
+    `is_terminal=True` and `parent_event_id=None`, emitted by Episode.
 - **`ToolCallEvent.action_id` references back to the parent
   `AgentEvent.actions[i].id`**, so the event stream is a flat list but the
   parent-child structure is recoverable.
 - **`turn_id` groups parallel calls** so XRay can render them as siblings of
   one turn.
-- **`EvaluationEvent`** makes the final `task.evaluate()` call a first-class
-  event with its own timestamp, instead of being smuggled into `Trajectory.reward_info`.
+- **One `EvaluationEvent` type for both step-wise and terminal**
+  evaluations — discriminated by `is_terminal` and the presence of
+  `parent_event_id`. One type, two flavors; no discriminated union in
+  the trajectory event stream.
 
 Storage filenames evolve from `000_obs.msgpack.zst` / `001_act.msgpack.zst` to
 `000_agent.msgpack.zst` / `001_tool_call.msgpack.zst` / `002_eval.msgpack.zst`.

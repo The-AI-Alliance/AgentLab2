@@ -59,22 +59,24 @@ def test_agent_event_from_agent_output() -> None:
 
 def test_tool_call_event_back_references() -> None:
     parent = AgentEvent(actions=[_make_action("foo", action_id="a-1")])
+    obs = _make_env_output(reward=0.5).obs
     tc = ToolCallEvent(
         parent_event_id=parent.id,
         action_id="a-1",
-        output=_make_env_output(reward=0.5),
+        obs=obs,
         turn_id=parent.id,
     )
     assert tc.parent_event_id == parent.id
     assert tc.turn_id == parent.id
-    assert tc.output.reward == 0.5
+    assert tc.obs == obs
 
 
 def test_tool_call_event_round_trip() -> None:
+    obs = _make_env_output(reward=1.0, done=True).obs
     tc = ToolCallEvent(
         parent_event_id="p-1",
         action_id="a-1",
-        output=_make_env_output(reward=1.0, done=True),
+        obs=obs,
         turn_id="t-1",
     )
     blob = tc.model_dump_json()
@@ -82,8 +84,7 @@ def test_tool_call_event_round_trip() -> None:
     assert dst.parent_event_id == "p-1"
     assert dst.action_id == "a-1"
     assert dst.turn_id == "t-1"
-    assert dst.output.reward == 1.0
-    assert dst.output.done is True
+    assert dst.obs == obs
 
 
 def test_evaluation_event_round_trip() -> None:
@@ -98,7 +99,7 @@ def test_trajectory_event_union_serialization() -> None:
     cases: list[TrajectoryEvent] = [
         TrajectoryEvent(output=AgentEvent(thoughts="x")),
         TrajectoryEvent(
-            output=ToolCallEvent(parent_event_id="p", action_id=None, output=_make_env_output(), turn_id="t")
+            output=ToolCallEvent(parent_event_id="p", action_id=None, obs=_make_env_output().obs, turn_id="t")
         ),
         TrajectoryEvent(output=EvaluationEvent(reward=1.0)),
     ]

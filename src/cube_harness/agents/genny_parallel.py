@@ -38,7 +38,6 @@ import asyncio
 import logging
 
 from cube.core import Observation, StepError
-from cube.task import Task
 
 from cube_harness.agents.genny import Genny, GennyConfig
 from cube_harness.recorder import TurnRecorder
@@ -84,9 +83,15 @@ class GennyParallel(Genny):
     so XRay (Phase I) renders them as siblings of one turn.
     """
 
-    async def run(self, initial_obs: Observation, task: Task, recorder: TurnRecorder) -> None:
+    async def run(self, initial_obs: Observation, toolbox, recorder: TurnRecorder) -> None:
         """Drive the agent loop with `asyncio.gather` parallel dispatch
-        of the N actions returned per assistant turn."""
+        of the N actions returned per assistant turn.
+
+        The toolbox is provided by Episode and contains the task's
+        monitored tools + the agent's own (non-monitored) tools. The
+        agent calls toolbox.execute_action(action) uniformly — no
+        `task` reference; done/eval semantics are absorbed by the
+        MonitoredTool wrappers."""
         obs = initial_obs
         while True:
             agent_output = await asyncio.to_thread(self.step, obs)
@@ -96,19 +101,9 @@ class GennyParallel(Genny):
 
             # Parallel fan-out. Each call goes through MonitoredTool's
             # execute_action (installed by Episode), which records its
-            # own ToolCallEvent and enforces budget. asyncio.gather
-            # awaits all; an exception in any one (incl. BudgetExceeded)
-            # propagates as the first to fire, with the others cancelled
-            # at the asyncio layer. We use return_exceptions=False
-            # because we WANT BudgetExceeded to propagate to Episode.
-            #
-            # cube-standard Task exposes the toolbox as `tool` (the
-            # composite tool — `Toolbox` is-a `Tool`). Some downstream
-            # tasks aliased it as `toolbox`; prefer the canonical
-            # `tool` attribute.
-            toolbox = getattr(task, "tool", None) or getattr(task, "toolbox", None)
-            if toolbox is None:
-                raise RuntimeError("task has no .tool or .toolbox to dispatch parallel actions against")
+            # own ToolCallEvent, enforces budget, and may raise
+            # TaskDone / BudgetExceeded that propagates up through
+            # asyncio.gather to Episode's outer except.
             results = await asyncio.gather(
                 *(asyncio.to_thread(toolbox.execute_action, action) for action in agent_output.actions)
             )
