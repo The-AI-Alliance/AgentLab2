@@ -12,27 +12,57 @@
 The original RFC restructured the loop around `Agent.run` + `MonitoredTool` + event-stream
 trajectories. Phases A–L of that work shipped on this branch. While running the
 reference baseline (TerminalBench-2, gpt-5.4-mini, 29.3% — parity) we discovered
-two structural debts that should be paid in this same PR rather than a follow-up:
+two structural debts. Phases M–T of this same PR pay them down; the XRay
+event-card UI rewrite splits to a focused follow-up PR (see "Scope split"
+below).
 
-1. **`Trajectory` is no longer a useful in-memory abstraction.** Under streaming
-   it carries empty `events: []` and `steps: []` lists; the actual data lives in
-   `events/*.msgpack.zst` on disk. Every defensive `if events: ... else: ...` branch
-   in core/storage was paying upkeep for a vestigial container. Replace with
-   `EpisodeMetadata` (pure metadata) + `EpisodeView` (lazy reader) — modeled on
-   AgentLab's loader pattern.
+1. **`Trajectory` is no longer a useful in-memory abstraction during runs.**
+   Under streaming it carries empty `events: []` lists; the actual data lives
+   in `events/*.msgpack.zst` on disk. Every defensive `if events: ... else: ...`
+   branch in core/storage was paying upkeep for a vestigial container. Replace
+   on the production write-path with `EpisodeMetadata` (pure metadata) +
+   `EpisodeView` (lazy reader) — modeled on AgentLab's loader pattern.
 
 2. **XRay was not actually rewritten.** Phase I shipped a `_events_to_legacy_steps`
-   materialization shim so the *legacy* UI rendered new-format trajectories. Parallel
-   `ToolCallEvent` siblings collapsed into a flat sequence. The promised event-card
-   timeline with horizontal lanes is still owed. Bundle here so the XRay rewrite
-   pays the lazy-loader cost (random access via `view[i]`) and we can delete the
-   shim outright.
+   materialization shim so the *legacy* UI rendered new-format trajectories.
+   Parallel `ToolCallEvent` siblings collapsed into a flat sequence. The
+   promised event-card timeline with horizontal lanes is owed by a follow-up
+   PR (`agent-owns-loop-xray`).
 
-This expansion also lets us delete the `Trajectory.streaming` flag, the legacy
-`TrajectoryStep` union from the public API, and ~200 lines of dual-path
-load logic in storage. Net code reduction, simpler invariants, no half-finished
-migration. The cube-standard companion needs no further changes — Trajectory
-was never in cube-standard.
+### Scope split
+
+This PR (`agent-owns-loop` final):
+- Add `EpisodeMetadata` + `EpisodeView` (lazy reader).
+- Storage write-at-start; `load_episode` is the canonical lazy entry.
+- Production runtime (`Episode`, `MonitoredTool`, `TurnRecorder`,
+  `EpisodeRecord`) writes/reads through the new API. No in-memory event
+  accumulation. Crashed-mid-run episodes loadable.
+- Trajectory slimmed: keeps `id`, `metadata`, `steps` (materialized from
+  events on load), `summary_stats`, `reward_info`, `start_time`, `end_time`.
+  Drops `events` field, `streaming` flag, event helpers
+  (`last_env_step`/`events_of_turn`/`n_agent_events`/…), and all dual-path
+  code in core + storage.
+- `storage.load_trajectory(id)` becomes a thin wrapper over `load_episode(id)`
+  that materializes legacy steps via `_events_to_legacy_steps`. Lets XRay
+  + investigator + inspect_results keep their current consumers unchanged.
+
+Follow-up PR (`agent-owns-loop-xray`):
+- XRay rewrite around `EpisodeView` (event-card timeline, parallel sibling
+  lanes, drop the legacy materialization shim).
+- Investigator + inspect_results migration to `view.iter_events()`.
+- Delete the legacy `Trajectory` class entirely.
+
+Why split: XRay is ~3.5k lines + ~188 tests that hand-build `Trajectory`.
+Bundling that with the runtime refactor would push this PR past safe-review
+size. The runtime cleanup IS reviewable today; the UI rewrite deserves its
+own focused review.
+
+Net code reduction in THIS PR: ~150 LOC of `streaming` / `events` / dual-path
+branches in core + storage + summary + tool + recorder. Net interface gain:
+crashed-mid-run loadability; uniform `EpisodeView` reader for new consumers.
+
+The cube-standard companion needs no further changes — Trajectory was never
+in cube-standard.
 
 ---
 

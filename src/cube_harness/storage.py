@@ -440,6 +440,36 @@ def _build_legacy_steps_index(steps_dir: Path) -> list[_EventIndexEntry]:
     return entries
 
 
+def _meta_to_trajectory(view: "EpisodeView") -> Trajectory:
+    """Build a legacy-shape `Trajectory` from an EpisodeView's metadata
+    (`steps=[]`). Used by legacy metadata-only loaders that don't need
+    event payloads — XRay's experiment table, retry detection, etc."""
+    return Trajectory(
+        id=view.id,
+        metadata=dict(view.metadata),
+        start_time=view.start_time,
+        end_time=view.end_time,
+        reward_info=dict(view.reward_info),
+        summary_stats=dict(view.summary_stats) if view.summary_stats else None,
+        steps=[],
+    )
+
+
+def _episode_meta_to_trajectory(meta: EpisodeMetadata) -> Trajectory:
+    """Like `_meta_to_trajectory` but works directly from an
+    EpisodeMetadata record (no view construction). Used by
+    `load_all_trajectory_metadata` for the cheap study-scan path."""
+    return Trajectory(
+        id=meta.id,
+        metadata=dict(meta.metadata),
+        start_time=meta.start_time,
+        end_time=meta.end_time,
+        reward_info=dict(meta.reward_info),
+        summary_stats=dict(meta.summary_stats) if meta.summary_stats else None,
+        steps=[],
+    )
+
+
 def _episode_metadata_from_dict(data: dict, fallback_id: str) -> EpisodeMetadata:
     """Coerce a raw dict (from disk JSON) into an `EpisodeMetadata`.
 
@@ -503,34 +533,31 @@ class FileStorage:
     # --- Write (always V2) ---
 
     def save_trajectory(self, trajectory: Trajectory, allow_overwrite: bool = False) -> None:
+        """Legacy entry — persists a `Trajectory` as the V2 on-disk layout.
+
+        Internally splits into:
+          - `save_metadata(EpisodeMetadata(...))` — `episode.metadata.json`.
+          - one `_write_step` per `trajectory.steps[i]` — `steps/NNN_*.msgpack.zst`.
+
+        New code should call `save_metadata(EpisodeMetadata(...))` directly
+        and stream events through `save_event(event, id, n)`. This wrapper
+        exists for legacy test fixtures and the few in-tree callers that
+        still build a `Trajectory` by hand. Will be removed in the
+        follow-up XRay-rewrite PR alongside the legacy step API."""
+        meta = EpisodeMetadata(
+            id=trajectory.id,
+            metadata=dict(trajectory.metadata),
+            start_time=trajectory.start_time,
+            end_time=trajectory.end_time,
+            reward_info=dict(trajectory.reward_info),
+            summary_stats=dict(trajectory.summary_stats) if trajectory.summary_stats else None,
+        )
+        self.save_metadata(meta, allow_overwrite=allow_overwrite)
         ep_dir = self._episode_dir(trajectory.id)
-        metadata_path = ep_dir / EPISODE_METADATA
-        is_resave = trajectory.id in self._saved_ids
-
-        if not is_resave and ep_dir.exists() and metadata_path.exists():
-            if not allow_overwrite:
-                raise FileExistsError(
-                    f"Trajectory '{trajectory.id}' already exists at {ep_dir}. "
-                    "Use allow_overwrite=True to archive the old trajectory and overwrite."
-                )
-            self._archive_episode(ep_dir)
-
-        ep_dir.mkdir(parents=True, exist_ok=True)
         (ep_dir / STEPS_DIR).mkdir(exist_ok=True)
-        if trajectory.events:
-            (ep_dir / EVENTS_DIR).mkdir(exist_ok=True)
-        self._saved_ids.add(trajectory.id)
-
-        trajectory_data = trajectory.model_dump(exclude={"steps", "events"}, mode="json")
-        with open(metadata_path, "w") as f:
-            f.write(json.dumps(trajectory_data, indent=2))
-
         for i, step in enumerate(trajectory.steps):
             self._write_step(ep_dir, i, step)
-        for i, event in enumerate(trajectory.events):
-            (ep_dir / EVENTS_DIR / _event_filename(i, event)).write_bytes(_serialize_event(event))
-
-        logger.info(f"Saved trajectory to {ep_dir}")
+        logger.info(f"Saved legacy trajectory to {ep_dir}")
 
     def _archive_episode(self, ep_dir: Path) -> None:
         archived = ep_dir.parent / f"{ep_dir.name}{ARCHIVED_MARKER}{time.time()}"
@@ -723,7 +750,7 @@ class FileStorage:
         """
         metadata_path, steps_path = self._v1_resolve_trajectory_paths(trajectory_id)
         if not metadata_path.exists():
-            raise FileNotFoundError(f"Episode metadata not found: {metadata_path}")
+            raise FileNotFoundError(f"Trajectory metadata not found: {metadata_path}")
         with open(metadata_path) as f:
             data = json.load(f)
         if "metadata" not in data:
@@ -796,10 +823,26 @@ class FileStorage:
     # --- Load single trajectory ---
 
     def load_trajectory(self, trajectory_id: str) -> Trajectory:
-        ep_dir = self._episode_dir(trajectory_id)
-        if (ep_dir / EPISODE_METADATA).exists():
-            return self._load_trajectory(ep_dir, trajectory_id)
-        return self._v1_load_trajectory(trajectory_id)
+        """Legacy entry point — returns a `Trajectory` for XRay /
+        investigator / inspect_results consumers.
+
+        Internally builds an `EpisodeView` (cheap) and materializes the
+        legacy `steps` list from its events via `_events_to_legacy_steps`.
+        New code should call `load_episode(id) -> EpisodeView` directly.
+
+        Kept until those consumers migrate to `EpisodeView` (planned
+        follow-up PR `agent-owns-loop-xray`)."""
+        view = self.load_episode(trajectory_id)
+        steps = _events_to_legacy_steps(list(view))
+        return Trajectory(
+            id=view.id,
+            metadata=dict(view.metadata),
+            start_time=view.start_time,
+            end_time=view.end_time,
+            reward_info=dict(view.reward_info),
+            summary_stats=dict(view.summary_stats) if view.summary_stats else None,
+            steps=steps,
+        )
 
     def _maybe_inject_failure_text(self, ep_dir: Path, trajectory_data: dict) -> None:
         """Inject _failure_text into metadata if failure.txt exists and trajectory has no end_time."""
@@ -828,48 +871,12 @@ class FileStorage:
             }
         )
 
-    def _load_trajectory(self, ep_dir: Path, trajectory_id: str) -> Trajectory:
-        with open(ep_dir / EPISODE_METADATA) as f:
-            trajectory_data = json.load(f)
-
-        self._maybe_inject_failure_text(ep_dir, trajectory_data)
-        self._maybe_inject_episode_status(ep_dir, trajectory_data)
-
-        steps: list[TrajectoryStep] = []
-        steps_dir = ep_dir / STEPS_DIR
-        if steps_dir.exists():
-            for step_file in sorted(steps_dir.iterdir()):
-                step_data = _read_step_file(step_file)
-                if step_data is not None:
-                    steps.append(TrajectoryStep.model_validate(step_data))
-
-        # RFC: agent-owns-loop. New event-stream layout lives alongside
-        # the legacy steps/ dir during migration. Load whichever exists;
-        # if both are present (transition trajectories), load both.
-        events: list[TrajectoryEvent] = []
-        events_dir = ep_dir / EVENTS_DIR
-        if events_dir.exists():
-            for event_file in sorted(events_dir.iterdir()):
-                if not event_file.name.endswith(".msgpack.zst"):
-                    continue
-                events.append(TrajectoryEvent.model_validate(_deserialize_event(event_file.read_bytes())))
-
-        # XRay backward-compat: when we have events but no legacy steps,
-        # synthesize a steps view so the existing XRay UI keeps rendering
-        # (Phase I: XRay's full event-card timeline is a follow-up; for
-        # now the legacy table view continues working without changes).
-        # AgentEvent → AgentOutput-shaped step; ToolCallEvent → env step
-        # carrying the underlying EnvironmentOutput; EvaluationEvent is
-        # not represented in the legacy steps view (it lives in
-        # reward_info already).
-        if events and not steps:
-            steps = _events_to_legacy_steps(events)
-
-        trajectory_data["steps"] = steps
-        trajectory_data["events"] = events
-        return Trajectory.model_validate(trajectory_data)
-
     def load_step(self, trajectory_id: str, step_index: int) -> TrajectoryStep:
+        """Load one legacy step file (V2-steps layout only).
+
+        New event-stream episodes don't have step files on disk; this
+        path is only used by callers that still hold legacy step indices.
+        """
         ep_dir = self._episode_dir(trajectory_id)
         if not ep_dir.exists():
             raise FileNotFoundError(f"Episode directory not found for trajectory: {trajectory_id}")
@@ -879,32 +886,6 @@ class FileStorage:
             if path.exists():
                 return TrajectoryStep.model_validate(_deserialize_step(path.read_bytes()))
         raise IndexError(f"Step {step_index} not found in {steps_dir}")
-
-    def _v1_load_trajectory(self, trajectory_id: str) -> Trajectory:
-        metadata_path, steps_path = self._v1_resolve_trajectory_paths(trajectory_id)
-
-        if not metadata_path.exists():
-            raise FileNotFoundError(f"Trajectory metadata not found: {metadata_path}")
-
-        with open(metadata_path) as f:
-            trajectory_data = json.load(f)
-
-        if "metadata" not in trajectory_data:
-            trajectory_data = {"id": trajectory_id, "metadata": trajectory_data}
-
-        steps: list[TrajectoryStep] = []
-        if steps_path.exists():
-            with open(steps_path) as f:
-                for i, line in enumerate(f):
-                    if line.strip():
-                        step_data = json.loads(line)
-                        step_data = self._v1_resolve_llm_call_refs(step_data, trajectory_id, i)
-                        if "output" not in step_data and ("obs" in step_data or "actions" in step_data):
-                            step_data = {"output": step_data}
-                        steps.append(TrajectoryStep.model_validate(step_data))
-
-        trajectory_data["steps"] = steps
-        return Trajectory.model_validate(trajectory_data)
 
     def _v1_resolve_llm_call_refs(self, step_data: dict, trajectory_id: str, step_num: int) -> dict:
         output = step_data.get("output", {})
@@ -930,55 +911,21 @@ class FileStorage:
     # --- Load metadata (no steps) ---
 
     def load_trajectory_metadata(self, trajectory_id: str) -> Trajectory:
-        ep_dir = self._episode_dir(trajectory_id)
-        metadata_path = ep_dir / EPISODE_METADATA
-        if not metadata_path.exists():
-            metadata_path, _ = self._v1_resolve_trajectory_paths(trajectory_id)
+        """Legacy entry — returns a `Trajectory` with `steps=[]`.
 
-        if not metadata_path.exists():
-            raise FileNotFoundError(f"Trajectory metadata not found: {metadata_path}")
-
-        with open(metadata_path) as f:
-            trajectory_data = json.load(f)
-
-        if "metadata" not in trajectory_data:
-            trajectory_data = {"id": trajectory_id, "metadata": trajectory_data}
-
-        if (ep_dir / EPISODE_METADATA).exists():
-            self._maybe_inject_failure_text(ep_dir, trajectory_data)
-            self._maybe_inject_episode_status(ep_dir, trajectory_data)
-
-        trajectory_data["steps"] = []
-        return Trajectory.model_validate(trajectory_data)
+        Thin wrapper over `load_episode` followed by `_meta_to_trajectory`.
+        Used by XRay's metadata-only loader path (fast scan, no event decode)."""
+        view = self.load_episode(trajectory_id)
+        return _meta_to_trajectory(view)
 
     # --- Bulk listing ---
 
     def load_all_trajectory_metadata(self) -> list[Trajectory]:
-        return self._load_all_metadata() + self._v1_load_all_metadata()
+        """Legacy entry — returns one `Trajectory(steps=[])` per episode.
 
-    def _load_all_metadata(self) -> list[Trajectory]:
-        results: list[Trajectory] = []
-        for ep_dir in self._episode_dirs():
-            try:
-                with open(ep_dir / EPISODE_METADATA) as f:
-                    data = json.load(f)
-                self._maybe_inject_failure_text(ep_dir, data)
-                self._maybe_inject_episode_status(ep_dir, data)
-                data["steps"] = []
-                results.append(Trajectory.model_validate(data))
-            except Exception as e:
-                logger.error(f"Failed to load episode metadata {ep_dir.name}: {e}")
-        return results
-
-    def _v1_load_all_metadata(self) -> list[Trajectory]:
-        results: list[Trajectory] = []
-        for metadata_file in self._v1_metadata_files():
-            trajectory_id = self._v1_traj_id_from_file(metadata_file)
-            try:
-                results.append(self.load_trajectory_metadata(trajectory_id))
-            except Exception as e:
-                logger.error(f"Failed to load trajectory metadata {trajectory_id}: {e}")
-        return results
+        Thin wrapper over `list_episodes`. Used by XRay's experiment-level
+        list view (one row per episode, no event decode)."""
+        return [_episode_meta_to_trajectory(meta) for meta in self.list_episodes()]
 
     def list_trajectory_ids(self) -> list[str]:
         return self._list_ids() + self._v1_list_ids()
@@ -1030,27 +977,28 @@ class FileStorage:
         return result
 
     def load_all_trajectories(self, exp_dir: str | Path | None = None) -> list[Trajectory]:
+        """Legacy bulk loader — returns one full `Trajectory` per episode.
+
+        Each entry routes through `load_trajectory` (thin wrapper over
+        `load_episode`), so steps are materialized from events on the
+        fly. Used by XRay / inspect_results study-aggregation paths.
+        New code should iterate `list_episodes()` for metadata only and
+        call `load_episode(id)` on demand.
+        """
         if exp_dir is not None:
             return FileStorage(exp_dir).load_all_trajectories()
-        return self._load_all_trajectories() + self._v1_load_all_trajectories()
-
-    def _load_all_trajectories(self) -> list[Trajectory]:
         results: list[Trajectory] = []
         for ep_dir in self._episode_dirs():
             try:
-                results.append(self._load_trajectory(ep_dir, ep_dir.name))
+                results.append(self.load_trajectory(ep_dir.name))
             except Exception as e:
                 logger.error(f"Failed to load episode {ep_dir.name}: {e}")
-        return results
-
-    def _v1_load_all_trajectories(self) -> list[Trajectory]:
-        results: list[Trajectory] = []
         for metadata_file in self._v1_metadata_files():
             trajectory_id = self._v1_traj_id_from_file(metadata_file)
             try:
-                results.append(self._v1_load_trajectory(trajectory_id))
+                results.append(self.load_trajectory(trajectory_id))
             except Exception as e:
-                logger.error(f"Failed to load trajectory {trajectory_id}: {e}")
+                logger.error(f"Failed to load V1 trajectory {trajectory_id}: {e}")
         return results
 
     # --- Logs ---

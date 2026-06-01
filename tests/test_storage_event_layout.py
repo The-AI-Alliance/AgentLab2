@@ -1,8 +1,12 @@
 """Storage event-file layout tests — save_event / load_event,
-trajectory-level save/load with events/ alongside steps/, dual-format
-loading (legacy steps/-only AND new events/-only AND both)."""
+crash-safe save_metadata roundtrip.
 
-import json
+The historical `Trajectory(events=[...])` round-trip tests have been
+moved to `tests/test_episode_view.py`, which exercises the canonical
+`EpisodeMetadata + EpisodeView` path. This file now only covers the
+low-level `save_event` / `load_event` storage methods directly.
+"""
+
 from pathlib import Path
 
 import pytest
@@ -10,12 +14,10 @@ from cube.core import Action, EnvironmentOutput, Observation
 
 from cube_harness.core import (
     AgentEvent,
-    AgentOutput,
+    EpisodeMetadata,
     EvaluationEvent,
     ToolCallEvent,
-    Trajectory,
     TrajectoryEvent,
-    TrajectoryStep,
 )
 from cube_harness.storage import EVENTS_DIR, FileStorage
 
@@ -37,6 +39,13 @@ def _eval_event(reward: float = 1.0) -> EvaluationEvent:
     return EvaluationEvent(reward=reward, info={"score": reward})
 
 
+def _prime(storage: FileStorage, traj_id: str) -> None:
+    """Write a stub EpisodeMetadata so the episode directory exists —
+    save_event requires the directory and we want to test save_event
+    without exercising save_trajectory."""
+    storage.save_metadata(EpisodeMetadata(id=traj_id))
+
+
 # ---------------------------------------------------------------------------
 # save_event / load_event
 # ---------------------------------------------------------------------------
@@ -44,8 +53,7 @@ def _eval_event(reward: float = 1.0) -> EvaluationEvent:
 
 def test_save_and_load_event_round_trip(tmp_path: Path) -> None:
     storage = FileStorage(tmp_path)
-    traj = Trajectory(id="t")
-    storage.save_trajectory(traj)
+    _prime(storage, "t")
 
     parent = _agent_event()
     te = TrajectoryEvent(output=parent, start_time=0.0, end_time=0.1)
@@ -59,8 +67,7 @@ def test_save_and_load_event_round_trip(tmp_path: Path) -> None:
 
 def test_save_event_creates_events_dir_lazily(tmp_path: Path) -> None:
     storage = FileStorage(tmp_path)
-    traj = Trajectory(id="t")
-    storage.save_trajectory(traj)
+    _prime(storage, "t")
     ep_dir = tmp_path / "episodes" / "t"
     assert not (ep_dir / EVENTS_DIR).exists()
     storage.save_event(TrajectoryEvent(output=_eval_event(), start_time=0.0, end_time=0.0), "t", 0)
@@ -69,7 +76,7 @@ def test_save_event_creates_events_dir_lazily(tmp_path: Path) -> None:
 
 def test_save_event_filename_carries_kind(tmp_path: Path) -> None:
     storage = FileStorage(tmp_path)
-    storage.save_trajectory(Trajectory(id="t"))
+    _prime(storage, "t")
     storage.save_event(TrajectoryEvent(output=_agent_event()), "t", 0)
     storage.save_event(TrajectoryEvent(output=_tool_call_event("p")), "t", 1)
     storage.save_event(TrajectoryEvent(output=_eval_event()), "t", 2)
@@ -88,122 +95,6 @@ def test_save_event_requires_episode_dir(tmp_path: Path) -> None:
 
 def test_load_event_missing_raises(tmp_path: Path) -> None:
     storage = FileStorage(tmp_path)
-    storage.save_trajectory(Trajectory(id="t"))
+    _prime(storage, "t")
     with pytest.raises(FileNotFoundError):
         storage.load_event("t", 99)
-
-
-# ---------------------------------------------------------------------------
-# Trajectory-level save/load with events
-# ---------------------------------------------------------------------------
-
-
-def test_save_trajectory_writes_events_alongside_steps(tmp_path: Path) -> None:
-    storage = FileStorage(tmp_path)
-    parent = _agent_event()
-    traj = Trajectory(
-        id="t",
-        events=[
-            TrajectoryEvent(output=parent),
-            TrajectoryEvent(output=_tool_call_event(parent.id)),
-            TrajectoryEvent(output=_eval_event()),
-        ],
-    )
-    storage.save_trajectory(traj)
-    events_dir = tmp_path / "episodes" / "t" / EVENTS_DIR
-    files = list(events_dir.iterdir())
-    assert len(files) == 3
-
-
-def test_load_trajectory_recovers_events(tmp_path: Path) -> None:
-    storage = FileStorage(tmp_path)
-    parent = _agent_event(thoughts="my reasoning")
-    traj = Trajectory(
-        id="t",
-        events=[
-            TrajectoryEvent(output=parent),
-            TrajectoryEvent(output=_tool_call_event(parent.id)),
-            TrajectoryEvent(output=_eval_event(reward=0.75)),
-        ],
-    )
-    storage.save_trajectory(traj)
-    loaded = storage.load_trajectory("t")
-    assert loaded.n_agent_events == 1
-    assert loaded.n_tool_calls == 1
-    assert loaded.n_evaluations == 1
-    # AgentEvent identity preserved
-    agent_event = loaded.events[0].output
-    assert isinstance(agent_event, AgentEvent)
-    assert agent_event.id == parent.id
-    assert agent_event.thoughts == "my reasoning"
-
-
-def test_load_trajectory_handles_legacy_steps_only(tmp_path: Path) -> None:
-    """Trajectories written before the migration (steps/ only) must still load."""
-    storage = FileStorage(tmp_path)
-    legacy = Trajectory(
-        id="t-legacy",
-        steps=[
-            TrajectoryStep(output=EnvironmentOutput(obs=Observation(), reward=0.0, done=False, info={})),
-            TrajectoryStep(output=AgentOutput()),
-        ],
-    )
-    storage.save_trajectory(legacy)
-    # Confirm no events/ dir was created (none of the events were populated).
-    ep_dir = tmp_path / "episodes" / "t-legacy"
-    assert not (ep_dir / EVENTS_DIR).exists()
-
-    loaded = storage.load_trajectory("t-legacy")
-    assert loaded.n_env_steps == 1  # counted from legacy steps
-    assert loaded.n_agent_steps == 1
-    assert loaded.n_agent_events == 0
-
-
-def test_load_trajectory_handles_mixed_formats(tmp_path: Path) -> None:
-    """A trajectory mid-migration may end up with both steps/ AND events/.
-    Both load — but the events stream takes precedence for the legacy
-    counters (RFC agent-owns-loop: events are the authoritative source;
-    storage materializes a legacy steps view from events for XRay
-    backward-compat, which would otherwise double-count)."""
-    storage = FileStorage(tmp_path)
-    parent = _agent_event()
-    traj = Trajectory(
-        id="t-mixed",
-        steps=[
-            TrajectoryStep(output=EnvironmentOutput(obs=Observation(), reward=0.0, done=False, info={})),
-        ],
-        events=[
-            TrajectoryEvent(output=parent),
-            TrajectoryEvent(output=_tool_call_event(parent.id)),
-        ],
-    )
-    storage.save_trajectory(traj)
-
-    loaded = storage.load_trajectory("t-mixed")
-    # Events authoritative: n_env_steps == n_tool_calls (the legacy
-    # steps/ file is dropped from the count when events are present).
-    assert loaded.n_env_steps == 1  # one ToolCallEvent
-    assert loaded.n_agent_events == 1
-    assert loaded.n_tool_calls == 1
-
-
-# ---------------------------------------------------------------------------
-# Sanity: metadata round-trip preserves trajectory state
-# ---------------------------------------------------------------------------
-
-
-def test_episode_metadata_excludes_steps_and_events(tmp_path: Path) -> None:
-    """The metadata file must not duplicate per-step / per-event content
-    that lives in the steps/ and events/ directories — those would
-    explode the metadata size and undermine the streamed-to-disk
-    invariant from stream-trajectory-steps."""
-    storage = FileStorage(tmp_path)
-    parent = _agent_event()
-    traj = Trajectory(
-        id="t",
-        events=[TrajectoryEvent(output=parent), TrajectoryEvent(output=_eval_event())],
-    )
-    storage.save_trajectory(traj)
-    meta = json.loads((tmp_path / "episodes" / "t" / "episode.metadata.json").read_text())
-    assert meta.get("steps") in (None, [])
-    assert meta.get("events") in (None, [])

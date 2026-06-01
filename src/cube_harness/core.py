@@ -113,51 +113,44 @@ class TrajectoryEvent(TypedBaseModel):
 
 
 class Trajectory(TypedBaseModel):
-    """
-    Stores history of the previous interaction.
+    """Legacy trajectory shape — what `Storage.load_trajectory(id)` returns.
 
-    Metadata contains info about agent, env and task.
-    reward_info represents episode level reward data.
+    Consumed by XRay, the investigator, and `inspect_results` until they
+    migrate to `EpisodeView` directly (planned follow-up PR
+    `agent-owns-loop-xray`). On the production write-path NOTHING constructs
+    a `Trajectory` anymore — `Episode.run` builds an `EpisodeMetadata`,
+    streams events through `storage.save_event`, and returns an
+    `EpisodeView`. The Trajectory you see came from
+    `_events_to_legacy_steps(view)` materializing the legacy step list at
+    load time.
 
-    During the agent-owns-loop migration (RFC `agent-owns-loop`), this
-    type carries BOTH the legacy `steps` field (binary union of
-    `EnvironmentOutput | AgentOutput`, written by today's Episode loop)
-    AND the new `events` field (the AgentEvent / ToolCallEvent /
-    EvaluationEvent stream that the refactored Episode will write).
-    Phase F (storage) lands the migration shim that converts old `steps`
-    to `events` on read. Phase E flips Episode to write `events`. Tools
-    that consume the trajectory should prefer `events` when non-empty.
+    Drops vs. the agent-owns-loop draft form:
+      - `events` field removed (events live on the EpisodeView; this class
+        is steps-only for legacy consumers).
+      - `streaming` flag removed (events ALWAYS stream now; the flag was
+        a transition artefact).
+      - `last_env_step` / `last_env_output` / `events_of_turn` /
+        `n_agent_events` / `n_tool_calls` / `n_evaluations` methods removed
+        (live on EpisodeView; this class only carries what XRay needs).
+      - `n_agent_steps` / `n_env_steps` properties stay because XRay's
+        legacy step-walking UI counts them.
     """
 
     id: str
     steps: list[TrajectoryStep] = Field(default_factory=list)
-    events: list[TrajectoryEvent] = Field(default_factory=list)
     metadata: dict = Field(default_factory=dict)
     start_time: float | None = None
     end_time: float | None = None
     reward_info: dict = Field(default_factory=dict)
     summary_stats: dict | None = None
-    # When True, MonitoredTool / TurnRecorder skip the in-memory
-    # `events.append(...)` step — events stream to storage + summary
-    # ONLY. Preserves the stream-trajectory-steps invariant: driver /
-    # worker RAM stays flat regardless of trajectory size (the
-    # OSWorld-style 20 GB-per-job fix). Unit tests build trajectories
-    # with streaming=False (the default) so they can inspect events
-    # in-memory; Episode flips it to True for production runs.
-    streaming: bool = False
 
     def last_env_step(self) -> EnvironmentOutput:
-        """Return the most recent EnvironmentOutput in the trajectory.
+        """Most recent `EnvironmentOutput` in the steps list.
 
-        Prefers the new event stream (ToolCallEvent.output) over the
-        legacy steps view. Raises ValueError if neither stream has any
-        env output. With `streaming=True` the in-memory streams are
-        empty during a run — call this on a loaded trajectory, not a
-        live one."""
-        # Prefer events stream when present.
-        for event in reversed(self.events):
-            if isinstance(event.output, ToolCallEvent):
-                return event.output.output
+        Raises `ValueError` if the trajectory has no env step on disk.
+        Used by the legacy XRay loader; new code should use
+        `EpisodeView.last_env_output()` (returns `None` instead of raising).
+        """
         for step in reversed(self.steps):
             if isinstance(step.output, EnvironmentOutput):
                 return step.output
@@ -170,45 +163,15 @@ class Trajectory(TypedBaseModel):
         except ValueError:
             return None
 
-    def events_of_turn(self, turn_id: str) -> list[TrajectoryEvent]:
-        """All `ToolCallEvent`s sharing a `turn_id`. Returns `[]` if none.
-
-        Useful for XRay to render parallel tool calls of one agent turn
-        as siblings.
-        """
-        return [e for e in self.events if isinstance(e.output, ToolCallEvent) and e.output.turn_id == turn_id]
-
     @property
     def n_agent_steps(self) -> int:
-        """Number of agent turns in this trajectory (legacy alias)."""
-        # When the events stream is populated, it is authoritative —
-        # `steps` may be a synthesized legacy view (see storage
-        # _events_to_legacy_steps) so adding both would double-count.
-        if self.events:
-            return self.n_agent_events
+        """Number of agent turns in this trajectory's legacy step list."""
         return sum(1 for step in self.steps if isinstance(step.output, AgentOutput))
 
     @property
     def n_env_steps(self) -> int:
-        """Number of env interactions in this trajectory (legacy alias)."""
-        if self.events:
-            return self.n_tool_calls
+        """Number of env interactions in this trajectory's legacy step list."""
         return sum(1 for step in self.steps if isinstance(step.output, EnvironmentOutput))
-
-    @property
-    def n_agent_events(self) -> int:
-        """Number of AgentEvent entries in the event stream."""
-        return sum(1 for e in self.events if isinstance(e.output, AgentEvent))
-
-    @property
-    def n_tool_calls(self) -> int:
-        """Number of ToolCallEvent entries in the event stream."""
-        return sum(1 for e in self.events if isinstance(e.output, ToolCallEvent))
-
-    @property
-    def n_evaluations(self) -> int:
-        """Number of EvaluationEvent entries (≤1 per trajectory in practice)."""
-        return sum(1 for e in self.events if isinstance(e.output, EvaluationEvent))
 
 
 class EpisodeMetadata(BaseModel):

@@ -302,21 +302,21 @@ class TestEpisode:
         with pytest.raises(RuntimeError, match="Agent step failed"):
             episode.run()
 
-        # But error should be saved in trajectory before raising
+        # But error should be saved in the events stream before raising
         from cube_harness.storage import FileStorage
 
         storage = FileStorage(tmp_dir)
         traj_id = f"{episode.config.task_config.task_id}_ep{episode.config.id}"
-        trajectory = storage.load_trajectory(traj_id)
+        view = storage.load_episode(traj_id)
 
         # RFC agent-owns-loop: errors land on an AgentEvent (via
         # recorder.record_failure) instead of an AgentOutput step.
-        agent_events = [e for e in trajectory.events if isinstance(e.output, AgentEvent)]
+        agent_events = [e.output for e in view if isinstance(e.output, AgentEvent)]
         assert len(agent_events) > 0, "No agent events found in trajectory"
-        error_event = next((e for e in agent_events if e.output.error is not None), None)
+        error_event = next((e for e in agent_events if e.error is not None), None)
         assert error_event is not None, "No error found in agent events"
-        assert error_event.output.error.error_type == "RuntimeError"
-        assert "Agent step failed" in error_event.output.error.exception_str
+        assert error_event.error.error_type == "RuntimeError"
+        assert "Agent step failed" in error_event.error.exception_str
 
     def test_episode_captures_env_error(self, tmp_dir, mock_agent_config):
         """Test Episode captures environment errors correctly in trajectory."""
@@ -345,24 +345,24 @@ class TestEpisode:
         with pytest.raises(ValueError, match="Environment validation failed"):
             episode.run()
 
-        # But error should be saved in trajectory before raising
+        # But error should be saved in the events stream before raising
         from cube_harness.storage import FileStorage
 
         storage = FileStorage(tmp_dir)
         traj_id = f"{episode.config.task_config.task_id}_ep{episode.config.id}"
-        trajectory = storage.load_trajectory(traj_id)
+        view = storage.load_episode(traj_id)
 
         # RFC agent-owns-loop: env results are ToolCallEvents and the
         # final eval is a separate EvaluationEvent. The error from a
         # raised evaluate() is captured on the failure AgentEvent
         # via recorder.record_failure.
-        agent_events = [e for e in trajectory.events if isinstance(e.output, AgentEvent)]
-        error_event = next((e for e in agent_events if e.output.error is not None), None)
+        agent_events = [e.output for e in view if isinstance(e.output, AgentEvent)]
+        error_event = next((e for e in agent_events if e.error is not None), None)
         assert error_event is not None, "No error found in failure-AgentEvent"
-        assert "Environment validation failed" in error_event.output.error.exception_str
+        assert "Environment validation failed" in error_event.error.exception_str
         # ToolCallEvents (env step proxies) should also be present from
         # the agent loop before the failure.
-        tool_call_events = [e for e in trajectory.events if isinstance(e.output, ToolCallEvent)]
+        tool_call_events = [e.output for e in view if isinstance(e.output, ToolCallEvent)]
         assert len(tool_call_events) >= 1
 
     def test_episode_run_raises_on_duplicate_trajectory(

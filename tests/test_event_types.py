@@ -107,34 +107,10 @@ def test_trajectory_event_union_serialization() -> None:
         assert type(dst.output) is type(src.output)
 
 
-def test_trajectory_event_helpers_and_counters() -> None:
-    parent = AgentEvent(
-        actions=[
-            _make_action("foo", action_id="a-1"),
-            _make_action("bar", action_id="a-2"),
-        ]
-    )
-    tc1 = ToolCallEvent(parent_event_id=parent.id, action_id="a-1", output=_make_env_output(0.0), turn_id=parent.id)
-    tc2 = ToolCallEvent(parent_event_id=parent.id, action_id="a-2", output=_make_env_output(0.0), turn_id=parent.id)
-    final = EvaluationEvent(reward=1.0, info={"x": 1})
-    traj = Trajectory(id="t-1")
-    traj.events.append(TrajectoryEvent(output=parent))
-    traj.events.append(TrajectoryEvent(output=tc1))
-    traj.events.append(TrajectoryEvent(output=tc2))
-    traj.events.append(TrajectoryEvent(output=final))
-
-    assert traj.n_agent_events == 1
-    assert traj.n_tool_calls == 2
-    assert traj.n_evaluations == 1
-    siblings = traj.events_of_turn(parent.id)
-    assert len(siblings) == 2
-    assert all(isinstance(e.output, ToolCallEvent) for e in siblings)
-    assert traj.last_env_output() is not None
-
-
 def test_trajectory_legacy_steps_still_counted() -> None:
-    """The legacy `steps` field stays a writable target during migration.
-    Counters fold both streams together so XRay and Summary keep working."""
+    """The legacy `steps` field stays a writable target on the slim
+    Trajectory shape (XRay consumer). Counters work as the old code
+    expected for the XRay legacy view."""
     traj = Trajectory(id="t-1")
     traj.steps.append(TrajectoryStep(output=_make_env_output()))
     traj.steps.append(TrajectoryStep(output=AgentOutput()))
@@ -142,23 +118,13 @@ def test_trajectory_legacy_steps_still_counted() -> None:
     assert traj.n_agent_steps == 1
 
 
-def test_trajectory_last_env_prefers_events() -> None:
-    """When the event stream is populated, last_env_step pulls from there
-    rather than the legacy steps field."""
+def test_trajectory_last_env_step_walks_steps() -> None:
+    """Trajectory.last_env_step walks the legacy steps list. Event-stream
+    consumers should use EpisodeView.last_env_output instead — see
+    test_episode_view.py."""
     traj = Trajectory(id="t-1")
     traj.steps.append(TrajectoryStep(output=_make_env_output(reward=0.1)))
-    parent = AgentEvent()
-    traj.events.append(TrajectoryEvent(output=parent))
-    traj.events.append(
-        TrajectoryEvent(
-            output=ToolCallEvent(
-                parent_event_id=parent.id,
-                action_id=None,
-                output=_make_env_output(reward=0.9),
-                turn_id=parent.id,
-            )
-        )
-    )
+    traj.steps.append(TrajectoryStep(output=_make_env_output(reward=0.9)))
     last = traj.last_env_step()
     assert last.reward == 0.9
 

@@ -28,16 +28,20 @@ delete the dead code the original phases couldn't touch.
 | J: Connector seam (record_external_run) | ✅ shipped + tested | covered by Phase C tests |
 | K: End-to-end smokes | ✅ 3 smokes in `scripts/smoke/` | `agent_owns_loop_events.py`, `genny_parallel_recorder.py`, `xray_loads_event_trajectory.py` all SMOKE OK |
 | L: Reference experiments | ✅ TerminalBench-2 reproduced at parity (gpt-5.4-mini) | see *Reference baseline reproduction* below |
-| M: EpisodeMetadata pydantic type | 🟡 in progress | new unit tests TBD |
-| N: EpisodeView lazy loader + per-view cache | 🟡 in progress | new unit tests TBD |
-| O: Write metadata-at-start + finalize_episode(meta) | 🟡 in progress | crash-load smoke |
-| P: Storage migration (load_episode, list_episodes, V1 upgrade) | 🟡 in progress | V1 + V2 + crashed-V2 load tests |
-| Q: XRay full event-card rewrite (drop legacy shim) | 🟡 in progress | smoke + manual `make xray` |
-| R: Investigator migration to EpisodeView | 🟡 in progress | investigator integration tests |
-| S: Test helper `make_fake_episode` + migrate hand-built tests | 🟡 in progress | full pytest green |
-| T: Delete Trajectory + dead helpers + dual-path branches | 🟡 in progress | grep -r "class Trajectory" → 0 |
+| M: EpisodeMetadata pydantic type | ✅ shipped | `tests/test_episode_view.py::TestEpisodeMetadata` |
+| N: EpisodeView lazy loader + per-view cache | ✅ shipped | `tests/test_episode_view.py` (12/12, V2 + V2-steps + crashed-mid-run) |
+| O: Write metadata-at-start + finalize_episode(meta) | ✅ shipped | episode.py rewrites |
+| P: Storage migration (load_episode, list_episodes, V1 upgrade) | ✅ shipped | covered by test_episode_view + test_storage |
+| P2: Episode + MonitoredTool + TurnRecorder + EpisodeRecord migration | ✅ shipped | 1028 unit tests pass |
+| Q (scoped): load_trajectory wraps load_episode (XRay/utils/inspect_results unchanged) | 🟡 in progress | full pytest |
+| Q-full: XRay event-card rewrite (drop legacy shim) | ⏭ deferred to follow-up PR `agent-owns-loop-xray` | — |
+| R: Investigator migration to EpisodeView | ⏭ deferred to follow-up PR | — |
+| S: make_fake_episode test helper | ⏭ deferred to follow-up PR (needed when test_xray_utils migrates) | — |
+| T (scoped): slim Trajectory; drop streaming/events/dead helpers + save_trajectory + save_step | 🟡 in progress | grep audit |
 
-**Aggregate test count after expansion: TBD (currently 1003 pass; target 1000+ post-migration).**
+**Aggregate test count: 1028 unit tests pass through Phase P. Target after
+Phase Q+T cleanup: same count (Trajectory consumers keep working through
+the thin load_trajectory shim).**
 
 ### Design adjustments made during implementation
 

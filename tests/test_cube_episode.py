@@ -79,26 +79,25 @@ class TestCubeEpisode:
 
         with warnings.catch_warnings():
             warnings.simplefilter("error", DeprecationWarning)
-            trajectory = episode.run()
+            view = episode.run()
 
-        assert trajectory.metadata["task_id"] == mock_cube_task_config.task_id
-        loaded = episode.storage.load_trajectory(trajectory.id)
-        kinds = [type(e.output).__name__ for e in loaded.events]
+        assert view.metadata["task_id"] == mock_cube_task_config.task_id
+        kinds = [type(e.output).__name__ for e in view]
         assert "AgentEvent" in kinds
         assert "ToolCallEvent" in kinds
         assert "EvaluationEvent" in kinds
 
         # The first agent event carries the final_step action.
-        agent_event = next(e.output for e in loaded.events if isinstance(e.output, AgentEvent))
+        agent_event = next(e.output for e in view if isinstance(e.output, AgentEvent))
         assert agent_event.actions[0].name == "final_step"
 
         # The terminal EvaluationEvent reports the final reward.
-        eval_event = next(e.output for e in loaded.events if isinstance(e.output, EvaluationEvent))
+        eval_event = next(e.output for e in view if isinstance(e.output, EvaluationEvent))
         assert eval_event.reward == 1.0
 
         # reward_info carries the terminal eval payload.
-        assert trajectory.reward_info["reward"] == 1.0
-        assert trajectory.reward_info["done"] is True
+        assert view.reward_info["reward"] == 1.0
+        assert view.reward_info["done"] is True
 
     def test_run_streams_events_to_disk(self, tmp_dir, mock_agent_config, mock_cube_task_config):
         """RFC agent-owns-loop scope expansion: events stream to disk;
