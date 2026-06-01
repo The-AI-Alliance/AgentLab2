@@ -11,6 +11,7 @@ from cube_harness.utils import parse_actions
 
 logger = logging.getLogger(__name__)
 
+
 def tir_parse_actions_tolerant(llm_output) -> list[Action]:
     """Mirror native TIR tolerance for malformed tool-call arguments.
 
@@ -37,6 +38,7 @@ def tir_parse_actions_tolerant(llm_output) -> list[Action]:
             actions.append(Action(id=getattr(tc, "id", None), name=name, arguments=args))
         return actions
 
+
 class TirAgentConfig(AgentConfig):
     """TIR-style tool-calling agent.
 
@@ -55,7 +57,10 @@ class TirAgentConfig(AgentConfig):
     max_actions: int = 3
     min_generation_tokens: int = 256  # minimum tokens required for generation after accounting for prompt length;
 
-    def make(self, action_set: list[ActionSchema]) -> "TirAgent":
+    def make(self, action_set: list[ActionSchema], **kwargs: object) -> "TirAgent":
+        # meta-rl's Episode passes task_id (and possibly other kwargs) to make(); TirAgent
+        # doesn't use them, but must accept them to match the AgentConfig.make() convention.
+        _ = kwargs
         return TirAgent(config=self, tools=action_set)
 
 
@@ -95,12 +100,14 @@ class TirAgent(Agent):
         messages = self._build_prompt_messages()
         prompt = Prompt(messages=messages, tools=self.tools)
         prompt_tokens = self.token_counter(messages=messages, tools=self.tools)
-        
+
         remaining = self.max_model_len - prompt_tokens
         if remaining < self.config.min_generation_tokens:
             logger.warning(
                 "Prompt length %d leaves only %d tokens for generation (max_model_len=%d), stopping loop",
-                prompt_tokens, remaining, self.max_model_len,
+                prompt_tokens,
+                remaining,
+                self.max_model_len,
             )
             return AgentOutput(actions=[])
 
@@ -109,7 +116,10 @@ class TirAgent(Agent):
         if max_tokens_this_turn < self.max_completion_tokens:
             logger.warning(
                 "capping max_tokens from %d to %d (prompt_len=%d, max_model_len=%d)",
-                self.max_completion_tokens, max_tokens_this_turn, prompt_tokens, self.max_model_len,
+                self.max_completion_tokens,
+                max_tokens_this_turn,
+                prompt_tokens,
+                self.max_model_len,
             )
             self.llm.config.max_completion_tokens = max_tokens_this_turn
 
@@ -133,7 +143,10 @@ class TirAgent(Agent):
         for i in range(len(actions)):
             if actions[i].name not in self.tool_names:
                 logger.warning(f"LLM called unknown tool '{actions[i].name}'")
-                actions[i] = Action(id=actions[i].id, name="_unknown_tool", 
-                                arguments={"name": actions[i].name, "arguments": actions[i].arguments})
+                actions[i] = Action(
+                    id=actions[i].id,
+                    name="_unknown_tool",
+                    arguments={"name": actions[i].name, "arguments": actions[i].arguments},
+                )
 
         return AgentOutput(actions=actions, llm_calls=[llm_call])
