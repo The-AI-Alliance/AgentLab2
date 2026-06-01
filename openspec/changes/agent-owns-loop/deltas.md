@@ -36,12 +36,12 @@ See companion: `cube-standard/openspec/changes/agent-owns-loop/deltas.md`.
 
 ## MODIFIED — `openspec/specs/core/spec.md`
 
-### Trajectory class removed; replaced by EpisodeMetadata + EpisodeView
+### Trajectory class removed; replaced by TrajectoryMetadata + TrajectoryView
 
 `Trajectory` (the Pydantic class) is **deleted** from `cube_harness.core`.
-Two new abstractions replace it: `EpisodeMetadata` (pure metadata,
+Two new abstractions replace it: `TrajectoryMetadata` (pure metadata,
 persisted as `episode.metadata.json`) lives in `cube_harness.core`;
-`EpisodeView` (lazy reader over a storage handle) lives in
+`TrajectoryView` (lazy reader over a storage handle) lives in
 `cube_harness.storage`.
 
 `TrajectoryStep` (the legacy `EnvironmentOutput | AgentOutput` union) is
@@ -74,7 +74,7 @@ class TrajectoryEvent(TypedBaseModel):
     start_time: float
     end_time: float
 
-class EpisodeMetadata(TypedBaseModel):
+class TrajectoryMetadata(TypedBaseModel):
     """Persisted at episode.metadata.json. Written at episode start with
     end_time=None and stub fields; updated at episode end with the
     final summary."""
@@ -86,10 +86,10 @@ class EpisodeMetadata(TypedBaseModel):
     reward_info: dict                  # mirrors the final EvaluationEvent
 ```
 
-### `EpisodeView` (in `cube_harness.storage`)
+### `TrajectoryView` (in `cube_harness.storage`)
 
 ```python
-class EpisodeView:
+class TrajectoryView:
     """Lazy reader for an episode directory.
 
     Holds .metadata eagerly (one JSON read). Events live on disk; the
@@ -98,7 +98,7 @@ class EpisodeView:
     """
     storage: Storage
     id: str
-    metadata: EpisodeMetadata          # eager
+    metadata: TrajectoryMetadata          # eager
     # private: _cache: dict[int, TrajectoryEvent], _index: list[Path]
 
     def __len__(self) -> int           # from events/ directory listing
@@ -132,7 +132,7 @@ class EpisodeView:
 4. `AgentEvent.id` is unique within a trajectory.
 5. `turn_id` is unique per `AgentEvent`; all `ToolCallEvent`s spawned from one
    `AgentEvent` share the same `turn_id`.
-6. `EpisodeView` never accumulates the full event list in memory; the
+6. `TrajectoryView` never accumulates the full event list in memory; the
    per-view cache is bounded by accessed events and is freed when the
    view is GC'd.
 
@@ -483,7 +483,7 @@ directories remain loadable via the migration shim (see storage delta).
 
 ```
 episodes/<trajectory_id>/
-├── episode.metadata.json   # EpisodeMetadata: id, metadata, start_time,
+├── episode.metadata.json   # TrajectoryMetadata: id, metadata, start_time,
 │                           # end_time (None mid-run), summary_stats,
 │                           # reward_info. Written at episode START, updated at END.
 ├── episode_config.json     # TaskConfig + AgentConfig + EpisodeConfig (input)
@@ -507,14 +507,14 @@ all new writes use the V2 layout above.
 ```python
 class Storage(Protocol):
     # New write API:
-    def save_metadata(self, meta: EpisodeMetadata) -> None
+    def save_metadata(self, meta: TrajectoryMetadata) -> None
     def save_event(self, event: TrajectoryEvent, trajectory_id: str, event_num: int) -> None
-    def finalize_episode(self, meta: EpisodeMetadata) -> None
+    def finalize_episode(self, meta: TrajectoryMetadata) -> None
 
     # New read API:
-    def load_episode(self, trajectory_id: str) -> EpisodeView
+    def load_episode(self, trajectory_id: str) -> TrajectoryView
     def load_event(self, trajectory_id: str, event_num: int) -> TrajectoryEvent
-    def list_episodes(self) -> list[EpisodeMetadata]    # cheap study scan
+    def list_episodes(self) -> list[TrajectoryMetadata]    # cheap study scan
 
     # ... existing methods (save_config, archive_episode, etc.) ...
 ```
@@ -531,10 +531,10 @@ by XRay (the file exists; events that did land are renderable; status.json
 disambiguates "in-flight" from "failed").
 
 `finalize_episode` is called in `Episode.run`'s `finally` block with the
-final `EpisodeMetadata` (`end_time`, `summary_stats`, `reward_info` filled).
+final `TrajectoryMetadata` (`end_time`, `summary_stats`, `reward_info` filled).
 It overwrites the same `episode.metadata.json`.
 
-### Lazy load via `EpisodeView`
+### Lazy load via `TrajectoryView`
 
 `load_episode(id)` is **cheap**: one JSON read for the metadata,
 directory listing of `events/`, no event-payload I/O. The returned view
@@ -559,7 +559,7 @@ Used for study aggregation, EpisodeRecord generation, Atlas indexing.
 - `episode.metadata.json` is written **at episode start**; the same file
   is overwritten **at episode end** with the final summary. No other
   callers write to it.
-- `EpisodeView` never materializes the full event list. Its internal
+- `TrajectoryView` never materializes the full event list. Its internal
   cache is per-view (GC'd with the view).
 
 ### Summary
@@ -573,9 +573,9 @@ field names remain as JSON aliases.
 
 ## MODIFIED — `openspec/specs/analyze/spec.md`
 
-### Data layer: lazy EpisodeView
+### Data layer: lazy TrajectoryView
 
-XRay's data layer is rebuilt around `EpisodeView`. When the user opens an
+XRay's data layer is rebuilt around `TrajectoryView`. When the user opens an
 episode, the viewer calls `storage.load_episode(id)` (cheap: metadata
 + directory listing) and iterates once to build a lightweight
 `event_index -> kind` table. Card rendering then accesses
@@ -622,14 +622,14 @@ group (parent `AgentEvent` above, siblings below).
 
 If `view.is_complete == False` (no `end_time` in metadata), the timeline
 renders what's on disk and shows a banner reading the `status.json`
-failure summary. No special-case loader path; the same EpisodeView API
+failure summary. No special-case loader path; the same TrajectoryView API
 is used.
 
 ### Invariants
 
 - Read-only (unchanged).
 - Loads both `events/` (V2 fresh + V2 crashed-mid-run) and `steps/`
-  (legacy V1) layouts via `EpisodeView`'s open-time detection.
+  (legacy V1) layouts via `TrajectoryView`'s open-time detection.
 - Stale background-loader generations still self-abort (unchanged).
 
 ### Removed
@@ -647,7 +647,7 @@ is used.
 - Trajectories with very wide parallel tool calls (e.g. 20+ siblings in one
   turn) will overflow the horizontal lane layout. Out of scope for v1;
   acceptable to fall back to a vertical list above some threshold.
-- `EpisodeView`'s cache is bounded by the events the viewer accessed. If
+- `TrajectoryView`'s cache is bounded by the events the viewer accessed. If
   the user scrubs through every event on a SWE-bench-scale episode, the
   whole trajectory ends up in RAM for the lifetime of the view. Acceptable
   — switching episodes constructs a new view and GC's the old cache.
@@ -664,7 +664,7 @@ intended actions + LLM calls + thoughts the legacy `AgentOutput` step
 did. The diff is type-level, not behavior-level.
 
 `InvestigatorContext.trajectory: Trajectory` → `InvestigatorContext.view:
-EpisodeView`. Per-step blame uses `view[i]`; cross-step pattern detection
+TrajectoryView`. Per-step blame uses `view[i]`; cross-step pattern detection
 uses `for event in view:`. No new code paths.
 
 ## REMOVED
@@ -672,16 +672,16 @@ uses `for event in view:`. No new code paths.
 The following are **deleted outright** (no deprecation alias):
 
 - `class Trajectory` (from `cube_harness.core`) — replaced by
-  `EpisodeMetadata` + `EpisodeView`.
+  `TrajectoryMetadata` + `TrajectoryView`.
 - `class TrajectoryStep` (the `EnvironmentOutput | AgentOutput` union) —
   removed from the public API. The legacy V1 reader uses it internally
   but it is not exported.
 - `Trajectory.streaming` flag — no longer needed; events are always
   streamed to disk by `MonitoredTool` / `TurnRecorder` and never
   accumulated.
-- `Trajectory.steps` field/alias — replaced by `EpisodeView` iteration.
+- `Trajectory.steps` field/alias — replaced by `TrajectoryView` iteration.
 - `Trajectory.last_env_step`, `last_env_output`, `n_agent_steps`,
-  `n_env_steps`, `events_of_turn` (methods) — moved to `EpisodeView`
+  `n_env_steps`, `events_of_turn` (methods) — moved to `TrajectoryView`
   where they belong. Their old form on `Trajectory` is gone.
 - `_events_to_legacy_steps` (storage materialization shim) — no
   consumer remains after the XRay rewrite.

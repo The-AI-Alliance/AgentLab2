@@ -101,7 +101,7 @@ class TestCubeEpisode:
 
     def test_run_streams_events_to_disk(self, tmp_dir, mock_agent_config, mock_cube_task_config):
         """RFC agent-owns-loop scope expansion: events stream to disk;
-        the returned `EpisodeView` is a lazy reader (no in-memory event
+        the returned `TrajectoryView` is a lazy reader (no in-memory event
         list). Keeps driver/worker RAM flat on image-heavy benchmarks."""
         episode = Episode(
             id=0,

@@ -116,22 +116,22 @@ class Trajectory(TypedBaseModel):
     """Legacy trajectory shape — what `Storage.load_trajectory(id)` returns.
 
     Consumed by XRay, the investigator, and `inspect_results` until they
-    migrate to `EpisodeView` directly (planned follow-up PR
+    migrate to `TrajectoryView` directly (planned follow-up PR
     `agent-owns-loop-xray`). On the production write-path NOTHING constructs
-    a `Trajectory` anymore — `Episode.run` builds an `EpisodeMetadata`,
+    a `Trajectory` anymore — `Episode.run` builds an `TrajectoryMetadata`,
     streams events through `storage.save_event`, and returns an
-    `EpisodeView`. The Trajectory you see came from
+    `TrajectoryView`. The Trajectory you see came from
     `_events_to_legacy_steps(view)` materializing the legacy step list at
     load time.
 
     Drops vs. the agent-owns-loop draft form:
-      - `events` field removed (events live on the EpisodeView; this class
+      - `events` field removed (events live on the TrajectoryView; this class
         is steps-only for legacy consumers).
       - `streaming` flag removed (events ALWAYS stream now; the flag was
         a transition artefact).
       - `last_env_step` / `last_env_output` / `events_of_turn` /
         `n_agent_events` / `n_tool_calls` / `n_evaluations` methods removed
-        (live on EpisodeView; this class only carries what XRay needs).
+        (live on TrajectoryView; this class only carries what XRay needs).
       - `n_agent_steps` / `n_env_steps` properties stay because XRay's
         legacy step-walking UI counts them.
     """
@@ -149,7 +149,7 @@ class Trajectory(TypedBaseModel):
 
         Raises `ValueError` if the trajectory has no env step on disk.
         Used by the legacy XRay loader; new code should use
-        `EpisodeView.last_env_output()` (returns `None` instead of raising).
+        `TrajectoryView.last_env_output()` (returns `None` instead of raising).
         """
         for step in reversed(self.steps):
             if isinstance(step.output, EnvironmentOutput):
@@ -174,15 +174,15 @@ class Trajectory(TypedBaseModel):
         return sum(1 for step in self.steps if isinstance(step.output, EnvironmentOutput))
 
 
-class EpisodeMetadata(BaseModel):
+class TrajectoryMetadata(BaseModel):
     """The scalar metadata of an episode — persisted as `episode.metadata.json`.
 
     Replaces the metadata half of the legacy `Trajectory` class (RFC
     `agent-owns-loop` scope expansion). The event list itself never lives
     here — events stream to `events/*.msgpack.zst` and are read back lazily
-    via `EpisodeView` (cube_harness.storage).
+    via `TrajectoryView` (cube_harness.storage).
 
-    Plain `BaseModel` (not `TypedBaseModel`) — EpisodeMetadata is never
+    Plain `BaseModel` (not `TypedBaseModel`) — TrajectoryMetadata is never
     polymorphic, and the `_type` discriminator that `TypedBaseModel`
     injects would shadow the legacy on-disk format that `load_trajectory`
     consumers still read.
@@ -191,7 +191,7 @@ class EpisodeMetadata(BaseModel):
 
     1. At episode START with `end_time=None` and stub summary fields.
        Makes crashed-mid-run episodes loadable: the file exists on disk
-       and `EpisodeView.is_complete` returns False until step 2 happens.
+       and `TrajectoryView.is_complete` returns False until step 2 happens.
     2. At episode END with the final `end_time`, `summary_stats`, and
        `reward_info`. Overwrites the same file.
     """

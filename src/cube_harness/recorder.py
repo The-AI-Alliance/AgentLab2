@@ -168,7 +168,7 @@ class TurnRecorder:
 
     Events stream to disk via `storage.save_event(event, trajectory_id, n)`
     where `n` comes from the shared `EventCounter`. There is no in-memory
-    accumulation — `Episode.run` returns an `EpisodeView` and consumers
+    accumulation — `Episode.run` returns an `TrajectoryView` and consumers
     read from storage.
     """
 
@@ -196,7 +196,7 @@ class TurnRecorder:
         self.event_counter = event_counter if event_counter is not None else EventCounter()
         # Mutable side-channel dict passed from Episode. record_external_run
         # writes connector-specific data here; Episode merges it into the
-        # final EpisodeMetadata.metadata at finalize_episode time.
+        # final TrajectoryMetadata.metadata at finalize_episode time.
         self.metadata_updates = metadata_updates if metadata_updates is not None else {}
         self._current_turn_id: str | None = None
         self._n_turns_emitted = 0
@@ -249,7 +249,7 @@ class TurnRecorder:
         """
         event = AgentEvent(response_text=final_text)
         # Stash side-channel data on the metadata_updates dict — Episode
-        # merges it into the final EpisodeMetadata.metadata at
+        # merges it into the final TrajectoryMetadata.metadata at
         # finalize_episode time. Connectors can re-read it post-run
         # (XRay, scoring scripts, ADP export, ...).
         if usage is not None:
@@ -344,7 +344,7 @@ class TurnRecorder:
 
     def _append_event(self, te: TrajectoryEvent) -> None:
         """Stream one event to storage + summary. Never keeps a copy in
-        memory — the EpisodeView is the read interface, this writes."""
+        memory — the TrajectoryView is the read interface, this writes."""
         if self.storage is not None:
             save_event = getattr(self.storage, "save_event", None)
             if save_event is not None:

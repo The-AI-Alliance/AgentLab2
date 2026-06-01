@@ -12,14 +12,14 @@ from opentelemetry.trace import StatusCode
 from termcolor import colored
 
 from cube_harness.agent import AgentConfig
-from cube_harness.core import AgentOutput, EpisodeMetadata
+from cube_harness.core import AgentOutput, TrajectoryMetadata
 from cube_harness.episode_logs import trajectory_log_id
 from cube_harness.episode_status import TERMINAL_STATUSES, EpisodeStatus, next_retry_count
 from cube_harness.eval_log import EpisodeRecord
 from cube_harness.llm import is_permanent_llm_error
 from cube_harness.metrics.tracer import get_tracer
 from cube_harness.recorder import EventCounter, TurnRecorder
-from cube_harness.storage import EpisodeView, FileStorage, Storage
+from cube_harness.storage import FileStorage, Storage, TrajectoryView
 from cube_harness.summary import SummaryProcessor
 from cube_harness.tool import Budget, BudgetExceeded, install_monitoring
 
@@ -97,10 +97,10 @@ class Episode:
             runtime_context=runtime_context,
         )
 
-    def run(self) -> EpisodeView:
+    def run(self) -> TrajectoryView:
         """Sync entry point: drives the async loop via asyncio.run.
 
-        Returns a lazy `EpisodeView` onto the just-finalized episode dir.
+        Returns a lazy `TrajectoryView` onto the just-finalized episode dir.
         The view's metadata is loaded eagerly; events decode from disk
         on demand. Per the RFC `agent-owns-loop` scope expansion no
         full trajectory is held in memory at any point.
@@ -134,7 +134,7 @@ class Episode:
         self.storage.write_episode_status(trajectory_id, ep_status)
         return ep_status
 
-    async def _arun(self) -> EpisodeView:
+    async def _arun(self) -> TrajectoryView:
         """Agent-owns-loop body. Sync `run()` wraps this with asyncio.run.
 
         Flow:
@@ -164,7 +164,7 @@ class Episode:
 
         # Heartbeat 1: covers stuck task creation / reset.
         ep_status = self._open_status(trajectory_id)
-        meta: EpisodeMetadata | None = None
+        meta: TrajectoryMetadata | None = None
         summary_proc: SummaryProcessor | None = None
         max_steps_reached = False
 
@@ -182,12 +182,12 @@ class Episode:
                 initial = EnvironmentOutput(obs=obs, info=info)
 
                 agent_name = self.config.agent_config.agent_name
-                # WRITE-AT-START: persist EpisodeMetadata with stub
+                # WRITE-AT-START: persist TrajectoryMetadata with stub
                 # summary fields and `end_time=None`. Makes crashed-
                 # mid-run episodes loadable: the file exists on disk
-                # and `EpisodeView.is_complete` returns False until
+                # and `TrajectoryView.is_complete` returns False until
                 # finalize_episode writes the final fields below.
-                meta = EpisodeMetadata(
+                meta = TrajectoryMetadata(
                     id=trajectory_id,
                     metadata={
                         "task_id": task_id,
@@ -260,7 +260,7 @@ class Episode:
                 reward, info = task.evaluate()
                 recorder.record_evaluation(reward, info)
 
-                # Finalize: write the EpisodeMetadata at episode end
+                # Finalize: write the TrajectoryMetadata at episode end
                 # with summary_stats + reward_info + end_time, then
                 # update the experiment-level summary and emit the
                 # eval record.

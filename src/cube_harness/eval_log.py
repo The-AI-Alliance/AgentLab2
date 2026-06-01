@@ -43,7 +43,7 @@ from pydantic import Field
 from cube_harness.storage import EPISODES_DIR as _EPISODES_DIR
 
 if TYPE_CHECKING:
-    from cube_harness.storage import EpisodeView
+    from cube_harness.storage import TrajectoryView
 
 logger = logging.getLogger(__name__)
 
@@ -547,12 +547,12 @@ class EpisodeRecord(TypedBaseModel):
     @classmethod
     def from_view(
         cls,
-        view: "EpisodeView",
+        view: "TrajectoryView",
         evaluation_id: str,
         task_metadata: Any | None = None,
         task_config: Any | None = None,
     ) -> "EpisodeRecord":
-        """Assemble an EpisodeRecord from a finalized `EpisodeView`.
+        """Assemble an EpisodeRecord from a finalized `TrajectoryView`.
 
         Only reads `view.metadata` — no event payloads are decoded, so
         building an EpisodeRecord stays O(1) per episode at

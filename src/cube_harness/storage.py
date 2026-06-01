@@ -16,11 +16,11 @@ from pydantic import BaseModel
 from cube_harness.core import (
     AgentEvent,
     AgentOutput,
-    EpisodeMetadata,
     EvaluationEvent,
     ToolCallEvent,
     Trajectory,
     TrajectoryEvent,
+    TrajectoryMetadata,
     TrajectoryStep,
 )
 from cube_harness.episode_logs import get_log_path as get_episode_log_path
@@ -45,21 +45,21 @@ class LLMCallRef(BaseModel):
 
 
 class Storage(Protocol):
-    def save_metadata(self, meta: EpisodeMetadata, allow_overwrite: bool = False) -> None: ...
+    def save_metadata(self, meta: TrajectoryMetadata, allow_overwrite: bool = False) -> None: ...
 
-    def finalize_episode(self, meta: EpisodeMetadata) -> None: ...
+    def finalize_episode(self, meta: TrajectoryMetadata) -> None: ...
 
     def save_event(self, event: TrajectoryEvent, trajectory_id: str, event_num: int) -> None:
         """Persist one TrajectoryEvent (agent-owns-loop event stream)."""
         ...
 
-    def load_episode(self, trajectory_id: str) -> "EpisodeView": ...
+    def load_episode(self, trajectory_id: str) -> "TrajectoryView": ...
 
-    def list_episodes(self) -> list[EpisodeMetadata]: ...
+    def list_episodes(self) -> list[TrajectoryMetadata]: ...
 
     def save_episode_config(self, episode_config: "EpisodeConfig") -> None: ...
 
-    def update_experiment_summary(self, meta: EpisodeMetadata) -> None: ...
+    def update_experiment_summary(self, meta: TrajectoryMetadata) -> None: ...
 
     def write_episode_status(self, trajectory_id: str, status: EpisodeStatus) -> None: ...
 
@@ -196,12 +196,12 @@ def _resolve_llm_call_file(output_dir: Path, step_id: str, llm_call_id: str) -> 
     return output_dir / "llm_calls" / f"{step_id}_{llm_call_id}.json"
 
 
-# --- EpisodeView lazy loader (RFC: agent-owns-loop scope expansion) -------
+# --- TrajectoryView lazy loader (RFC: agent-owns-loop scope expansion) -------
 
 
 @dataclass
 class _EventIndexEntry:
-    """One slot in `EpisodeView._index`.
+    """One slot in `TrajectoryView._index`.
 
     `kind` is the canonical event kind (`agent` / `tool_call` / `eval`)
     regardless of on-disk layout. For V1 / V2-steps legacy layouts the
@@ -216,7 +216,7 @@ class _EventIndexEntry:
     legacy_parent_num: int | None = None  # only set for legacy obs entries
 
 
-class EpisodeView:
+class TrajectoryView:
     """Lazy reader for one episode directory.
 
     Replaces in-memory `Trajectory` for every consumer that walks events.
@@ -238,7 +238,7 @@ class EpisodeView:
         self,
         storage: "FileStorage",
         trajectory_id: str,
-        meta: EpisodeMetadata,
+        meta: TrajectoryMetadata,
         index: list[_EventIndexEntry],
     ) -> None:
         self.storage = storage
@@ -274,8 +274,8 @@ class EpisodeView:
         return self._meta.end_time
 
     @property
-    def episode_metadata(self) -> EpisodeMetadata:
-        """The full `EpisodeMetadata` record. Most callers want the
+    def episode_metadata(self) -> TrajectoryMetadata:
+        """The full `TrajectoryMetadata` record. Most callers want the
         individual shortcuts above; this is for callers (eval_log,
         atlas-style aggregation) that pass the metadata around whole."""
         return self._meta
@@ -440,8 +440,8 @@ def _build_legacy_steps_index(steps_dir: Path) -> list[_EventIndexEntry]:
     return entries
 
 
-def _meta_to_trajectory(view: "EpisodeView") -> Trajectory:
-    """Build a legacy-shape `Trajectory` from an EpisodeView's metadata
+def _meta_to_trajectory(view: "TrajectoryView") -> Trajectory:
+    """Build a legacy-shape `Trajectory` from an TrajectoryView's metadata
     (`steps=[]`). Used by legacy metadata-only loaders that don't need
     event payloads — XRay's experiment table, retry detection, etc."""
     return Trajectory(
@@ -455,9 +455,9 @@ def _meta_to_trajectory(view: "EpisodeView") -> Trajectory:
     )
 
 
-def _episode_meta_to_trajectory(meta: EpisodeMetadata) -> Trajectory:
+def _episode_meta_to_trajectory(meta: TrajectoryMetadata) -> Trajectory:
     """Like `_meta_to_trajectory` but works directly from an
-    EpisodeMetadata record (no view construction). Used by
+    TrajectoryMetadata record (no view construction). Used by
     `load_all_trajectory_metadata` for the cheap study-scan path."""
     return Trajectory(
         id=meta.id,
@@ -470,19 +470,19 @@ def _episode_meta_to_trajectory(meta: EpisodeMetadata) -> Trajectory:
     )
 
 
-def _episode_metadata_from_dict(data: dict, fallback_id: str) -> EpisodeMetadata:
-    """Coerce a raw dict (from disk JSON) into an `EpisodeMetadata`.
+def _episode_metadata_from_dict(data: dict, fallback_id: str) -> TrajectoryMetadata:
+    """Coerce a raw dict (from disk JSON) into an `TrajectoryMetadata`.
 
     Tolerant of legacy `trajectory.json` files that may carry extra
     fields (`steps`, `events`, `streaming`, …): only fields declared on
-    `EpisodeMetadata` are read. Missing `id` falls back to `fallback_id`
+    `TrajectoryMetadata` are read. Missing `id` falls back to `fallback_id`
     (used when loading a crashed-mid-run dir whose metadata wasn't yet
     written).
     """
-    allowed = set(EpisodeMetadata.model_fields)
+    allowed = set(TrajectoryMetadata.model_fields)
     filtered = {k: v for k, v in data.items() if k in allowed}
     filtered.setdefault("id", fallback_id)
-    return EpisodeMetadata.model_validate(filtered)
+    return TrajectoryMetadata.model_validate(filtered)
 
 
 class FileStorage:
@@ -536,15 +536,15 @@ class FileStorage:
         """Legacy entry — persists a `Trajectory` as the V2 on-disk layout.
 
         Internally splits into:
-          - `save_metadata(EpisodeMetadata(...))` — `episode.metadata.json`.
+          - `save_metadata(TrajectoryMetadata(...))` — `episode.metadata.json`.
           - one `_write_step` per `trajectory.steps[i]` — `steps/NNN_*.msgpack.zst`.
 
-        New code should call `save_metadata(EpisodeMetadata(...))` directly
+        New code should call `save_metadata(TrajectoryMetadata(...))` directly
         and stream events through `save_event(event, id, n)`. This wrapper
         exists for legacy test fixtures and the few in-tree callers that
         still build a `Trajectory` by hand. Will be removed in the
         follow-up XRay-rewrite PR alongside the legacy step API."""
-        meta = EpisodeMetadata(
+        meta = TrajectoryMetadata(
             id=trajectory.id,
             metadata=dict(trajectory.metadata),
             start_time=trajectory.start_time,
@@ -579,9 +579,9 @@ class FileStorage:
         if ep_dir.exists():
             self._archive_episode(ep_dir)
 
-    # --- EpisodeMetadata write-at-start API (RFC: agent-owns-loop scope expansion) ---
+    # --- TrajectoryMetadata write-at-start API (RFC: agent-owns-loop scope expansion) ---
 
-    def save_metadata(self, meta: EpisodeMetadata, allow_overwrite: bool = False) -> None:
+    def save_metadata(self, meta: TrajectoryMetadata, allow_overwrite: bool = False) -> None:
         """Write `episode.metadata.json` for this episode.
 
         Called twice per episode: at START with `end_time=None` and stub
@@ -615,7 +615,7 @@ class FileStorage:
         metadata_path.write_text(json.dumps(meta.model_dump(mode="json"), indent=2))
         logger.info(f"Saved episode metadata to {ep_dir}")
 
-    def finalize_episode(self, meta: EpisodeMetadata) -> None:
+    def finalize_episode(self, meta: TrajectoryMetadata) -> None:
         """Write the final episode metadata at episode end.
 
         Idempotent re-save: the same `episode.metadata.json` file is
@@ -671,9 +671,9 @@ class FileStorage:
                 return TrajectoryEvent.model_validate(_deserialize_event(candidate.read_bytes()))
         raise FileNotFoundError(f"No event at {events_dir}/{event_num:03d}_*")
 
-    # --- EpisodeView lazy load (RFC: agent-owns-loop scope expansion) ---
+    # --- TrajectoryView lazy load (RFC: agent-owns-loop scope expansion) ---
 
-    def load_episode(self, trajectory_id: str) -> EpisodeView:
+    def load_episode(self, trajectory_id: str) -> TrajectoryView:
         """Cheap lazy view onto an episode directory.
 
         Reads only `episode.metadata.json` (or its V1 equivalent) and
@@ -710,8 +710,8 @@ class FileStorage:
         ep_dir: Path,
         trajectory_id: str,
         stub_metadata: bool = False,
-    ) -> EpisodeView:
-        """Build EpisodeView for a V2-layout episode (events/ or steps/)."""
+    ) -> TrajectoryView:
+        """Build TrajectoryView for a V2-layout episode (events/ or steps/)."""
         metadata_path = ep_dir / EPISODE_METADATA
         if stub_metadata:
             data: dict = {"id": trajectory_id}
@@ -723,10 +723,10 @@ class FileStorage:
         self._maybe_inject_episode_status(ep_dir, data)
         meta = _episode_metadata_from_dict(data, trajectory_id)
         index = self._build_v2_index(ep_dir)
-        return EpisodeView(self, trajectory_id, meta, index)
+        return TrajectoryView(self, trajectory_id, meta, index)
 
     def _build_v2_index(self, ep_dir: Path) -> list[_EventIndexEntry]:
-        """Build the EpisodeView index for a V2 layout.
+        """Build the TrajectoryView index for a V2 layout.
 
         Prefer events/ when present; fall back to steps/ (legacy-upgrade)
         when only steps/ exists. Returns [] if neither dir is on disk —
@@ -740,8 +740,8 @@ class FileStorage:
             return _build_legacy_steps_index(steps_dir)
         return []
 
-    def _v1_load_episode_view(self, trajectory_id: str) -> EpisodeView:
-        """Build EpisodeView for a V1 jsonl-layout episode.
+    def _v1_load_episode_view(self, trajectory_id: str) -> TrajectoryView:
+        """Build TrajectoryView for a V1 jsonl-layout episode.
 
         V1 has no per-step files to lazy-decode, so this eager-loads
         the jsonl into a synthetic index that points at a series of
@@ -760,7 +760,7 @@ class FileStorage:
         # V1 jsonl: parse it into in-memory steps, then map to a synthetic
         # index whose entries point at TrajectoryStep payloads via a side
         # dict on the storage (one-shot for this view).
-        view = EpisodeView(self, trajectory_id, meta, [])
+        view = TrajectoryView(self, trajectory_id, meta, [])
         if steps_path.exists():
             v1_steps: list[TrajectoryStep] = []
             with open(steps_path) as f:
@@ -788,17 +788,17 @@ class FileStorage:
                     continue
                 view._index.append(entry)
                 # Pre-populate the cache since V1 has no per-event files.
-                view._cache[len(view._index) - 1] = EpisodeView._step_to_event(step, entry)
+                view._cache[len(view._index) - 1] = TrajectoryView._step_to_event(step, entry)
         return view
 
-    def list_episodes(self) -> list[EpisodeMetadata]:
+    def list_episodes(self) -> list[TrajectoryMetadata]:
         """Cheap study-scan: one JSON read per episode dir, no events.
 
         Used by study aggregation, EpisodeRecord generation, Atlas
         indexing — everything that needs a list of episodes but not
         their events.
         """
-        results: list[EpisodeMetadata] = []
+        results: list[TrajectoryMetadata] = []
         for ep_dir in self._episode_dirs():
             try:
                 with open(ep_dir / EPISODE_METADATA) as f:
@@ -826,11 +826,11 @@ class FileStorage:
         """Legacy entry point — returns a `Trajectory` for XRay /
         investigator / inspect_results consumers.
 
-        Internally builds an `EpisodeView` (cheap) and materializes the
+        Internally builds an `TrajectoryView` (cheap) and materializes the
         legacy `steps` list from its events via `_events_to_legacy_steps`.
-        New code should call `load_episode(id) -> EpisodeView` directly.
+        New code should call `load_episode(id) -> TrajectoryView` directly.
 
-        Kept until those consumers migrate to `EpisodeView` (planned
+        Kept until those consumers migrate to `TrajectoryView` (planned
         follow-up PR `agent-owns-loop-xray`)."""
         view = self.load_episode(trajectory_id)
         steps = _events_to_legacy_steps(list(view))
@@ -1022,9 +1022,9 @@ class FileStorage:
 
     # --- Experiment summary ---
 
-    def update_experiment_summary(self, meta: EpisodeMetadata) -> None:
+    def update_experiment_summary(self, meta: TrajectoryMetadata) -> None:
         """Roll one episode's summary_stats into the experiment-level
-        `experiment_summary.json`. Accepts an `EpisodeMetadata` rather
+        `experiment_summary.json`. Accepts an `TrajectoryMetadata` rather
         than a Trajectory — only `meta.summary_stats` is read."""
         from cube_harness.summary import ExperimentSummary
 

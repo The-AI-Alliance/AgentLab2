@@ -1,4 +1,4 @@
-"""Phase M+N: EpisodeMetadata + EpisodeView lazy loader unit tests.
+"""Phase M+N: TrajectoryMetadata + TrajectoryView lazy loader unit tests.
 
 Validates the AgentLab-style lazy loader pattern that replaces the
 Trajectory class as the consumer-facing trajectory abstraction.
@@ -9,10 +9,10 @@ from cube.core import Action, EnvironmentOutput, Observation
 from cube_harness.core import (
     AgentEvent,
     AgentOutput,
-    EpisodeMetadata,
     EvaluationEvent,
     ToolCallEvent,
     TrajectoryEvent,
+    TrajectoryMetadata,
     TrajectoryStep,
 )
 from cube_harness.storage import FileStorage
@@ -47,16 +47,16 @@ def _eval_event() -> TrajectoryEvent:
     )
 
 
-class TestEpisodeMetadata:
+class TestTrajectoryMetadata:
     def test_stub_metadata_is_incomplete(self) -> None:
-        meta = EpisodeMetadata(id="t1", start_time=1.0)
+        meta = TrajectoryMetadata(id="t1", start_time=1.0)
         assert meta.is_complete is False
         assert meta.end_time is None
         assert meta.reward_info == {}
         assert meta.summary_stats is None
 
     def test_finalized_metadata_is_complete(self) -> None:
-        meta = EpisodeMetadata(
+        meta = TrajectoryMetadata(
             id="t1",
             start_time=1.0,
             end_time=2.0,
@@ -67,7 +67,7 @@ class TestEpisodeMetadata:
         assert meta.summary_stats == {"n_agent_events": 3}
 
     def test_json_roundtrip(self) -> None:
-        meta = EpisodeMetadata(
+        meta = TrajectoryMetadata(
             id="t1",
             metadata={"task_id": "arithmetic_0"},
             start_time=1.0,
@@ -75,14 +75,14 @@ class TestEpisodeMetadata:
             summary_stats={"k": 1},
             reward_info={"reward": 0.5},
         )
-        restored = EpisodeMetadata.model_validate_json(meta.model_dump_json())
+        restored = TrajectoryMetadata.model_validate_json(meta.model_dump_json())
         assert restored == meta
 
 
-class TestEpisodeViewWriteAtStart:
+class TestTrajectoryViewWriteAtStart:
     def test_metadata_at_start_then_finalize(self, tmp_path) -> None:
         storage = FileStorage(tmp_path)
-        meta = EpisodeMetadata(id="t1", metadata={"task_id": "arith"}, start_time=1.0)
+        meta = TrajectoryMetadata(id="t1", metadata={"task_id": "arith"}, start_time=1.0)
         storage.save_metadata(meta)
 
         view = storage.load_episode("t1")
@@ -99,10 +99,10 @@ class TestEpisodeViewWriteAtStart:
         assert view2.summary_stats == {"n": 0}
 
 
-class TestEpisodeViewIteration:
+class TestTrajectoryViewIteration:
     def test_iteration_decodes_events_lazily(self, tmp_path) -> None:
         storage = FileStorage(tmp_path)
-        meta = EpisodeMetadata(id="t1")
+        meta = TrajectoryMetadata(id="t1")
         storage.save_metadata(meta)
         events = [_agent_event(0), _tool_call_event("agent_0"), _eval_event()]
         for i, ev in enumerate(events):
@@ -119,7 +119,7 @@ class TestEpisodeViewIteration:
 
     def test_random_access_caches_decode(self, tmp_path) -> None:
         storage = FileStorage(tmp_path)
-        meta = EpisodeMetadata(id="t1")
+        meta = TrajectoryMetadata(id="t1")
         storage.save_metadata(meta)
         events = [_agent_event(0), _tool_call_event("agent_0")]
         for i, ev in enumerate(events):
@@ -133,7 +133,7 @@ class TestEpisodeViewIteration:
 
     def test_kind_counts_no_decode(self, tmp_path) -> None:
         storage = FileStorage(tmp_path)
-        meta = EpisodeMetadata(id="t1")
+        meta = TrajectoryMetadata(id="t1")
         storage.save_metadata(meta)
         events = [
             _agent_event(0),
@@ -154,7 +154,7 @@ class TestEpisodeViewIteration:
 
     def test_events_of_turn(self, tmp_path) -> None:
         storage = FileStorage(tmp_path)
-        meta = EpisodeMetadata(id="t1")
+        meta = TrajectoryMetadata(id="t1")
         storage.save_metadata(meta)
         siblings = [
             _agent_event(0),
@@ -170,7 +170,7 @@ class TestEpisodeViewIteration:
 
     def test_last_env_output(self, tmp_path) -> None:
         storage = FileStorage(tmp_path)
-        meta = EpisodeMetadata(id="t1")
+        meta = TrajectoryMetadata(id="t1")
         storage.save_metadata(meta)
         final_obs = EnvironmentOutput(obs=Observation.from_text("final"), reward=1.0)
         events = [
@@ -189,7 +189,7 @@ class TestEpisodeViewIteration:
 
     def test_last_env_output_none_when_no_tool_calls(self, tmp_path) -> None:
         storage = FileStorage(tmp_path)
-        meta = EpisodeMetadata(id="t1")
+        meta = TrajectoryMetadata(id="t1")
         storage.save_metadata(meta)
         storage.save_event(_agent_event(0), "t1", 0)
 
@@ -197,7 +197,7 @@ class TestEpisodeViewIteration:
         assert view.last_env_output() is None
 
 
-class TestEpisodeViewCrashedMidRun:
+class TestTrajectoryViewCrashedMidRun:
     def test_view_loads_without_metadata_file(self, tmp_path) -> None:
         """A crash before save_metadata wrote anything: events on disk,
         no `episode.metadata.json`. The view should still load with stub
@@ -221,12 +221,12 @@ class TestEpisodeViewCrashedMidRun:
         assert view.end_time is None
 
 
-class TestEpisodeViewLegacyStepsLayout:
+class TestTrajectoryViewLegacyStepsLayout:
     def test_v2_steps_only_layout_synthesizes_events(self, tmp_path) -> None:
         """Old V2 episodes that only have `steps/` (no `events/`) load
-        through EpisodeView with events synthesized on the fly."""
+        through TrajectoryView with events synthesized on the fly."""
         storage = FileStorage(tmp_path)
-        meta = EpisodeMetadata(id="legacy_v2")
+        meta = TrajectoryMetadata(id="legacy_v2")
         storage.save_metadata(meta)
 
         ep_dir = storage._episode_dir("legacy_v2")

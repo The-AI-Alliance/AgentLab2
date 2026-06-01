@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from cube.core import Content, EnvironmentOutput, Observation
 
-from cube_harness.core import AgentOutput, EpisodeMetadata, Trajectory, TrajectoryStep
+from cube_harness.core import AgentOutput, Trajectory, TrajectoryMetadata, TrajectoryStep
 from cube_harness.eval_log import (
     AgentInfo,
     BenchmarkSubset,
@@ -24,7 +24,7 @@ from cube_harness.eval_log import (
     _extract_tool_names,
     _to_github_url,
 )
-from cube_harness.storage import EpisodeView
+from cube_harness.storage import TrajectoryView
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -65,13 +65,13 @@ def _trajectory(reward: float = 1.0, task_id: str = "t1", n_agent_steps: int = 1
     return traj
 
 
-def _view(reward: float = 1.0, task_id: str = "t1", n_agent_steps: int = 1) -> EpisodeView:
-    """Build a stub `EpisodeView` for `EpisodeRecord.from_view` tests.
+def _view(reward: float = 1.0, task_id: str = "t1", n_agent_steps: int = 1) -> TrajectoryView:
+    """Build a stub `TrajectoryView` for `EpisodeRecord.from_view` tests.
 
     `from_view` only reads `view.metadata` / summary_stats / reward_info
     / timestamps — never iterates events. So passing `None` for the
     storage handle and an empty index is sufficient for these tests."""
-    meta = EpisodeMetadata(
+    meta = TrajectoryMetadata(
         id=f"{task_id}_ep0",
         metadata={"task_id": task_id},
         start_time=100.0,
@@ -88,16 +88,16 @@ def _view(reward: float = 1.0, task_id: str = "t1", n_agent_steps: int = 1) -> E
             "cost": 0.01 * n_agent_steps,
         },
     )
-    return EpisodeView(storage=None, trajectory_id=meta.id, meta=meta, index=[])
+    return TrajectoryView(storage=None, trajectory_id=meta.id, meta=meta, index=[])
 
 
-def _view_of(traj: Trajectory) -> EpisodeView:
-    """Adapt a legacy in-memory `Trajectory` to a stub `EpisodeView`.
+def _view_of(traj: Trajectory) -> TrajectoryView:
+    """Adapt a legacy in-memory `Trajectory` to a stub `TrajectoryView`.
 
     Used by tests that mutate trajectory fields (`traj.summary_stats[...] = ...`)
-    after building it — we materialize to EpisodeMetadata on the fly so
+    after building it — we materialize to TrajectoryMetadata on the fly so
     the rest of the test reads the same data through the view."""
-    meta = EpisodeMetadata(
+    meta = TrajectoryMetadata(
         id=traj.id,
         metadata=dict(traj.metadata),
         start_time=traj.start_time,
@@ -105,7 +105,7 @@ def _view_of(traj: Trajectory) -> EpisodeView:
         reward_info=dict(traj.reward_info),
         summary_stats=dict(traj.summary_stats) if traj.summary_stats else None,
     )
-    return EpisodeView(storage=None, trajectory_id=meta.id, meta=meta, index=[])
+    return TrajectoryView(storage=None, trajectory_id=meta.id, meta=meta, index=[])
 
 
 # ---------------------------------------------------------------------------

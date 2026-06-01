@@ -117,7 +117,7 @@ def _check(label: str, exp: Experiment, result: ExpResult) -> int:
         return _fail(f"[{label}] expected {N_TASKS} trajectories, got {len(result.trajectories)}")
 
     for traj_id, view in result.trajectories.items():
-        # 1. Returned EpisodeView holds no decoded events in RAM (cache empty).
+        # 1. Returned TrajectoryView holds no decoded events in RAM (cache empty).
         if view._cache:
             return _fail(f"[{label}] {traj_id}: returned view cache pre-populated with {len(view._cache)} events")
         if not view.summary_stats:

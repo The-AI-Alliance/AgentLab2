@@ -10,7 +10,7 @@ the same PR as the spec.
 
 Phases A–L shipped in the first pass (commits on this branch). The
 2026-06-01 scope expansion adds Phases M–R: replace `Trajectory` with
-`EpisodeMetadata` + `EpisodeView`, write metadata at episode start, do
+`TrajectoryMetadata` + `TrajectoryView`, write metadata at episode start, do
 the full XRay rewrite, migrate Investigator + EpisodeRecord + tests, and
 delete the dead code the original phases couldn't touch.
 
@@ -28,8 +28,8 @@ delete the dead code the original phases couldn't touch.
 | J: Connector seam (record_external_run) | ✅ shipped + tested | covered by Phase C tests |
 | K: End-to-end smokes | ✅ 3 smokes in `scripts/smoke/` | `agent_owns_loop_events.py`, `genny_parallel_recorder.py`, `xray_loads_event_trajectory.py` all SMOKE OK |
 | L: Reference experiments | ✅ TerminalBench-2 reproduced at parity (gpt-5.4-mini) | see *Reference baseline reproduction* below |
-| M: EpisodeMetadata pydantic type | ✅ shipped | `tests/test_episode_view.py::TestEpisodeMetadata` |
-| N: EpisodeView lazy loader + per-view cache | ✅ shipped | `tests/test_episode_view.py` (12/12, V2 + V2-steps + crashed-mid-run) |
+| M: TrajectoryMetadata pydantic type | ✅ shipped | `tests/test_episode_view.py::TestTrajectoryMetadata` |
+| N: TrajectoryView lazy loader + per-view cache | ✅ shipped | `tests/test_episode_view.py` (12/12, V2 + V2-steps + crashed-mid-run) |
 | O: Write metadata-at-start + finalize_episode(meta) | ✅ shipped | episode.py rewrites |
 | P: Storage migration (load_episode, list_episodes, V1 upgrade) | ✅ shipped | covered by test_episode_view + test_storage |
 | P2: Episode + MonitoredTool + TurnRecorder + EpisodeRecord migration | ✅ shipped | 1022 unit tests pass |
@@ -38,11 +38,11 @@ delete the dead code the original phases couldn't touch.
 | Smokes | ✅ green | agent_owns_loop_events, genny_parallel_recorder, xray_loads_event_trajectory, streaming_trajectory |
 | Cube debug suites | ✅ green | arithmetic-cube, miniwob-cube, workarena-cube |
 | Q-full: XRay event-card rewrite (drop legacy shim) | ⏭ follow-up PR `agent-owns-loop-xray` | — |
-| R: Investigator migration to EpisodeView | ⏭ follow-up PR | — |
+| R: Investigator migration to TrajectoryView | ⏭ follow-up PR | — |
 | S: make_fake_episode test helper | ⏭ follow-up PR (needed when test_xray_utils migrates) | — |
 
 **Final aggregate this PR: 1022 unit tests pass + 4 smokes + 3 cube
-debug suites green. Net: 1019 starting → 1022 (3 new EpisodeView /
+debug suites green. Net: 1019 starting → 1022 (3 new TrajectoryView /
 metadata tests; legacy event-stream-on-Trajectory tests deleted as
 their assertions moved to test_episode_view).**
 
@@ -351,22 +351,22 @@ Smokes exit 0/1/2 with `SMOKE OK/FAIL/SKIP: <name>`.
 
 ---
 
-## Phase M — `EpisodeMetadata` pydantic type
+## Phase M — `TrajectoryMetadata` pydantic type
 
-- [ ] M1. Add `class EpisodeMetadata(TypedBaseModel)` to `cube_harness.core`
+- [ ] M1. Add `class TrajectoryMetadata(TypedBaseModel)` to `cube_harness.core`
   with fields `id`, `metadata`, `start_time`, `end_time`, `summary_stats`,
   `reward_info`.
 - [ ] M2. Round-trip JSON test: serialize, write to disk, read, validate.
-- [ ] M3. Update `openspec/specs/core/spec.md` to declare EpisodeMetadata
+- [ ] M3. Update `openspec/specs/core/spec.md` to declare TrajectoryMetadata
   in place of Trajectory.
 
 **Validation**: pytest tests/test_episode_metadata.py green.
 
 ---
 
-## Phase N — `EpisodeView` lazy loader
+## Phase N — `TrajectoryView` lazy loader
 
-- [ ] N1. Add `class EpisodeView` to `cube_harness.storage`. Holds
+- [ ] N1. Add `class TrajectoryView` to `cube_harness.storage`. Holds
   `(storage, id, metadata, _index, _cache)`. Methods: `__len__`,
   `__getitem__(i)`, `__iter__`, `iter_events`, `events_of_turn`,
   `is_complete`, properties for `n_agent_events` / `n_tool_calls` /
@@ -391,13 +391,13 @@ Smokes exit 0/1/2 with `SMOKE OK/FAIL/SKIP: <name>`.
 - [ ] O1. `Episode.run` calls `storage.save_metadata(meta)` immediately
   after `task.reset()` (or just before — bikeshed minimally; see code).
   Stub `meta` has `end_time=None`, `summary_stats=None`, `reward_info={}`.
-- [ ] O2. Episode `finally` block constructs the final `EpisodeMetadata`
+- [ ] O2. Episode `finally` block constructs the final `TrajectoryMetadata`
   (filled end_time + summary_stats + reward_info) and calls
   `storage.finalize_episode(meta)` which rewrites `episode.metadata.json`.
 - [ ] O3. Remove `Trajectory` construction from `Episode.run`. No
   `trajectory.streaming = True` setter — gone with the class.
 - [ ] O4. `Episode.run` returns `storage.load_episode(self.id)` —
-  EpisodeView onto what was just written.
+  TrajectoryView onto what was just written.
 - [ ] O5. Crash-load smoke: force an exception mid-episode, then
   `storage.load_episode(id)` and assert `view.is_complete == False`,
   events decoded so far are visible, `status.json` failure summary is
@@ -414,11 +414,11 @@ Smokes exit 0/1/2 with `SMOKE OK/FAIL/SKIP: <name>`.
   fails on overwrite without `allow_overwrite=True` *unless* this is
   the same `id` already in `_saved_ids` — the start-write counts as
   saving).
-- [ ] P2. `FileStorage.load_episode(id) -> EpisodeView`. Detects V2 vs
+- [ ] P2. `FileStorage.load_episode(id) -> TrajectoryView`. Detects V2 vs
   V1 layout; returns view bound to this storage handle.
 - [ ] P3. `FileStorage.finalize_episode(meta)` — same code path as
   `save_metadata` but allows overwrite of the start-write file.
-- [ ] P4. `FileStorage.list_episodes() -> list[EpisodeMetadata]` —
+- [ ] P4. `FileStorage.list_episodes() -> list[TrajectoryMetadata]` —
   walks episodes/ dir, reads each `episode.metadata.json` (or
   `trajectory.json` for V1). Tolerant: malformed/missing metadata file
   returns a stub with id from dir name.
@@ -465,7 +465,7 @@ Smokes exit 0/1/2 with `SMOKE OK/FAIL/SKIP: <name>`.
 ## Phase R — Investigator migration
 
 - [ ] R1. `InvestigatorContext.trajectory: Trajectory` →
-  `InvestigatorContext.view: EpisodeView`. Update every consumer
+  `InvestigatorContext.view: TrajectoryView`. Update every consumer
   (`use_cases/general_blame`, `profiling`, `agent_scaffolding`,
   `hinter`, `fix_audit`).
 - [ ] R2. Investigator pipeline functions that iterate steps
@@ -484,9 +484,9 @@ investigator use case smokes against a real episode dir.
 ## Phase S — Test helper + migrate hand-built tests
 
 - [ ] S1. Add `make_fake_episode(events: list[TrajectoryEvent], *,
-  storage: TmpStorage | None = None, **meta_fields) -> EpisodeView` to
+  storage: TmpStorage | None = None, **meta_fields) -> TrajectoryView` to
   `tests/_helpers.py` (new module). Writes events to a TmpStorage and
-  returns a real `EpisodeView` so tests exercise the actual load path.
+  returns a real `TrajectoryView` so tests exercise the actual load path.
 - [ ] S2. Migrate every test that built `Trajectory(id=..., steps=[...])`
   or `Trajectory(id=..., events=[...])` directly. ~30 sites.
 - [ ] S3. Drop `streaming=True` from any test constructor that set it
@@ -509,7 +509,7 @@ when this lands.
   `TurnRecorder`, `tool.py`, `recorder.py` — events are always streamed.
 - [ ] T4. Delete `Trajectory.last_env_step` / `last_env_output` /
   `n_agent_steps` / `n_env_steps` / `events_of_turn` (the
-  Trajectory-method versions). `EpisodeView` has the live versions.
+  Trajectory-method versions). `TrajectoryView` has the live versions.
 - [ ] T5. Delete `_events_to_legacy_steps` from storage.py.
 - [ ] T6. Delete every `if trajectory.events: ... else: ...` defensive
   branch in core/storage/summary.
@@ -518,7 +518,7 @@ when this lands.
 - [ ] T8. Grep audit: `grep -rn "class Trajectory\|Trajectory(" src/`
   returns zero hits (excluding the V1 legacy-reader internals if any).
 - [ ] T9. Update `cube_harness/CLAUDE.md` package-layout block: drop
-  references to Trajectory, add EpisodeMetadata / EpisodeView.
+  references to Trajectory, add TrajectoryMetadata / TrajectoryView.
 
 **Validation**: full `pytest tests/`, `make lint`, all smokes green.
 

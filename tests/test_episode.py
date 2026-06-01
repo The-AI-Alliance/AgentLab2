@@ -10,7 +10,7 @@ from cube.task import TaskConfig, TaskMetadata
 from cube_harness.agent import AgentConfig
 from cube_harness.core import AgentEvent, AgentOutput, ToolCallEvent, Trajectory, TrajectoryStep
 from cube_harness.episode import Episode
-from cube_harness.storage import EpisodeView
+from cube_harness.storage import TrajectoryView
 from tests.conftest import MockAgent, MockAgentConfig, MockCubeTask, MockCubeTaskConfig, MockToolConfig
 
 
@@ -54,7 +54,7 @@ class TestEpisode:
         """Test Episode run completes successfully."""
         view = mock_episode.run()
 
-        assert isinstance(view, EpisodeView)
+        assert isinstance(view, TrajectoryView)
         assert "task_id" in view.metadata
         # RFC agent-owns-loop: events stream to disk; the returned
         # view is a lazy reader (no in-memory event list).

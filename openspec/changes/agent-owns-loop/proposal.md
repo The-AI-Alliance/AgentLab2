@@ -20,8 +20,8 @@ below).
    Under streaming it carries empty `events: []` lists; the actual data lives
    in `events/*.msgpack.zst` on disk. Every defensive `if events: ... else: ...`
    branch in core/storage was paying upkeep for a vestigial container. Replace
-   on the production write-path with `EpisodeMetadata` (pure metadata) +
-   `EpisodeView` (lazy reader) — modeled on AgentLab's loader pattern.
+   on the production write-path with `TrajectoryMetadata` (pure metadata) +
+   `TrajectoryView` (lazy reader) — modeled on AgentLab's loader pattern.
 
 2. **XRay was not actually rewritten.** Phase I shipped a `_events_to_legacy_steps`
    materialization shim so the *legacy* UI rendered new-format trajectories.
@@ -32,7 +32,7 @@ below).
 ### Scope split
 
 This PR (`agent-owns-loop` final):
-- Add `EpisodeMetadata` + `EpisodeView` (lazy reader).
+- Add `TrajectoryMetadata` + `TrajectoryView` (lazy reader).
 - Storage write-at-start; `load_episode` is the canonical lazy entry.
 - Production runtime (`Episode`, `MonitoredTool`, `TurnRecorder`,
   `EpisodeRecord`) writes/reads through the new API. No in-memory event
@@ -47,7 +47,7 @@ This PR (`agent-owns-loop` final):
   + investigator + inspect_results keep their current consumers unchanged.
 
 Follow-up PR (`agent-owns-loop-xray`):
-- XRay rewrite around `EpisodeView` (event-card timeline, parallel sibling
+- XRay rewrite around `TrajectoryView` (event-card timeline, parallel sibling
   lanes, drop the legacy materialization shim).
 - Investigator + inspect_results migration to `view.iter_events()`.
 - Delete the legacy `Trajectory` class entirely.
@@ -59,7 +59,7 @@ own focused review.
 
 Net code reduction in THIS PR: ~150 LOC of `streaming` / `events` / dual-path
 branches in core + storage + summary + tool + recorder. Net interface gain:
-crashed-mid-run loadability; uniform `EpisodeView` reader for new consumers.
+crashed-mid-run loadability; uniform `TrajectoryView` reader for new consumers.
 
 The cube-standard companion needs no further changes — Trajectory was never
 in cube-standard.
@@ -133,20 +133,20 @@ trajectories into typed event streams.
   naturally. `MonitoredTool` does not raise on done.
 - One reference agent that overrides `run()` with parallel tool calls
   (`agents/parallel_tool_agent.py` or evolution of Genny).
-- `Trajectory` class removed. Replaced by `EpisodeMetadata` (pydantic record
-  persisted at `episode.metadata.json`) + `EpisodeView` (lazy reader bound to
-  storage + episode id). `Episode.run` returns `EpisodeView`. The
+- `Trajectory` class removed. Replaced by `TrajectoryMetadata` (pydantic record
+  persisted at `episode.metadata.json`) + `TrajectoryView` (lazy reader bound to
+  storage + episode id). `Episode.run` returns `TrajectoryView`. The
   per-run object never holds the event list in memory.
 - `episode.metadata.json` is now written at episode START with stub fields
   (`end_time=None`), then updated at END with the final summary. Crashed
-  runs are loadable: `EpisodeView` interprets `end_time=None` plus
+  runs are loadable: `TrajectoryView` interprets `end_time=None` plus
   `status.json` as "in-flight or failed" and renders what's on disk.
 - `EpisodeRecord.from_view(view)` replaces `from_trajectory(traj)` —
   reads only `view.metadata`, no event I/O. Study-aggregation stays O(1)
   per episode.
 - XRay rewrite: render each event as a card coloured by event kind, with tabs
   that follow the selected event (see Design). Consume the lazy
-  `EpisodeView` — random-access events decode on demand. Drop the
+  `TrajectoryView` — random-access events decode on demand. Drop the
   `_events_to_legacy_steps` shim entirely.
 - Investigator migrated to `view.iter_events()`. The materialization shim
   has no remaining consumer.
@@ -441,9 +441,9 @@ The trade-off is acceptable: connectors trade fine-grained traces for
 ### `Episode.run` (lifecycle owner)
 
 ```python
-async def run(self) -> EpisodeView:
+async def run(self) -> TrajectoryView:
     task = self.task_config.make(...)
-    meta = EpisodeMetadata(id=self.id, metadata={...}, start_time=now(), end_time=None)
+    meta = TrajectoryMetadata(id=self.id, metadata={...}, start_time=now(), end_time=None)
     self.storage.save_metadata(meta)              # WRITE-AT-START: crashed runs are loadable
     budget = Budget(max_turns=self.max_steps, ...)
 
@@ -546,12 +546,12 @@ Storage filenames evolve from `000_obs.msgpack.zst` / `001_act.msgpack.zst` to
 `000_agent.msgpack.zst` / `001_tool_call.msgpack.zst` / `002_eval.msgpack.zst`.
 Old V2 layouts (steps/) remain loadable via the legacy-upgrade view.
 
-### Storage & Loaders — `EpisodeMetadata` + `EpisodeView`
+### Storage & Loaders — `TrajectoryMetadata` + `TrajectoryView`
 
 The `Trajectory` pydantic class is deleted. Two abstractions replace it.
 
 ```python
-class EpisodeMetadata(TypedBaseModel):
+class TrajectoryMetadata(TypedBaseModel):
     """Persisted at episode.metadata.json. Written at episode start with
     end_time=None and stub summary fields; updated at episode end with
     the final summary. Tiny — never holds events."""
@@ -564,7 +564,7 @@ class EpisodeMetadata(TypedBaseModel):
 ```
 
 ```python
-class EpisodeView:
+class TrajectoryView:
     """Lazy reader bound to (Storage, trajectory_id).
 
     Holds `.metadata` eagerly (one JSON read). Events are decoded from
@@ -573,7 +573,7 @@ class EpisodeView:
     """
     storage: Storage
     id: str
-    metadata: EpisodeMetadata            # eager
+    metadata: TrajectoryMetadata            # eager
     _cache: dict[int, TrajectoryEvent]   # populated on access; cleared with the view
 
     def __len__(self) -> int             # from directory listing — cheap
@@ -592,7 +592,7 @@ class EpisodeView:
 Modeled on AgentLab's `Result`/`Episode` loader pattern:
 
 - **Studies of 500 episodes never touch bulk data** — `list_episodes()`
-  returns `list[EpisodeMetadata]` (one cheap JSON read each). DataFrame
+  returns `list[TrajectoryMetadata]` (one cheap JSON read each). DataFrame
   aggregation, Atlas indexing, and EpisodeRecord generation use metadata
   only.
 - **Only episodes you actually inspect pay event I/O** — XRay's data
@@ -605,14 +605,14 @@ Storage protocol changes:
 
 ```python
 class Storage(Protocol):
-    def save_metadata(self, meta: EpisodeMetadata) -> None
+    def save_metadata(self, meta: TrajectoryMetadata) -> None
     def save_event(self, event: TrajectoryEvent, trajectory_id: str, n: int) -> None
-    def load_episode(self, trajectory_id: str) -> EpisodeView   # replaces load_trajectory
-    def finalize_episode(self, meta: EpisodeMetadata) -> None   # writes final metadata + summary
-    def list_episodes(self) -> list[EpisodeMetadata]            # cheap study scan
+    def load_episode(self, trajectory_id: str) -> TrajectoryView   # replaces load_trajectory
+    def finalize_episode(self, meta: TrajectoryMetadata) -> None   # writes final metadata + summary
+    def list_episodes(self) -> list[TrajectoryMetadata]            # cheap study scan
 ```
 
-Legacy V1 (steps/-layout) episodes load through `EpisodeView` with a
+Legacy V1 (steps/-layout) episodes load through `TrajectoryView` with a
 synthesis layer: `AgentOutput` steps map to `AgentEvent`s,
 `EnvironmentOutput` steps map to `ToolCallEvent`s parented to the most
 recent agent event. Synthesized events live only in the iterator — never
@@ -620,15 +620,15 @@ rewritten to disk.
 
 ### Internal cache policy
 
-`EpisodeView._cache` is a plain `dict[int, TrajectoryEvent]`. AgentLab's
+`TrajectoryView._cache` is a plain `dict[int, TrajectoryEvent]`. AgentLab's
 pattern: no LRU, no eviction. RAM is bounded by ONE episode (~thousands of
 events tops at SWE-bench scale). When XRay opens a new episode it
-constructs a new `EpisodeView`; the old one is GC'd along with its cache.
+constructs a new `TrajectoryView`; the old one is GC'd along with its cache.
 
 ### XRay rewrite
 
 The viewer is rebuilt around the event stream and consumes the lazy
-`EpisodeView`. The `_events_to_legacy_steps` shim is **deleted** — there
+`TrajectoryView`. The `_events_to_legacy_steps` shim is **deleted** — there
 is no remaining caller after this PR.
 
 - **Data layer:** `view = storage.load_episode(id)`. The viewer iterates
@@ -687,10 +687,10 @@ already available (likely yes, follow-up if not).
 ## Migration
 
 - **`Trajectory` is deleted.** No deprecation alias. Callers that imported
-  it move to `EpisodeMetadata` (for fields) or `EpisodeView` (for iteration).
+  it move to `TrajectoryMetadata` (for fields) or `TrajectoryView` (for iteration).
   In-tree callers are migrated in this PR (storage, episode, experiment,
   EpisodeRecord, XRay, investigator, ~30 tests).
-- **Legacy on-disk episodes remain loadable.** `EpisodeView` detects
+- **Legacy on-disk episodes remain loadable.** `TrajectoryView` detects
   `events/` vs `steps/` at open time. For steps/-layout episodes, the
   iterator synthesizes `AgentEvent` / `ToolCallEvent` from
   `AgentOutput` / `EnvironmentOutput` step files on the fly. No
@@ -703,7 +703,7 @@ already available (likely yes, follow-up if not).
 - `EpisodeRecord.from_trajectory(traj)` → `EpisodeRecord.from_view(view)`.
   Body reads `view.metadata` only — no event I/O.
 - Tests that hand-built `Trajectory(id=..., steps=[...])` migrate to
-  `make_fake_episode(events=[...]) -> EpisodeView`, a new test helper
+  `make_fake_episode(events=[...]) -> TrajectoryView`, a new test helper
   that writes events to a `TmpStorage` and returns a real lazy view.
   Tests then exercise the actual load path, not a mock.
 
@@ -727,8 +727,8 @@ already available (likely yes, follow-up if not).
 - **`Trajectory` deletion breaks out-of-tree code that imported it.** No
   deprecation alias is shipped: the type lived in `cube_harness.core` for
   ~2 years but in-tree callers were always thin (mostly fixture
-  construction in tests). Out-of-tree callers move to `EpisodeView` for
-  iteration or `EpisodeMetadata` for fields. Documented in PR notes.
+  construction in tests). Out-of-tree callers move to `TrajectoryView` for
+  iteration or `TrajectoryMetadata` for fields. Documented in PR notes.
 
 ---
 

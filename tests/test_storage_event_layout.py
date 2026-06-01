@@ -3,7 +3,7 @@ crash-safe save_metadata roundtrip.
 
 The historical `Trajectory(events=[...])` round-trip tests have been
 moved to `tests/test_episode_view.py`, which exercises the canonical
-`EpisodeMetadata + EpisodeView` path. This file now only covers the
+`TrajectoryMetadata + TrajectoryView` path. This file now only covers the
 low-level `save_event` / `load_event` storage methods directly.
 """
 
@@ -14,10 +14,10 @@ from cube.core import Action, EnvironmentOutput, Observation
 
 from cube_harness.core import (
     AgentEvent,
-    EpisodeMetadata,
     EvaluationEvent,
     ToolCallEvent,
     TrajectoryEvent,
+    TrajectoryMetadata,
 )
 from cube_harness.storage import EVENTS_DIR, FileStorage
 
@@ -40,10 +40,10 @@ def _eval_event(reward: float = 1.0) -> EvaluationEvent:
 
 
 def _prime(storage: FileStorage, traj_id: str) -> None:
-    """Write a stub EpisodeMetadata so the episode directory exists —
+    """Write a stub TrajectoryMetadata so the episode directory exists —
     save_event requires the directory and we want to test save_event
     without exercising save_trajectory."""
-    storage.save_metadata(EpisodeMetadata(id=traj_id))
+    storage.save_metadata(TrajectoryMetadata(id=traj_id))
 
 
 # ---------------------------------------------------------------------------

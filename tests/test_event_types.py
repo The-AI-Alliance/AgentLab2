@@ -120,7 +120,7 @@ def test_trajectory_legacy_steps_still_counted() -> None:
 
 def test_trajectory_last_env_step_walks_steps() -> None:
     """Trajectory.last_env_step walks the legacy steps list. Event-stream
-    consumers should use EpisodeView.last_env_output instead — see
+    consumers should use TrajectoryView.last_env_output instead — see
     test_episode_view.py."""
     traj = Trajectory(id="t-1")
     traj.steps.append(TrajectoryStep(output=_make_env_output(reward=0.1)))
