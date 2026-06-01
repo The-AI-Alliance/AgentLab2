@@ -1,7 +1,8 @@
 import logging
+import tempfile
 import time
 from pathlib import Path
-from typing import Callable, Self
+from typing import Any, Callable, Self
 
 from cube.benchmark import Benchmark, RuntimeContext
 from cube.core import EnvironmentOutput, StepError, TypedBaseModel
@@ -47,9 +48,19 @@ class Episode:
         task_config: TaskConfig,
         exp_name: str,
         max_steps: int,
-        storage: Storage | None,
-        runtime_context: RuntimeContext | None,
+        storage: Storage | None = None,
+        runtime_context: RuntimeContext | None = None,
+        persist_episode: bool = True,
+        container_backend: Any = None,
     ) -> None:
+        # Ephemeral rollouts (persist_episode=False, e.g. PipelineRL cube_rl) keep steps in
+        # memory and write throwaway artifacts to a temp dir instead of a persistent output_dir.
+        self.persist_episode = persist_episode
+        # Accepted for cube_rl API compatibility; cube-standard's TaskConfig.make() does not yet
+        # accept a container_backend, so it is currently stored only (no-container tasks need none).
+        self._container_backend = container_backend
+        if not persist_episode and not output_dir:
+            output_dir = Path(tempfile.mkdtemp(prefix="cube_ephemeral_"))
         self.config = EpisodeConfig(
             id=id,
             agent_config=agent_config,
@@ -202,10 +213,17 @@ class Episode:
                 summary_proc = SummaryProcessor(ep_dir)
 
                 def _record(step: TrajectoryStep) -> None:
-                    """Persist one step to disk and fold it into the running summary."""
+                    """Persist one step to disk and fold it into the running summary.
+
+                    For ephemeral rollouts (persist_episode=False) steps are also retained in
+                    memory on the returned Trajectory — there is no persistent store to lazily
+                    load them from, and PipelineRL cube_rl reads ``trajectory.steps`` directly.
+                    """
                     nonlocal step_idx
                     self.storage.save_step(step, trajectory.id, step_idx)
                     summary_proc.on_step(step_idx, step)
+                    if not self.persist_episode:
+                        trajectory.steps.append(step)
                     step_idx += 1
 
                 _record(TrajectoryStep(output=env_output, start_time=start_time, end_time=time.time()))

@@ -70,3 +70,12 @@ class ArithmeticBenchmarkConfig(BenchmarkConfig[ArithmeticTaskMetadata]):
 
     task_config_class: ClassVar[type[TaskConfig]] = ArithmeticTaskConfig
     benchmark_class: ClassVar[type[Benchmark]] = ArithmeticBenchmark
+
+    # PipelineRL cube_rl drives one benchmark object through
+    # install() + setup() + get_task_configs() + close(). Arithmetic needs no shared
+    # infrastructure, so setup/close are no-ops (install/get_task_configs come from the base).
+    def setup(self) -> None:
+        pass
+
+    def close(self) -> None:
+        pass
