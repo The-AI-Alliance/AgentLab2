@@ -12,14 +12,14 @@ from opentelemetry.trace import StatusCode
 from termcolor import colored
 
 from cube_harness.agent import AgentConfig
-from cube_harness.core import AgentOutput, Trajectory
+from cube_harness.core import AgentOutput, EpisodeMetadata
 from cube_harness.episode_logs import trajectory_log_id
 from cube_harness.episode_status import TERMINAL_STATUSES, EpisodeStatus, next_retry_count
 from cube_harness.eval_log import EpisodeRecord
 from cube_harness.llm import is_permanent_llm_error
 from cube_harness.metrics.tracer import get_tracer
-from cube_harness.recorder import TurnRecorder
-from cube_harness.storage import FileStorage, Storage
+from cube_harness.recorder import EventCounter, TurnRecorder
+from cube_harness.storage import EpisodeView, FileStorage, Storage
 from cube_harness.summary import SummaryProcessor
 from cube_harness.tool import Budget, BudgetExceeded, install_monitoring
 
@@ -97,12 +97,13 @@ class Episode:
             runtime_context=runtime_context,
         )
 
-    def run(self) -> Trajectory:
+    def run(self) -> EpisodeView:
         """Sync entry point: drives the async loop via asyncio.run.
 
-        Returns the Trajectory (steps=[] / events=[] on the in-memory
-        instance per stream-trajectory-steps; load content lazily via
-        FileStorage.load_trajectory).
+        Returns a lazy `EpisodeView` onto the just-finalized episode dir.
+        The view's metadata is loaded eagerly; events decode from disk
+        on demand. Per the RFC `agent-owns-loop` scope expansion no
+        full trajectory is held in memory at any point.
         """
         return asyncio.run(self._arun())
 
@@ -111,7 +112,7 @@ class Episode:
 
         If the prior status is terminal and this Episode opted in to overwrite
         (a legitimate retry), archive the prior directory so its terminal
-        `status.json` survives. Without `allow_overwrite`, `save_trajectory`
+        `status.json` survives. Without `allow_overwrite`, `save_metadata`
         will later raise — preserving the safety guard against accidental
         double-runs.
         """
@@ -133,7 +134,7 @@ class Episode:
         self.storage.write_episode_status(trajectory_id, ep_status)
         return ep_status
 
-    async def _arun(self) -> Trajectory:
+    async def _arun(self) -> EpisodeView:
         """Agent-owns-loop body. Sync `run()` wraps this with asyncio.run.
 
         Flow:
@@ -163,7 +164,7 @@ class Episode:
 
         # Heartbeat 1: covers stuck task creation / reset.
         ep_status = self._open_status(trajectory_id)
-        trajectory: Trajectory | None = None
+        meta: EpisodeMetadata | None = None
         summary_proc: SummaryProcessor | None = None
         max_steps_reached = False
 
@@ -181,14 +182,13 @@ class Episode:
                 initial = EnvironmentOutput(obs=obs, info=info)
 
                 agent_name = self.config.agent_config.agent_name
-                # `streaming=True` keeps driver / worker RAM flat:
-                # MonitoredTool + TurnRecorder write each event to
-                # storage + summary but skip the in-memory
-                # `events.append` (stream-trajectory-steps invariant
-                # extended to the event-stream model).
-                trajectory = Trajectory(
+                # WRITE-AT-START: persist EpisodeMetadata with stub
+                # summary fields and `end_time=None`. Makes crashed-
+                # mid-run episodes loadable: the file exists on disk
+                # and `EpisodeView.is_complete` returns False until
+                # finalize_episode writes the final fields below.
+                meta = EpisodeMetadata(
                     id=trajectory_id,
-                    streaming=True,
                     metadata={
                         "task_id": task_id,
                         "agent_name": agent_name,
@@ -198,10 +198,8 @@ class Episode:
                     },
                     start_time=start_time,
                 )
-                # save_trajectory writes the metadata + creates events/
-                # before we start streaming per-event files.
-                self.storage.save_trajectory(trajectory, allow_overwrite=self.allow_overwrite)
-                ep_dir = self.storage._episode_dir(trajectory.id)
+                self.storage.save_metadata(meta, allow_overwrite=self.allow_overwrite)
+                ep_dir = self.storage._episode_dir(meta.id)
                 (ep_dir / "episode_config.json").write_text(
                     self.config.model_dump_json(indent=2, serialize_as_any=True)
                 )
@@ -210,16 +208,28 @@ class Episode:
                 # 3. Build budget + recorder + install monitoring on the
                 # task's toolbox in place. Tool calls fired during the
                 # run record their parent via the recorder's current
-                # turn id.
+                # turn id. The shared EventCounter is what makes
+                # recorder writes and monitored-tool writes land on a
+                # single global event-numbering sequence on disk.
                 budget = Budget(max_turns=self.config.max_steps)
-                recorder = TurnRecorder(trajectory, storage=self.storage, summary=summary_proc, budget=budget)
+                event_counter = EventCounter()
+                metadata_updates: dict = {}
+                recorder = TurnRecorder(
+                    trajectory_id=trajectory_id,
+                    storage=self.storage,
+                    summary=summary_proc,
+                    budget=budget,
+                    event_counter=event_counter,
+                    metadata_updates=metadata_updates,
+                )
                 install_monitoring(
                     task,
-                    trajectory,
+                    trajectory_id,
                     budget,
                     parent_event_id_getter=recorder.current_turn_id,
                     storage=self.storage,
                     summary=summary_proc,
+                    event_counter=event_counter,
                 )
 
                 # 4. Record the initial obs as a synthetic ToolCallEvent
@@ -244,30 +254,33 @@ class Episode:
 
                 # 6. Terminal evaluation. cube-standard's Task.evaluate
                 # accepts obs=None — tasks track their own final state
-                # internally. We pass None deliberately: with
-                # `trajectory.streaming=True` the in-memory events list
-                # is empty, so `trajectory.last_env_output()` would also
-                # be None and the conditional was pointless. Cube tasks
-                # that need a final obs reach for `self._latest_obs`
-                # set inside their own `step()` — that path is
-                # untouched. Errors propagate so callers see the real
-                # exception; `finally` still finalizes the trajectory.
+                # internally (`self._latest_obs` set inside their own
+                # `step()`). Errors propagate so callers see the real
+                # exception; `finally` still finalizes the metadata.
                 reward, info = task.evaluate()
                 recorder.record_evaluation(reward, info)
 
-                # Finalize: summary_stats + final save + record.
-                trajectory.end_time = time.time()
-                trajectory.reward_info = {"reward": reward, "done": True, **info}
-                trajectory.summary_stats = summary_proc.summary_stats(
-                    duration=trajectory.end_time - start_time, final_reward=reward
+                # Finalize: write the EpisodeMetadata at episode end
+                # with summary_stats + reward_info + end_time, then
+                # update the experiment-level summary and emit the
+                # eval record.
+                end_time = time.time()
+                final_metadata = {**meta.metadata, **metadata_updates}
+                meta = meta.model_copy(
+                    update={
+                        "metadata": final_metadata,
+                        "end_time": end_time,
+                        "reward_info": {"reward": reward, "done": True, **info},
+                        "summary_stats": summary_proc.summary_stats(
+                            duration=end_time - start_time, final_reward=reward
+                        ),
+                    }
                 )
-                # Per stream-trajectory-steps: the metadata save is an
-                # idempotent re-save (id already in _saved_ids).
-                self.storage.save_trajectory(trajectory)
-                summary_proc.on_episode_complete(trajectory, self.storage)
+                self.storage.finalize_episode(meta)
+                summary_proc.on_episode_complete(meta, self.storage)
                 try:
-                    ep_record = EpisodeRecord.from_trajectory(
-                        trajectory,
+                    ep_record = EpisodeRecord.from_view(
+                        self.storage.load_episode(meta.id),
                         evaluation_id=self.config.output_dir.name,
                         task_config=self.config.task_config,
                     )
@@ -295,14 +308,18 @@ class Episode:
             # Persist summary_stats on terminal failure paths too. With
             # it on the metadata stub, the XRay tables render correct
             # step/token/cost stats without loading any events.
-            if trajectory is not None and summary_proc is not None and not trajectory.summary_stats:
+            if meta is not None and summary_proc is not None and meta.summary_stats is None:
                 try:
-                    end = trajectory.end_time or time.time()
-                    trajectory.summary_stats = summary_proc.summary_stats(
-                        duration=end - (trajectory.start_time or end),
-                        final_reward=summary_proc.final_reward,
+                    end = meta.end_time or time.time()
+                    meta = meta.model_copy(
+                        update={
+                            "summary_stats": summary_proc.summary_stats(
+                                duration=end - (meta.start_time or end),
+                                final_reward=summary_proc.final_reward,
+                            ),
+                        }
                     )
-                    self.storage.save_trajectory(trajectory)
+                    self.storage.finalize_episode(meta)
                 except Exception:
                     logger.exception("Failed to persist summary_stats on terminal path")
             ep_status.ended_at = time.time()
@@ -318,7 +335,7 @@ class Episode:
             except Exception:
                 logger.exception("Failed to close task")
             tracer.shutdown()
-        return trajectory
+        return self.storage.load_episode(trajectory_id)
 
     def log_agent_output(self, turns: int, agent_output: AgentOutput) -> None:
         """Legacy logger helper retained for any out-of-tree caller; the

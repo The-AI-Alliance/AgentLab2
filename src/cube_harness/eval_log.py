@@ -33,15 +33,17 @@ import subprocess
 import time
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import cube
 from cube.benchmark import BenchmarkConfig
 from cube.core import TypedBaseModel
 from pydantic import Field
 
-from cube_harness.core import Trajectory
 from cube_harness.storage import EPISODES_DIR as _EPISODES_DIR
+
+if TYPE_CHECKING:
+    from cube_harness.storage import EpisodeView
 
 logger = logging.getLogger(__name__)
 
@@ -543,26 +545,32 @@ class EpisodeRecord(TypedBaseModel):
     )
 
     @classmethod
-    def from_trajectory(
+    def from_view(
         cls,
-        trajectory: Trajectory,
+        view: "EpisodeView",
         evaluation_id: str,
         task_metadata: Any | None = None,
         task_config: Any | None = None,
     ) -> "EpisodeRecord":
-        """Assemble an EpisodeRecord from a completed trajectory."""
-        sample_id = str(trajectory.metadata.get("task_id", ""))
-        action_schemas: list[dict] = trajectory.metadata.get("action_schemas", [])
+        """Assemble an EpisodeRecord from a finalized `EpisodeView`.
+
+        Only reads `view.metadata` — no event payloads are decoded, so
+        building an EpisodeRecord stays O(1) per episode at
+        study-aggregation time.
+        """
+        sample_id = str(view.metadata.get("task_id", ""))
+        action_schemas: list[dict] = view.metadata.get("action_schemas", [])
         tool_names = _extract_tool_names(action_schemas)
 
-        stats = trajectory.summary_stats or {}
-        # Steps are streamed to disk and not retained in memory after a run, so derive
-        # everything from the summary_stats / reward_info the episode loop populated.
-        score = (trajectory.reward_info or {}).get("reward", stats.get("final_reward", 0.0))
+        stats = view.summary_stats or {}
+        # Events stream to disk; this method NEVER touches them. All
+        # outcome / usage data comes from summary_stats + reward_info
+        # which `Episode.run` populates at finalize_episode time.
+        score = (view.reward_info or {}).get("reward", stats.get("final_reward", 0.0))
 
         wall_time_s: float | None = None
-        if trajectory.start_time is not None and trajectory.end_time is not None:
-            wall_time_s = trajectory.end_time - trajectory.start_time
+        if view.start_time is not None and view.end_time is not None:
+            wall_time_s = view.end_time - view.start_time
 
         sample_hash: str | None = None
         seed: int | None = None
@@ -592,8 +600,8 @@ class EpisodeRecord(TypedBaseModel):
             n_env_steps=stats.get("n_env_steps", 0),
             wall_time_s=wall_time_s,
             usage=UsageSummary.from_summary_stats(stats),
-            trajectory_id=trajectory.id,
-            timestamp=trajectory.start_time or 0.0,
+            trajectory_id=view.id,
+            timestamp=view.start_time or 0.0,
         )
 
     def write(self, output_dir: Path) -> None:

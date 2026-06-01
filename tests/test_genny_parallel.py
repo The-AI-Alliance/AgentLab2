@@ -5,7 +5,8 @@ budget enforcement still firing across the parallel calls.
 Uses a hand-rolled mock task + a thin agent override to avoid hitting
 a real LLM; the structural assertion (sibling ToolCallEvents in one
 turn) is what we care about. Real-LLM behavioral check happens in
-Phase K smokes."""
+Phase K smokes.
+"""
 
 import asyncio
 import time
@@ -14,9 +15,45 @@ from cube.core import Action, ActionSchema, Observation
 from cube.tool import AbstractTool
 
 from cube_harness.agents.genny_parallel import GennyParallel
-from cube_harness.core import AgentEvent, AgentOutput, ToolCallEvent, Trajectory
-from cube_harness.recorder import TurnRecorder
+from cube_harness.core import AgentEvent, AgentOutput, ToolCallEvent, TrajectoryEvent
+from cube_harness.recorder import EventCounter, TurnRecorder
 from cube_harness.tool import Budget, install_monitoring
+
+
+class _FakeStorage:
+    """Captures every save_event call so the parallel-dispatch tests
+    can inspect what landed on disk without a real FileStorage."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, int, TrajectoryEvent]] = []
+
+    def save_event(self, te: TrajectoryEvent, trajectory_id: str, n: int) -> None:
+        self.events.append((trajectory_id, n, te))
+
+    def outputs(self) -> list:
+        return [te.output for _, _, te in self.events]
+
+
+def _build_recorder_and_storage(budget: Budget, task) -> tuple[TurnRecorder, _FakeStorage]:
+    """Build TurnRecorder + storage + install monitoring with a shared
+    EventCounter, the way Episode does."""
+    storage = _FakeStorage()
+    counter = EventCounter()
+    recorder = TurnRecorder(
+        trajectory_id="t",
+        storage=storage,
+        budget=budget,
+        event_counter=counter,
+    )
+    install_monitoring(
+        task,
+        trajectory_id="t",
+        budget=budget,
+        parent_event_id_getter=recorder.current_turn_id,
+        storage=storage,
+        event_counter=counter,
+    )
+    return recorder, storage
 
 
 class _SleepyTool(AbstractTool):
@@ -120,25 +157,24 @@ def test_parallel_dispatch_records_sibling_tool_calls() -> None:
     sibling ToolCallEvents sharing the parent AgentEvent's id as
     turn_id — the back-reference invariant the RFC asks for."""
     task = _FakeTask()
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=10)
-    recorder = TurnRecorder(traj, budget=budget)
-    install_monitoring(task, traj, budget, parent_event_id_getter=recorder.current_turn_id)
+    recorder, storage = _build_recorder_and_storage(budget, task)
 
     agent = _ScriptedParallel(n_actions=4, sleep_ms=20)
     asyncio.run(agent.run(initial_obs=Observation(), task=task, recorder=recorder))
 
     # One AgentEvent + 4 sibling ToolCallEvents + a graceful-stop
     # AgentEvent (the second step returned empty actions).
-    agent_events = [e for e in traj.events if isinstance(e.output, AgentEvent)]
-    tool_calls = [e for e in traj.events if isinstance(e.output, ToolCallEvent)]
+    outputs = storage.outputs()
+    agent_events = [e for e in outputs if isinstance(e, AgentEvent)]
+    tool_calls = [e for e in outputs if isinstance(e, ToolCallEvent)]
     assert len(agent_events) == 2
     assert len(tool_calls) == 4
     # All four tool calls share the same turn_id (the parent
     # AgentEvent's id) — XRay uses this to render them as siblings.
-    parent_id = agent_events[0].output.id
-    assert all(t.output.turn_id == parent_id for t in tool_calls)
-    assert all(t.output.parent_event_id == parent_id for t in tool_calls)
+    parent_id = agent_events[0].id
+    assert all(t.turn_id == parent_id for t in tool_calls)
+    assert all(t.parent_event_id == parent_id for t in tool_calls)
 
 
 def test_parallel_dispatch_is_faster_than_serial() -> None:
@@ -146,10 +182,8 @@ def test_parallel_dispatch_is_faster_than_serial() -> None:
     under 200ms (their serial sum). 130ms gives a safe margin for
     thread-pool startup variance on slower CI runners."""
     task = _FakeTask()
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=10)
-    recorder = TurnRecorder(traj, budget=budget)
-    install_monitoring(task, traj, budget, parent_event_id_getter=recorder.current_turn_id)
+    recorder, _ = _build_recorder_and_storage(budget, task)
 
     agent = _ScriptedParallel(n_actions=4, sleep_ms=50)
     start = time.time()
@@ -165,12 +199,10 @@ def test_budget_still_fires_across_parallel_calls() -> None:
     from cube_harness.tool import BudgetExceeded
 
     task = _FakeTask()
-    traj = Trajectory(id="t")
     # max_tool_calls=2 — the agent fires 4 in one turn; the 3rd should
     # raise BudgetExceeded.
     budget = Budget(max_turns=10, max_tool_calls=2)
-    recorder = TurnRecorder(traj, budget=budget)
-    install_monitoring(task, traj, budget, parent_event_id_getter=recorder.current_turn_id)
+    recorder, _ = _build_recorder_and_storage(budget, task)
 
     agent = _ScriptedParallel(n_actions=4, sleep_ms=10)
     raised: list[BaseException] = []

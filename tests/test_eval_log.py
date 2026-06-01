@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from cube.core import Content, EnvironmentOutput, Observation
 
-from cube_harness.core import AgentOutput, Trajectory, TrajectoryStep
+from cube_harness.core import AgentOutput, EpisodeMetadata, Trajectory, TrajectoryStep
 from cube_harness.eval_log import (
     AgentInfo,
     BenchmarkSubset,
@@ -24,6 +24,7 @@ from cube_harness.eval_log import (
     _extract_tool_names,
     _to_github_url,
 )
+from cube_harness.storage import EpisodeView
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -36,7 +37,8 @@ def _env_output(reward: float = 0.0, done: bool = True, text: str = "Task: do it
 
 
 def _trajectory(reward: float = 1.0, task_id: str = "t1", n_agent_steps: int = 1) -> Trajectory:
-    """Build a minimal completed trajectory for testing."""
+    """Build a minimal completed trajectory for testing (legacy shape; kept
+    for tests that exercise the old in-memory model directly)."""
     traj = Trajectory(
         id=f"{task_id}_ep0",
         metadata={"task_id": task_id},
@@ -61,6 +63,49 @@ def _trajectory(reward: float = 1.0, task_id: str = "t1", n_agent_steps: int = 1
         TrajectoryStep(output=_env_output(reward=reward, done=reward > 0), start_time=102.0, end_time=103.0)
     )
     return traj
+
+
+def _view(reward: float = 1.0, task_id: str = "t1", n_agent_steps: int = 1) -> EpisodeView:
+    """Build a stub `EpisodeView` for `EpisodeRecord.from_view` tests.
+
+    `from_view` only reads `view.metadata` / summary_stats / reward_info
+    / timestamps — never iterates events. So passing `None` for the
+    storage handle and an empty index is sufficient for these tests."""
+    meta = EpisodeMetadata(
+        id=f"{task_id}_ep0",
+        metadata={"task_id": task_id},
+        start_time=100.0,
+        end_time=110.0,
+        reward_info={"reward": reward, "done": reward > 0},
+        summary_stats={
+            "n_agent_steps": n_agent_steps,
+            "n_env_steps": n_agent_steps + 1,
+            "total_llm_calls": n_agent_steps,
+            "prompt_tokens": 100 * n_agent_steps,
+            "completion_tokens": 50 * n_agent_steps,
+            "cached_tokens": 0,
+            "cache_creation_tokens": 0,
+            "cost": 0.01 * n_agent_steps,
+        },
+    )
+    return EpisodeView(storage=None, trajectory_id=meta.id, meta=meta, index=[])
+
+
+def _view_of(traj: Trajectory) -> EpisodeView:
+    """Adapt a legacy in-memory `Trajectory` to a stub `EpisodeView`.
+
+    Used by tests that mutate trajectory fields (`traj.summary_stats[...] = ...`)
+    after building it — we materialize to EpisodeMetadata on the fly so
+    the rest of the test reads the same data through the view."""
+    meta = EpisodeMetadata(
+        id=traj.id,
+        metadata=dict(traj.metadata),
+        start_time=traj.start_time,
+        end_time=traj.end_time,
+        reward_info=dict(traj.reward_info),
+        summary_stats=dict(traj.summary_stats) if traj.summary_stats else None,
+    )
+    return EpisodeView(storage=None, trajectory_id=meta.id, meta=meta, index=[])
 
 
 # ---------------------------------------------------------------------------
@@ -130,14 +175,14 @@ def test_extract_tool_names_skips_tools_without_name() -> None:
 
 
 def test_episode_record_error_none_for_clean_trajectory() -> None:
-    record = EpisodeRecord.from_trajectory(_trajectory(reward=1.0), evaluation_id="abc123")
+    record = EpisodeRecord.from_view(_view(reward=1.0), evaluation_id="abc123")
     assert record.error is None
 
 
 def test_episode_record_error_from_summary_stats() -> None:
     traj = _trajectory(reward=0.0)
     traj.summary_stats["error_type"] = "ValueError"
-    record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
+    record = EpisodeRecord.from_view(_view_of(traj), evaluation_id="abc123")
     assert record.error == "ValueError"
 
 
@@ -326,7 +371,7 @@ def test_experiment_record_roundtrip(mock_agent_config, mock_cube_benchmark_conf
 
 def test_episode_record_success() -> None:
     traj = _trajectory(reward=1.0)
-    record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
+    record = EpisodeRecord.from_view(_view_of(traj), evaluation_id="abc123")
     assert record.is_correct is True
     assert record.score == 1.0
     assert record.trajectory_id == "t1_ep0"
@@ -334,20 +379,20 @@ def test_episode_record_success() -> None:
 
 def test_episode_record_failure() -> None:
     traj = _trajectory(reward=0.0)
-    record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
+    record = EpisodeRecord.from_view(_view_of(traj), evaluation_id="abc123")
     assert record.is_correct is False
     assert record.score == 0.0
 
 
 def test_episode_record_wall_time() -> None:
     traj = _trajectory(reward=1.0)
-    record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
+    record = EpisodeRecord.from_view(_view_of(traj), evaluation_id="abc123")
     assert record.wall_time_s == pytest.approx(10.0)
 
 
 def test_episode_record_num_turns() -> None:
     traj = _trajectory(reward=1.0, n_agent_steps=3)
-    record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
+    record = EpisodeRecord.from_view(_view_of(traj), evaluation_id="abc123")
     # num_turns derives from the streamed summary_stats (n_env + n_agent), not len(steps).
     assert record.num_turns == traj.summary_stats["n_env_steps"] + traj.summary_stats["n_agent_steps"]
     assert record.n_agent_steps == 3
@@ -356,13 +401,13 @@ def test_episode_record_num_turns() -> None:
 def test_episode_record_tool_names_from_metadata() -> None:
     traj = _trajectory(reward=1.0)
     traj.metadata["action_schemas"] = [{"type": "function", "function": {"name": "click"}}]
-    record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
+    record = EpisodeRecord.from_view(_view_of(traj), evaluation_id="abc123")
     assert record.tool_names == ["click"]
 
 
 def test_episode_record_tool_names_empty_without_metadata() -> None:
     traj = _trajectory(reward=1.0)
-    record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
+    record = EpisodeRecord.from_view(_view_of(traj), evaluation_id="abc123")
     assert record.tool_names == []
 
 
@@ -371,7 +416,7 @@ def test_episode_record_with_task_metadata() -> None:
 
     traj = _trajectory(task_id="click-dialog")
     tm = TaskMetadata(id="click-dialog", split="test", abstract_description="Click a dialog button")
-    record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123", task_metadata=tm)
+    record = EpisodeRecord.from_view(_view_of(traj), evaluation_id="abc123", task_metadata=tm)
     assert record.split == "test"
     assert record.task_description == "Click a dialog button"
 
@@ -387,7 +432,7 @@ def test_episode_record_with_task_config(mock_tool_config) -> None:
     from cube.task import TaskMetadata
 
     tc = MockTaskConfig(metadata=TaskMetadata(id="t1"), seed=42, tool_config=mock_tool_config)
-    record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123", task_config=tc)
+    record = EpisodeRecord.from_view(_view_of(traj), evaluation_id="abc123", task_config=tc)
     assert record.seed == 42
     assert record.sample_hash is not None
     assert len(record.sample_hash) == 64
@@ -395,14 +440,14 @@ def test_episode_record_with_task_config(mock_tool_config) -> None:
 
 def test_episode_record_findings_optional() -> None:
     traj = _trajectory(reward=1.0)
-    record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
+    record = EpisodeRecord.from_view(_view_of(traj), evaluation_id="abc123")
     assert record.findings is None
     assert record.verifier is None
 
 
 def test_episode_record_with_findings() -> None:
     traj = _trajectory(reward=0.0)
-    record = EpisodeRecord.from_trajectory(traj, evaluation_id="abc123")
+    record = EpisodeRecord.from_view(_view_of(traj), evaluation_id="abc123")
     record = record.model_copy(
         update={
             "findings": Findings(
@@ -431,7 +476,7 @@ def test_episode_record_with_findings() -> None:
 def test_eval_log_save_and_load(mock_agent_config, mock_cube_benchmark_config, tmp_dir) -> None:
     traj = _trajectory(reward=1.0, task_id="task-a")
     exp_rec = ExperimentRecord.from_experiment("test_exp", tmp_dir, mock_agent_config, mock_cube_benchmark_config)
-    ep_rec = EpisodeRecord.from_trajectory(traj, evaluation_id=exp_rec.evaluation_id)
+    ep_rec = EpisodeRecord.from_view(_view_of(traj), evaluation_id=exp_rec.evaluation_id)
     log = EvalLog(experiment=exp_rec, episodes=[ep_rec])
 
     with tempfile.TemporaryDirectory() as out:
@@ -449,7 +494,7 @@ def test_eval_log_save_and_load(mock_agent_config, mock_cube_benchmark_config, t
 def test_eval_log_episode_record_is_valid_json(mock_agent_config, mock_cube_benchmark_config, tmp_dir) -> None:
     traj = _trajectory(reward=0.5)
     exp_rec = ExperimentRecord.from_experiment("test_exp", tmp_dir, mock_agent_config, mock_cube_benchmark_config)
-    ep_rec = EpisodeRecord.from_trajectory(traj, evaluation_id=exp_rec.evaluation_id)
+    ep_rec = EpisodeRecord.from_view(_view_of(traj), evaluation_id=exp_rec.evaluation_id)
     log = EvalLog(experiment=exp_rec, episodes=[ep_rec])
 
     with tempfile.TemporaryDirectory() as out:
@@ -481,8 +526,8 @@ def test_eval_log_to_jsonl(mock_agent_config, mock_cube_benchmark_config, tmp_di
     traj1 = _trajectory(reward=1.0, task_id="t1")
     traj2 = _trajectory(reward=0.0, task_id="t2")
     exp_rec = ExperimentRecord.from_experiment("test_exp", tmp_dir, mock_agent_config, mock_cube_benchmark_config)
-    rec1 = EpisodeRecord.from_trajectory(traj1, evaluation_id=exp_rec.evaluation_id)
-    rec2 = EpisodeRecord.from_trajectory(traj2, evaluation_id=exp_rec.evaluation_id)
+    rec1 = EpisodeRecord.from_view(_view_of(traj1), evaluation_id=exp_rec.evaluation_id)
+    rec2 = EpisodeRecord.from_view(_view_of(traj2), evaluation_id=exp_rec.evaluation_id)
     log = EvalLog(experiment=exp_rec, episodes=[rec1, rec2])
 
     with tempfile.TemporaryDirectory() as out:
@@ -499,7 +544,7 @@ def test_eval_log_evaluation_id_fk_consistent(mock_agent_config, mock_cube_bench
     """EpisodeRecords carry the same evaluation_id as ExperimentRecord."""
     exp_rec = ExperimentRecord.from_experiment("fk_test", tmp_dir, mock_agent_config, mock_cube_benchmark_config)
     traj = _trajectory(reward=1.0)
-    ep_rec = EpisodeRecord.from_trajectory(traj, evaluation_id=exp_rec.evaluation_id)
+    ep_rec = EpisodeRecord.from_view(_view_of(traj), evaluation_id=exp_rec.evaluation_id)
     assert ep_rec.evaluation_id == exp_rec.evaluation_id
 
 

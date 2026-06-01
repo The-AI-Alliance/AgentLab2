@@ -4,7 +4,11 @@ MonitoredTool.
 
 Uses a hand-rolled mock task (no LLM, no cube), so the test runs fast
 and deterministically. The structural-parity check for real cubes lives
-in Phase G (`cube test <name>` for every in-tree benchmark)."""
+in Phase G (`cube test <name>` for every in-tree benchmark).
+
+Post-Trajectory-removal: events stream to a Storage hook; tests inspect
+the captured event stream rather than walking an in-memory list.
+"""
 
 import asyncio
 
@@ -12,8 +16,8 @@ from cube.core import Action, ActionSchema, EnvironmentOutput, Observation
 from cube.tool import AbstractTool
 
 from cube_harness.agent import Agent, AgentConfig
-from cube_harness.core import AgentEvent, AgentOutput, ToolCallEvent, Trajectory
-from cube_harness.recorder import TurnRecorder
+from cube_harness.core import AgentEvent, AgentOutput, ToolCallEvent, TrajectoryEvent
+from cube_harness.recorder import EventCounter, TurnRecorder
 from cube_harness.tool import Budget, install_monitoring
 
 # ---------------------------------------------------------------------------
@@ -87,6 +91,37 @@ def _action(name: str = "inc") -> Action:
     return Action(id=f"id-{name}", name=name, arguments={})
 
 
+class _FakeStorage:
+    """Captures every save_event call so the default-run tests can
+    inspect what the recorder + MonitoredTool streamed."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, int, TrajectoryEvent]] = []
+
+    def save_event(self, te: TrajectoryEvent, trajectory_id: str, n: int) -> None:
+        self.events.append((trajectory_id, n, te))
+
+    def outputs(self) -> list:
+        return [te.output for _, _, te in self.events]
+
+
+def _setup(task, budget: Budget) -> tuple[TurnRecorder, _FakeStorage]:
+    """Build TurnRecorder + storage + install monitoring with a shared
+    EventCounter — the way Episode does it."""
+    storage = _FakeStorage()
+    counter = EventCounter()
+    recorder = TurnRecorder(trajectory_id="t", storage=storage, budget=budget, event_counter=counter)
+    install_monitoring(
+        task,
+        trajectory_id="t",
+        budget=budget,
+        parent_event_id_getter=recorder.current_turn_id,
+        storage=storage,
+        event_counter=counter,
+    )
+    return recorder, storage
+
+
 # ---------------------------------------------------------------------------
 # Default Agent.run shape
 # ---------------------------------------------------------------------------
@@ -94,17 +129,18 @@ def _action(name: str = "inc") -> Action:
 
 def test_default_run_completes_when_task_signals_done() -> None:
     task = _MockTask(done_after_n=3)
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=100)
-    recorder = TurnRecorder(traj)
-    install_monitoring(task, traj, budget, parent_event_id_getter=recorder.current_turn_id)
+    recorder, storage = _setup(task, budget)
 
     agent = _CounterAgent(_CounterAgentConfig())
     asyncio.run(agent.run(initial_obs=Observation(), task=task, recorder=recorder))
 
+    outputs = storage.outputs()
+    n_agent = sum(1 for e in outputs if isinstance(e, AgentEvent))
+    n_tool = sum(1 for e in outputs if isinstance(e, ToolCallEvent))
     # Three rounds: each emits one AgentEvent + one ToolCallEvent.
-    assert traj.n_agent_events == 3
-    assert traj.n_tool_calls == 3
+    assert n_agent == 3
+    assert n_tool == 3
     assert task.counter == 3
 
 
@@ -122,14 +158,13 @@ def test_default_run_terminates_on_empty_actions() -> None:
             return AgentOutput(actions=[])
 
     task = _MockTask(done_after_n=100)
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=10)
-    recorder = TurnRecorder(traj)
-    install_monitoring(task, traj, budget, parent_event_id_getter=recorder.current_turn_id)
+    recorder, storage = _setup(task, budget)
     agent = _NoopAgent(_CounterAgentConfig())
     asyncio.run(agent.run(initial_obs=Observation(), task=task, recorder=recorder))
-    assert traj.n_agent_events == 1
-    assert traj.n_tool_calls == 0
+    outputs = storage.outputs()
+    assert sum(1 for e in outputs if isinstance(e, AgentEvent)) == 1
+    assert sum(1 for e in outputs if isinstance(e, ToolCallEvent)) == 0
     assert task.counter == 0
 
 
@@ -137,18 +172,16 @@ def test_default_run_records_parent_event_id_on_tool_calls() -> None:
     """Each ToolCallEvent in the stream must reference the AgentEvent
     that spawned it (Phase A/B/C back-reference invariant)."""
     task = _MockTask(done_after_n=2)
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=10)
-    recorder = TurnRecorder(traj)
-    install_monitoring(task, traj, budget, parent_event_id_getter=recorder.current_turn_id)
+    recorder, storage = _setup(task, budget)
     asyncio.run(_CounterAgent(_CounterAgentConfig()).run(Observation(), task, recorder))
 
     agent_event_ids: list[str] = []
-    for ev in traj.events:
-        if isinstance(ev.output, AgentEvent):
-            agent_event_ids.append(ev.output.id)
-        elif isinstance(ev.output, ToolCallEvent):
-            assert ev.output.parent_event_id in agent_event_ids, (
+    for ev in storage.outputs():
+        if isinstance(ev, AgentEvent):
+            agent_event_ids.append(ev.id)
+        elif isinstance(ev, ToolCallEvent):
+            assert ev.parent_event_id in agent_event_ids, (
                 "ToolCallEvent.parent_event_id must reference a preceding AgentEvent.id"
             )
 
@@ -159,10 +192,8 @@ def test_default_run_propagates_budget_exceeded() -> None:
     from cube_harness.tool import BudgetExceeded
 
     task = _MockTask(done_after_n=100)
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=100, max_tool_calls=1)
-    recorder = TurnRecorder(traj)
-    install_monitoring(task, traj, budget, parent_event_id_getter=recorder.current_turn_id)
+    recorder, storage = _setup(task, budget)
 
     agent = _CounterAgent(_CounterAgentConfig())
     # The second tool call (turn 2) raises.
@@ -173,4 +204,4 @@ def test_default_run_propagates_budget_exceeded() -> None:
         raised.append(e)
     assert any(isinstance(e, BudgetExceeded) for e in raised)
     # At least one full round completed before the budget kicked in.
-    assert traj.n_tool_calls >= 1
+    assert sum(1 for e in storage.outputs() if isinstance(e, ToolCallEvent)) >= 1

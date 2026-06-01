@@ -6,6 +6,9 @@ practice every in-tree cube uses sync `Tool` subclasses (and
 `Toolbox.execute_action` asserts `isinstance(tool, AbstractTool)`), so
 we ship both sync and async wrappers with shared recording logic. See
 src/cube_harness/tool.py docstring.
+
+Post-Trajectory-removal: events stream to a Storage hook; tests inspect
+what was sent there rather than walking an in-memory list.
 """
 
 import asyncio
@@ -14,7 +17,8 @@ import pytest
 from cube.core import Action, ActionSchema, Observation, StepError
 from cube.tool import AbstractAsyncTool, AbstractTool, AsyncToolbox, Toolbox
 
-from cube_harness.core import ToolCallEvent, Trajectory
+from cube_harness.core import ToolCallEvent, TrajectoryEvent
+from cube_harness.recorder import EventCounter
 from cube_harness.tool import (
     AsyncMonitoredTool,
     Budget,
@@ -60,52 +64,92 @@ def _action(name: str, **args: object) -> Action:
     return Action(id=f"id-{name}", name=name, arguments=args)
 
 
+class _FakeStorage:
+    """Captures every save_event call so tests can inspect what
+    MonitoredTool streamed without needing a real FileStorage."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, int, TrajectoryEvent]] = []
+
+    def save_event(self, te: TrajectoryEvent, trajectory_id: str, n: int) -> None:
+        self.events.append((trajectory_id, n, te))
+
+    def tool_call_events(self) -> list[ToolCallEvent]:
+        """Convenience: only the ToolCallEvent outputs in order."""
+        return [te.output for _, _, te in self.events if isinstance(te.output, ToolCallEvent)]
+
+
+def _make_monitored(
+    inner: AbstractTool | AbstractAsyncTool,
+    budget: Budget,
+    *,
+    storage: _FakeStorage | None = None,
+    parent_event_id_getter=None,
+) -> MonitoredTool | AsyncMonitoredTool:
+    storage = storage if storage is not None else _FakeStorage()
+    counter = EventCounter()
+    if isinstance(inner, AbstractAsyncTool):
+        return AsyncMonitoredTool(
+            inner,
+            trajectory_id="t",
+            budget=budget,
+            parent_event_id_getter=parent_event_id_getter,
+            storage=storage,
+            event_counter=counter,
+        )
+    return MonitoredTool(
+        inner,
+        trajectory_id="t",
+        budget=budget,
+        parent_event_id_getter=parent_event_id_getter,
+        storage=storage,
+        event_counter=counter,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Drop-in compatibility — same API as wrapped tool
 # ---------------------------------------------------------------------------
 
 
 def test_sync_monitored_tool_exposes_inner_action_set() -> None:
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
-    tool = MonitoredTool(_SyncEchoTool(), traj, budget)
+    tool = _make_monitored(_SyncEchoTool(), budget)
     assert [s.name for s in tool.action_set] == ["sync_echo"]
 
 
 def test_sync_monitored_tool_returns_observation_unchanged() -> None:
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
-    tool = MonitoredTool(_SyncEchoTool(), traj, budget)
+    tool = _make_monitored(_SyncEchoTool(), budget)
     result = tool.execute_action(_action("sync_echo", msg="hi"))
     assert isinstance(result, Observation)
 
 
 def test_async_monitored_tool_returns_observation_unchanged() -> None:
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
-    tool = AsyncMonitoredTool(_AsyncEchoTool(), traj, budget)
+    tool = _make_monitored(_AsyncEchoTool(), budget)
     result = asyncio.run(tool.execute_action(_action("async_echo", msg="hi")))
     assert isinstance(result, Observation)
 
 
 def test_monitored_tool_records_event_per_call() -> None:
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
-    tool = MonitoredTool(_SyncEchoTool(), traj, budget)
+    storage = _FakeStorage()
+    tool = _make_monitored(_SyncEchoTool(), budget, storage=storage)
     tool.execute_action(_action("sync_echo", msg="hi"))
     tool.execute_action(_action("sync_echo", msg="bye"))
-    assert traj.n_tool_calls == 2
-    assert isinstance(traj.events[0].output, ToolCallEvent)
-    assert traj.events[0].output.action_id == "id-sync_echo"
+    events = storage.tool_call_events()
+    assert len(events) == 2
+    assert events[0].action_id == "id-sync_echo"
 
 
 def test_wrong_inner_type_raises() -> None:
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
+    counter = EventCounter()
     with pytest.raises(TypeError):
-        MonitoredTool(_AsyncEchoTool(), traj, budget)  # type: ignore[arg-type]
+        MonitoredTool(_AsyncEchoTool(), trajectory_id="t", budget=budget, event_counter=counter)  # type: ignore[arg-type]
     with pytest.raises(TypeError):
-        AsyncMonitoredTool(_SyncEchoTool(), traj, budget)  # type: ignore[arg-type]
+        AsyncMonitoredTool(_SyncEchoTool(), trajectory_id="t", budget=budget, event_counter=counter)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -114,17 +158,15 @@ def test_wrong_inner_type_raises() -> None:
 
 
 def test_monitored_tool_budget_exhaustion_raises() -> None:
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=0)
-    tool = MonitoredTool(_SyncEchoTool(), traj, budget)
+    tool = _make_monitored(_SyncEchoTool(), budget)
     with pytest.raises(BudgetExceeded):
         tool.execute_action(_action("sync_echo"))
 
 
 def test_budget_exhaustion_via_max_tool_calls() -> None:
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=100, max_tool_calls=2)
-    tool = MonitoredTool(_SyncEchoTool(), traj, budget)
+    tool = _make_monitored(_SyncEchoTool(), budget)
     tool.execute_action(_action("sync_echo"))
     tool.execute_action(_action("sync_echo"))
     with pytest.raises(BudgetExceeded):
@@ -153,9 +195,9 @@ def test_sync_toolbox_with_mixed_monitored_and_unmonitored() -> None:
     Validates the RFC design goal: MonitoredTool is API-identical to any
     AbstractTool from the caller's perspective. The agent doesn't know
     or care which tools are monitored."""
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=10)
-    monitored = MonitoredTool(_SyncEchoTool(), traj, budget)
+    storage = _FakeStorage()
+    monitored = _make_monitored(_SyncEchoTool(), budget, storage=storage)
     bare = _SyncOtherTool()
     box = Toolbox([monitored, bare])
 
@@ -163,10 +205,9 @@ def test_sync_toolbox_with_mixed_monitored_and_unmonitored() -> None:
     box.execute_action(_action("sync_echo", msg="m"))
     # Unmonitored call → no event recorded
     box.execute_action(_action("sync_other"))
-    assert traj.n_tool_calls == 1
-    # The recorded event is for the monitored tool's action name.
-    assert isinstance(traj.events[0].output, ToolCallEvent)
-    assert traj.events[0].output.action_id == "id-sync_echo"
+    events = storage.tool_call_events()
+    assert len(events) == 1
+    assert events[0].action_id == "id-sync_echo"
 
 
 def test_async_toolbox_with_mixed_monitored_and_unmonitored() -> None:
@@ -180,15 +221,15 @@ def test_async_toolbox_with_mixed_monitored_and_unmonitored() -> None:
         async def execute_action(self, action: Action) -> Observation | StepError:
             return Observation.from_text("other")
 
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=10)
-    monitored = AsyncMonitoredTool(_AsyncEchoTool(), traj, budget)
+    storage = _FakeStorage()
+    monitored = _make_monitored(_AsyncEchoTool(), budget, storage=storage)
     bare = _AsyncOther()
     box = AsyncToolbox([monitored, bare])
 
     asyncio.run(box.execute_action(_action("async_echo", msg="m")))
     asyncio.run(box.execute_action(_action("async_other")))
-    assert traj.n_tool_calls == 1
+    assert len(storage.tool_call_events()) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -215,30 +256,30 @@ def test_monitored_tool_forwards_direct_method_calls_to_inner() -> None:
         def bash(self, cmd: str, timeout: int = 0) -> str:
             return f"bash:{cmd}:t{timeout}"
 
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
-    wrapped = MonitoredTool(_BashLikeTool(), traj, budget)
+    storage = _FakeStorage()
+    wrapped = _make_monitored(_BashLikeTool(), budget, storage=storage)
     # The direct method call must reach the inner tool unchanged.
     assert wrapped.bash("echo ok", timeout=15) == "bash:echo ok:t15"
     # And it must NOT have recorded a ToolCallEvent — those direct
     # method calls aren't agent tool calls.
-    assert traj.n_tool_calls == 0
+    assert len(storage.tool_call_events()) == 0
 
 
 def test_wrap_tool_picks_sync_or_async_by_inner_type() -> None:
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
-    sync_wrapped = wrap_tool(_SyncEchoTool(), traj, budget)
-    async_wrapped = wrap_tool(_AsyncEchoTool(), traj, budget)
+    counter = EventCounter()
+    sync_wrapped = wrap_tool(_SyncEchoTool(), trajectory_id="t", budget=budget, event_counter=counter)
+    async_wrapped = wrap_tool(_AsyncEchoTool(), trajectory_id="t", budget=budget, event_counter=counter)
     assert isinstance(sync_wrapped, MonitoredTool)
     assert isinstance(async_wrapped, AsyncMonitoredTool)
 
 
 def test_wrap_tool_is_idempotent() -> None:
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
-    once = wrap_tool(_SyncEchoTool(), traj, budget)
-    twice = wrap_tool(once, traj, budget)
+    counter = EventCounter()
+    once = wrap_tool(_SyncEchoTool(), trajectory_id="t", budget=budget, event_counter=counter)
+    twice = wrap_tool(once, trajectory_id="t", budget=budget, event_counter=counter)
     assert twice is once
 
 
@@ -254,19 +295,17 @@ class _FakeTask:
 
 def test_install_monitoring_wraps_each_member_in_place() -> None:
     task = _FakeTask([_SyncEchoTool()])
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
-    install_monitoring(task, traj, budget)
+    install_monitoring(task, trajectory_id="t", budget=budget)
     assert all(isinstance(t, MonitoredTool) for t in task.toolbox.tools)
     assert "sync_echo" in task.toolbox._action_name_to_tool
 
 
 def test_install_monitoring_is_idempotent() -> None:
     task = _FakeTask([_SyncEchoTool()])
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
-    install_monitoring(task, traj, budget)
-    install_monitoring(task, traj, budget)
+    install_monitoring(task, trajectory_id="t", budget=budget)
+    install_monitoring(task, trajectory_id="t", budget=budget)
     assert len(task.toolbox.tools) == 1
     assert isinstance(task.toolbox.tools[0], MonitoredTool)
     assert not isinstance(task.toolbox.tools[0].inner, MonitoredTool)
@@ -276,11 +315,11 @@ def test_install_monitoring_dispatch_records_event() -> None:
     """After install_monitoring, calling task.toolbox.execute_action
     transitively writes a ToolCallEvent."""
     task = _FakeTask([_SyncEchoTool()])
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
-    install_monitoring(task, traj, budget)
+    storage = _FakeStorage()
+    install_monitoring(task, trajectory_id="t", budget=budget, storage=storage)
     task.toolbox.execute_action(_action("sync_echo", msg="hi"))
-    assert traj.n_tool_calls == 1
+    assert len(storage.tool_call_events()) == 1
 
 
 def test_install_monitoring_recurses_into_nested_toolboxes() -> None:
@@ -292,9 +331,8 @@ def test_install_monitoring_recurses_into_nested_toolboxes() -> None:
             self.toolbox = outer_box
 
     task = _Task()
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
-    install_monitoring(task, traj, budget)
+    install_monitoring(task, trajectory_id="t", budget=budget)
     # Every leaf is wrapped; toolboxes stay as toolboxes.
     assert isinstance(outer_box.tools[0], Toolbox)
     assert isinstance(outer_box.tools[0].tools[0], MonitoredTool)
@@ -305,12 +343,19 @@ def test_install_monitoring_with_parent_event_id_getter() -> None:
     """parent_event_id_getter is late-bound to the recorder's current turn.
     Recorded events carry the value the getter returns at call time."""
     task = _FakeTask([_SyncEchoTool()])
-    traj = Trajectory(id="t")
     budget = Budget(max_turns=5)
+    storage = _FakeStorage()
     current_turn = {"v": "agent-001"}
-    install_monitoring(task, traj, budget, parent_event_id_getter=lambda: current_turn["v"])
+    install_monitoring(
+        task,
+        trajectory_id="t",
+        budget=budget,
+        parent_event_id_getter=lambda: current_turn["v"],
+        storage=storage,
+    )
     task.toolbox.execute_action(_action("sync_echo"))
     current_turn["v"] = "agent-002"
     task.toolbox.execute_action(_action("sync_echo"))
-    assert traj.events[0].output.parent_event_id == "agent-001"
-    assert traj.events[1].output.parent_event_id == "agent-002"
+    events = storage.tool_call_events()
+    assert events[0].parent_event_id == "agent-001"
+    assert events[1].parent_event_id == "agent-002"

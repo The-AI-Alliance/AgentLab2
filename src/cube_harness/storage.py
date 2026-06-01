@@ -45,17 +45,21 @@ class LLMCallRef(BaseModel):
 
 
 class Storage(Protocol):
-    def save_trajectory(self, trajectory: Trajectory, allow_overwrite: bool = False) -> None: ...
+    def save_metadata(self, meta: EpisodeMetadata, allow_overwrite: bool = False) -> None: ...
 
-    def save_step(self, step: TrajectoryStep, trajectory_id: str, step_num: int) -> None: ...
+    def finalize_episode(self, meta: EpisodeMetadata) -> None: ...
 
     def save_event(self, event: TrajectoryEvent, trajectory_id: str, event_num: int) -> None:
         """Persist one TrajectoryEvent (agent-owns-loop event stream)."""
         ...
 
+    def load_episode(self, trajectory_id: str) -> "EpisodeView": ...
+
+    def list_episodes(self) -> list[EpisodeMetadata]: ...
+
     def save_episode_config(self, episode_config: "EpisodeConfig") -> None: ...
 
-    def update_experiment_summary(self, trajectory: Trajectory) -> None: ...
+    def update_experiment_summary(self, meta: EpisodeMetadata) -> None: ...
 
     def write_episode_status(self, trajectory_id: str, status: EpisodeStatus) -> None: ...
 
@@ -234,14 +238,47 @@ class EpisodeView:
         self,
         storage: "FileStorage",
         trajectory_id: str,
-        metadata: EpisodeMetadata,
+        meta: EpisodeMetadata,
         index: list[_EventIndexEntry],
     ) -> None:
         self.storage = storage
         self.id = trajectory_id
-        self.metadata = metadata
+        self._meta = meta
         self._index = index
         self._cache: dict[int, TrajectoryEvent] = {}
+
+    # --- Metadata shortcuts. The accessors below mirror the legacy
+    # `Trajectory.<field>` API so existing call sites that did
+    # `trajectory.metadata["task_id"]` keep working as `view.metadata["task_id"]`.
+
+    @property
+    def metadata(self) -> dict:
+        """Free-form episode metadata dict (task_id, agent_name, action_schemas, …).
+
+        Same shape as the legacy `Trajectory.metadata`. Mutating the
+        returned dict won't be re-persisted — `Episode.run` is the only
+        writer, and it merges any side-channel updates from the recorder
+        into this dict at finalize_episode time.
+        """
+        return self._meta.metadata
+
+    @property
+    def start_time(self) -> float | None:
+        """Episode start time (Unix timestamp)."""
+        return self._meta.start_time
+
+    @property
+    def end_time(self) -> float | None:
+        """Episode end time (Unix timestamp), or None if the episode is
+        still running / crashed before finalize."""
+        return self._meta.end_time
+
+    @property
+    def episode_metadata(self) -> EpisodeMetadata:
+        """The full `EpisodeMetadata` record. Most callers want the
+        individual shortcuts above; this is for callers (eval_log,
+        atlas-style aggregation) that pass the metadata around whole."""
+        return self._meta
 
     @property
     def n_agent_events(self) -> int:
@@ -260,18 +297,18 @@ class EpisodeView:
 
     @property
     def is_complete(self) -> bool:
-        """True once the episode finalized (`metadata.end_time` is set)."""
-        return self.metadata.is_complete
+        """True once the episode finalized (`end_time` is set)."""
+        return self._meta.is_complete
 
     @property
     def summary_stats(self) -> dict | None:
-        """Shortcut to `metadata.summary_stats`."""
-        return self.metadata.summary_stats
+        """Aggregate per-episode stats produced by SummaryProcessor."""
+        return self._meta.summary_stats
 
     @property
     def reward_info(self) -> dict:
-        """Shortcut to `metadata.reward_info`."""
-        return self.metadata.reward_info
+        """Terminal reward + info dict (mirrors the final EvaluationEvent)."""
+        return self._meta.reward_info
 
     def __len__(self) -> int:
         return len(self._index)
@@ -1037,7 +1074,10 @@ class FileStorage:
 
     # --- Experiment summary ---
 
-    def update_experiment_summary(self, trajectory: Trajectory) -> None:
+    def update_experiment_summary(self, meta: EpisodeMetadata) -> None:
+        """Roll one episode's summary_stats into the experiment-level
+        `experiment_summary.json`. Accepts an `EpisodeMetadata` rather
+        than a Trajectory — only `meta.summary_stats` is read."""
         from cube_harness.summary import ExperimentSummary
 
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -1052,7 +1092,7 @@ class FileStorage:
                 else:
                     summary = ExperimentSummary()
 
-                stats = trajectory.summary_stats or {}
+                stats = meta.summary_stats or {}
                 # trajectory.steps is empty post-stream refactor; the first step-level
                 # error_type is captured incrementally by SummaryProcessor and lives in
                 # summary_stats. Walking the (empty) step list here would have silently

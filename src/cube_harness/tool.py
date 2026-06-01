@@ -39,7 +39,8 @@ from cube.tool import (
 )
 from pydantic import Field
 
-from cube_harness.core import EnvironmentOutput, ToolCallEvent, Trajectory, TrajectoryEvent
+from cube_harness.core import EnvironmentOutput, ToolCallEvent, TrajectoryEvent
+from cube_harness.recorder import EventCounter
 
 if TYPE_CHECKING:
     from cube_harness.summary import SummaryProcessor
@@ -119,7 +120,7 @@ def _to_env_output(result: Observation | StepError) -> EnvironmentOutput:
 
 
 def _record_tool_call(
-    trajectory: Trajectory,
+    trajectory_id: str,
     budget: Budget,
     parent_event_id: str,
     action: Action,
@@ -128,11 +129,15 @@ def _record_tool_call(
     end: float,
     storage: object | None,
     summary: "SummaryProcessor | None",
+    event_counter: EventCounter,
 ) -> None:
-    """Persist a ToolCallEvent to storage + summary, and append to the
-    in-memory event list when `trajectory.streaming` is False. Bumps
+    """Stream one ToolCallEvent to storage + summary, bump
     `budget.tool_calls`. Shared between MonitoredTool (sync) and
-    AsyncMonitoredTool (async)."""
+    AsyncMonitoredTool (async).
+
+    Events stream to disk via `storage.save_event(event, trajectory_id, n)`
+    where `n` comes from the shared `EventCounter`. There is no in-memory
+    accumulation."""
     env_output = _to_env_output(result)
     event = ToolCallEvent(
         parent_event_id=parent_event_id,
@@ -141,16 +146,11 @@ def _record_tool_call(
         turn_id=parent_event_id,
     )
     trajectory_event = TrajectoryEvent(output=event, start_time=start, end_time=end)
-    # Only accumulate in RAM when the trajectory opts in. Episode flips
-    # `streaming=True` (stream-trajectory-steps invariant); unit tests
-    # leave the default False so they can inspect traj.events directly.
-    if not trajectory.streaming:
-        trajectory.events.append(trajectory_event)
 
     if storage is not None:
         save_event = getattr(storage, "save_event", None)
         if save_event is not None:
-            save_event(trajectory_event, trajectory.id, len(trajectory.events) - 1)
+            save_event(trajectory_event, trajectory_id, event_counter.next())
 
     if summary is not None:
         on_event = getattr(summary, "on_event", None)
@@ -162,26 +162,32 @@ def _record_tool_call(
 
 class _MonitorState:
     """State shared between a MonitoredTool / AsyncMonitoredTool wrapper
-    and the install_monitoring helper. Holds the per-episode trajectory,
-    budget, storage / summary handles, and a parent-event-id getter
-    (late-bound to the recorder's current turn).
+    and the install_monitoring helper.
+
+    Carries the per-episode trajectory id, budget, storage / summary
+    handles, parent-event-id getter (late-bound to the recorder's
+    current turn), and a shared `EventCounter` so monitored tool
+    writes and recorder writes use a single global event number
+    sequence on disk.
     """
 
-    __slots__ = ("trajectory", "budget", "parent_event_id_getter", "storage", "summary")
+    __slots__ = ("trajectory_id", "budget", "parent_event_id_getter", "storage", "summary", "event_counter")
 
     def __init__(
         self,
-        trajectory: Trajectory,
+        trajectory_id: str,
         budget: Budget,
         parent_event_id_getter: Callable[[], str] | None,
         storage: object | None,
         summary: "SummaryProcessor | None",
+        event_counter: EventCounter,
     ) -> None:
-        self.trajectory = trajectory
+        self.trajectory_id = trajectory_id
         self.budget = budget
         self.parent_event_id_getter = parent_event_id_getter
         self.storage = storage
         self.summary = summary
+        self.event_counter = event_counter
 
     def parent_event_id(self) -> str:
         """Resolve the parent_event_id to attribute to the next recorded
@@ -213,11 +219,12 @@ class MonitoredTool(AbstractTool):
     def __init__(
         self,
         inner: AbstractTool,
-        trajectory: Trajectory,
+        trajectory_id: str,
         budget: Budget,
         parent_event_id_getter: Callable[[], str] | None = None,
         storage: object | None = None,
         summary: "SummaryProcessor | None" = None,
+        event_counter: EventCounter | None = None,
     ) -> None:
         if not isinstance(inner, AbstractTool):
             raise TypeError(
@@ -225,7 +232,14 @@ class MonitoredTool(AbstractTool):
                 f"Use AsyncMonitoredTool for AbstractAsyncTool."
             )
         self.inner = inner
-        self._state = _MonitorState(trajectory, budget, parent_event_id_getter, storage, summary)
+        self._state = _MonitorState(
+            trajectory_id,
+            budget,
+            parent_event_id_getter,
+            storage,
+            summary,
+            event_counter if event_counter is not None else EventCounter(),
+        )
 
     # --- delegation ---
 
@@ -254,7 +268,7 @@ class MonitoredTool(AbstractTool):
         result = self.inner.execute_action(action)
         end = time.time()
         _record_tool_call(
-            self._state.trajectory,
+            self._state.trajectory_id,
             self._state.budget,
             self._state.parent_event_id(),
             action,
@@ -263,6 +277,7 @@ class MonitoredTool(AbstractTool):
             end,
             self._state.storage,
             self._state.summary,
+            self._state.event_counter,
         )
         return result
 
@@ -299,11 +314,12 @@ class AsyncMonitoredTool(AbstractAsyncTool):
     def __init__(
         self,
         inner: AbstractAsyncTool,
-        trajectory: Trajectory,
+        trajectory_id: str,
         budget: Budget,
         parent_event_id_getter: Callable[[], str] | None = None,
         storage: object | None = None,
         summary: "SummaryProcessor | None" = None,
+        event_counter: EventCounter | None = None,
     ) -> None:
         if not isinstance(inner, AbstractAsyncTool):
             raise TypeError(
@@ -311,7 +327,14 @@ class AsyncMonitoredTool(AbstractAsyncTool):
                 f"Use MonitoredTool for AbstractTool."
             )
         self.inner = inner
-        self._state = _MonitorState(trajectory, budget, parent_event_id_getter, storage, summary)
+        self._state = _MonitorState(
+            trajectory_id,
+            budget,
+            parent_event_id_getter,
+            storage,
+            summary,
+            event_counter if event_counter is not None else EventCounter(),
+        )
 
     @property
     def action_set(self) -> list[ActionSchema]:
@@ -336,7 +359,7 @@ class AsyncMonitoredTool(AbstractAsyncTool):
         result = await self.inner.execute_action(action)
         end = time.time()
         _record_tool_call(
-            self._state.trajectory,
+            self._state.trajectory_id,
             self._state.budget,
             self._state.parent_event_id(),
             action,
@@ -345,6 +368,7 @@ class AsyncMonitoredTool(AbstractAsyncTool):
             end,
             self._state.storage,
             self._state.summary,
+            self._state.event_counter,
         )
         return result
 
@@ -365,11 +389,12 @@ class AsyncMonitoredTool(AbstractAsyncTool):
 
 def wrap_tool(
     inner: AbstractTool | AbstractAsyncTool,
-    trajectory: Trajectory,
+    trajectory_id: str,
     budget: Budget,
     parent_event_id_getter: Callable[[], str] | None = None,
     storage: object | None = None,
     summary: "SummaryProcessor | None" = None,
+    event_counter: EventCounter | None = None,
 ) -> AbstractTool | AbstractAsyncTool:
     """Wrap a tool in the right MonitoredTool variant for its sync/async nature.
 
@@ -378,19 +403,20 @@ def wrap_tool(
     if isinstance(inner, (MonitoredTool, AsyncMonitoredTool)):
         return inner
     if isinstance(inner, AbstractAsyncTool):
-        return AsyncMonitoredTool(inner, trajectory, budget, parent_event_id_getter, storage, summary)
+        return AsyncMonitoredTool(inner, trajectory_id, budget, parent_event_id_getter, storage, summary, event_counter)
     if isinstance(inner, AbstractTool):
-        return MonitoredTool(inner, trajectory, budget, parent_event_id_getter, storage, summary)
+        return MonitoredTool(inner, trajectory_id, budget, parent_event_id_getter, storage, summary, event_counter)
     raise TypeError(f"Cannot wrap {type(inner).__name__}: not a cube.tool.Tool / AsyncTool")
 
 
 def install_monitoring(
     task: Any,
-    trajectory: Trajectory,
+    trajectory_id: str,
     budget: Budget,
     parent_event_id_getter: Callable[[], str] | None = None,
     storage: object | None = None,
     summary: "SummaryProcessor | None" = None,
+    event_counter: EventCounter | None = None,
 ) -> None:
     """Wrap every leaf tool of `task`'s toolbox in place.
 
@@ -406,17 +432,27 @@ def install_monitoring(
 
     Looks up the toolbox via `task.toolbox` first, then `task.tool` —
     cube-standard `Task` exposes the latter (a single Toolbox usually).
+
+    `event_counter` must be the same instance shared with the episode's
+    `TurnRecorder` so that monitored tool writes and recorder writes
+    use a single global event-numbering sequence on disk. Defaults to
+    a fresh counter for tests / standalone use.
     """
     container = getattr(task, "toolbox", None) or getattr(task, "tool", None)
     if container is None:
         return
 
+    if event_counter is None:
+        event_counter = EventCounter()
+
     if isinstance(container, (Toolbox, AsyncToolbox)):
-        _wrap_toolbox_in_place(container, trajectory, budget, parent_event_id_getter, storage, summary)
+        _wrap_toolbox_in_place(
+            container, trajectory_id, budget, parent_event_id_getter, storage, summary, event_counter
+        )
         return
 
     # Single tool. Wrap and stash it back on the attribute it came from.
-    wrapped = wrap_tool(container, trajectory, budget, parent_event_id_getter, storage, summary)
+    wrapped = wrap_tool(container, trajectory_id, budget, parent_event_id_getter, storage, summary, event_counter)
     if hasattr(task, "toolbox") and getattr(task, "toolbox", None) is container:
         task.toolbox = wrapped
     elif hasattr(task, "tool") and getattr(task, "tool", None) is container:
@@ -431,11 +467,12 @@ def install_monitoring(
 
 def _wrap_toolbox_in_place(
     toolbox: Toolbox | AsyncToolbox,
-    trajectory: Trajectory,
+    trajectory_id: str,
     budget: Budget,
     parent_event_id_getter: Callable[[], str] | None,
     storage: object | None,
     summary: "SummaryProcessor | None",
+    event_counter: EventCounter,
 ) -> None:
     """Recursively wrap each leaf tool of a Toolbox / AsyncToolbox with
     its sync/async MonitoredTool variant, rebuilding the dispatch index
@@ -443,10 +480,12 @@ def _wrap_toolbox_in_place(
     new_tools: list = []
     for tool in toolbox.tools:
         if isinstance(tool, (Toolbox, AsyncToolbox)):
-            _wrap_toolbox_in_place(tool, trajectory, budget, parent_event_id_getter, storage, summary)
+            _wrap_toolbox_in_place(tool, trajectory_id, budget, parent_event_id_getter, storage, summary, event_counter)
             new_tools.append(tool)
         else:
-            new_tools.append(wrap_tool(tool, trajectory, budget, parent_event_id_getter, storage, summary))
+            new_tools.append(
+                wrap_tool(tool, trajectory_id, budget, parent_event_id_getter, storage, summary, event_counter)
+            )
     toolbox.tools = new_tools
     # Rebuild action-name → tool index so dispatch resolves to the wrappers.
     toolbox._action_name_to_tool = {action.name: tool for tool in toolbox.tools for action in tool.action_set}

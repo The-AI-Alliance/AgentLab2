@@ -9,9 +9,9 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from cube_harness.core import (
     AgentEvent,
     AgentOutput,
+    EpisodeMetadata,
     EvaluationEvent,
     ToolCallEvent,
-    Trajectory,
     TrajectoryEvent,
     TrajectoryStep,
 )
@@ -190,7 +190,11 @@ class SummaryProcessor:
             "error_type": self._error_type,
         }
 
-    def on_episode_complete(self, trajectory: Trajectory, storage: "FileStorage") -> None:
+    def on_episode_complete(self, meta: EpisodeMetadata, storage: "FileStorage") -> None:
+        """Finalize the per-episode summary stream and roll into the
+        experiment-level summary. `meta` carries the just-finalized
+        EpisodeMetadata whose `summary_stats` was filled by
+        `summary_stats(...)` above."""
         status = EpisodeStatus.FAILED if self.has_error else EpisodeStatus.DONE
         self._append(self._build_entry(-1, status))
-        storage.update_experiment_summary(trajectory)
+        storage.update_experiment_summary(meta)

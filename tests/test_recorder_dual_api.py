@@ -2,25 +2,23 @@
 AgentEvents, Episode-only helpers (reset/failure/evaluation) work as
 expected, current_turn_id surfaces correctly for MonitoredTool's
 parent_event_id_getter, and record_external_run carries metadata for
-opaque framework connectors."""
+opaque framework connectors.
 
-from cube.core import Action, ActionSchema, Observation
+Post-Trajectory-removal: events stream to a Storage hook; tests inspect
+what was sent there rather than walking an in-memory list.
+"""
+
+from cube.core import Action, ActionSchema, EnvironmentOutput, Observation
 from cube.tool import AbstractTool
 
 # Import litellm.Message lazily through the existing module's exports
 from litellm import Message
 
-from cube_harness.core import (
-    AgentEvent,
-    AgentOutput,
-    EnvironmentOutput,
-    EvaluationEvent,
-    ToolCallEvent,
-    Trajectory,
-)
+from cube_harness.core import AgentEvent, AgentOutput, EvaluationEvent, ToolCallEvent, TrajectoryEvent
 from cube_harness.llm import LLMCall, LLMConfig, Prompt, Usage
 from cube_harness.recorder import (
     RESET_PARENT_EVENT_ID,
+    EventCounter,
     TurnRecorder,
     equivalent_agent_events,
 )
@@ -49,27 +47,60 @@ def _llm_call() -> LLMCall:
     )
 
 
+class _FakeStorage:
+    """Captures every save_event call so tests can inspect what the
+    recorder streamed without needing a real FileStorage backend."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, int, TrajectoryEvent]] = []
+
+    def save_event(self, te: TrajectoryEvent, trajectory_id: str, n: int) -> None:
+        self.events.append((trajectory_id, n, te))
+
+    def event_outputs(self) -> list:
+        """Convenience: list[TrajectoryEvent.output] in save order."""
+        return [te.output for _, _, te in self.events]
+
+
+class _FakeSummary:
+    def __init__(self) -> None:
+        self.seen = 0
+
+    def on_event(self, te: TrajectoryEvent) -> None:
+        self.seen += 1
+
+
+def _make_recorder(**kwargs) -> tuple[TurnRecorder, _FakeStorage, dict]:
+    storage = kwargs.pop("storage", None) or _FakeStorage()
+    metadata_updates: dict = kwargs.pop("metadata_updates", {})
+    r = TurnRecorder(
+        trajectory_id=kwargs.pop("trajectory_id", "t"),
+        storage=storage,
+        metadata_updates=metadata_updates,
+        **kwargs,
+    )
+    return r, storage, metadata_updates
+
+
 # ---------------------------------------------------------------------------
 # Coarse path
 # ---------------------------------------------------------------------------
 
 
 def test_record_emits_one_agent_event() -> None:
-    traj = Trajectory(id="t")
-    r = TurnRecorder(traj)
+    r, st, _ = _make_recorder()
     r.record(_agent_output(thoughts="x", response_text="resp"))
-    assert traj.n_agent_events == 1
-    ev = traj.events[0].output
-    assert isinstance(ev, AgentEvent)
-    assert ev.thoughts == "x"
+    outputs = st.event_outputs()
+    assert len(outputs) == 1
+    assert isinstance(outputs[0], AgentEvent)
+    assert outputs[0].thoughts == "x"
 
 
 def test_record_returns_agent_event_id() -> None:
-    traj = Trajectory(id="t")
-    r = TurnRecorder(traj)
+    r, st, _ = _make_recorder()
     eid = r.record(_agent_output())
-    assert isinstance(traj.events[0].output, AgentEvent)
-    assert traj.events[0].output.id == eid
+    assert isinstance(st.event_outputs()[0], AgentEvent)
+    assert st.event_outputs()[0].id == eid
 
 
 # ---------------------------------------------------------------------------
@@ -78,16 +109,16 @@ def test_record_returns_agent_event_id() -> None:
 
 
 def test_begin_turn_flushes_on_exit() -> None:
-    traj = Trajectory(id="t")
-    r = TurnRecorder(traj)
+    r, st, _ = _make_recorder()
     with r.begin_turn() as turn:
         turn.add_thought("thinking...")
         turn.add_response_text("hello")
         turn.add_llm_call(_llm_call())
         turn.add_action(_action("foo"))
         turn.add_profile("llm", 1.0, 1.5)
-    assert traj.n_agent_events == 1
-    ev = traj.events[0].output
+    outputs = st.event_outputs()
+    assert len(outputs) == 1
+    ev = outputs[0]
     assert isinstance(ev, AgentEvent)
     assert ev.thoughts == "thinking..."
     assert ev.response_text == "hello"
@@ -98,13 +129,13 @@ def test_begin_turn_flushes_on_exit() -> None:
 def test_begin_turn_accumulates_thought_chunks() -> None:
     """Streaming agents emit reasoning in chunks; the recorder must
     concatenate so we don't lose history."""
-    traj = Trajectory(id="t")
-    r = TurnRecorder(traj)
+    r, st, _ = _make_recorder()
     with r.begin_turn() as turn:
         turn.add_thought("chunk-1 ")
         turn.add_thought("chunk-2")
-    assert isinstance(traj.events[0].output, AgentEvent)
-    assert traj.events[0].output.thoughts == "chunk-1 chunk-2"
+    ev = st.event_outputs()[0]
+    assert isinstance(ev, AgentEvent)
+    assert ev.thoughts == "chunk-1 chunk-2"
 
 
 def test_record_and_begin_turn_produce_equivalent_events() -> None:
@@ -113,14 +144,12 @@ def test_record_and_begin_turn_produce_equivalent_events() -> None:
     out = _agent_output(thoughts="t", response_text="rt")
     out.llm_calls.append(_llm_call())
 
-    traj1 = Trajectory(id="t1")
-    r1 = TurnRecorder(traj1)
+    r1, st1, _ = _make_recorder(trajectory_id="t1")
     r1.record(out, response_text="rt")
-    coarse = traj1.events[0].output
+    coarse = st1.event_outputs()[0]
     assert isinstance(coarse, AgentEvent)
 
-    traj2 = Trajectory(id="t2")
-    r2 = TurnRecorder(traj2)
+    r2, st2, _ = _make_recorder(trajectory_id="t2")
     with r2.begin_turn() as turn:
         for a in out.actions:
             turn.add_action(a)
@@ -129,7 +158,7 @@ def test_record_and_begin_turn_produce_equivalent_events() -> None:
         if out.thoughts:
             turn.add_thought(out.thoughts)
         turn.add_response_text("rt")
-    granular = traj2.events[0].output
+    granular = st2.event_outputs()[0]
     assert isinstance(granular, AgentEvent)
     assert equivalent_agent_events(coarse, granular)
 
@@ -140,26 +169,26 @@ def test_record_and_begin_turn_produce_equivalent_events() -> None:
 
 
 def test_record_reset_emits_synthetic_tool_call_event() -> None:
-    traj = Trajectory(id="t")
-    r = TurnRecorder(traj)
+    r, st, _ = _make_recorder()
     initial = EnvironmentOutput(obs=Observation(), reward=0.0, done=False, info={})
     r.record_reset(initial)
-    assert traj.n_tool_calls == 1
-    ev = traj.events[0].output
+    outputs = st.event_outputs()
+    assert len(outputs) == 1
+    ev = outputs[0]
     assert isinstance(ev, ToolCallEvent)
     assert ev.parent_event_id == RESET_PARENT_EVENT_ID
     assert ev.turn_id == RESET_PARENT_EVENT_ID
 
 
 def test_record_failure_records_agent_event_with_error() -> None:
-    traj = Trajectory(id="t")
-    r = TurnRecorder(traj)
+    r, st, _ = _make_recorder()
     try:
         raise RuntimeError("boom")
     except RuntimeError as e:
         r.record_failure(e)
-    assert traj.n_agent_events == 1
-    ev = traj.events[0].output
+    outputs = st.event_outputs()
+    assert len(outputs) == 1
+    ev = outputs[0]
     assert isinstance(ev, AgentEvent)
     assert ev.error is not None
     assert ev.error.error_type == "RuntimeError"
@@ -167,11 +196,11 @@ def test_record_failure_records_agent_event_with_error() -> None:
 
 
 def test_record_evaluation_emits_evaluation_event() -> None:
-    traj = Trajectory(id="t")
-    r = TurnRecorder(traj)
+    r, st, _ = _make_recorder()
     r.record_evaluation(reward=0.75, info={"score": 0.75})
-    assert traj.n_evaluations == 1
-    ev = traj.events[0].output
+    outputs = st.event_outputs()
+    assert len(outputs) == 1
+    ev = outputs[0]
     assert isinstance(ev, EvaluationEvent)
     assert ev.reward == 0.75
 
@@ -192,28 +221,31 @@ class _SyncEchoTool(AbstractTool):
 
 def test_current_turn_id_propagates_to_monitored_tool_via_getter() -> None:
     """Tool calls fired inside a turn record that turn's id as parent."""
-    traj = Trajectory(id="t")
+    counter = EventCounter()
+    storage = _FakeStorage()
+    r = TurnRecorder(trajectory_id="t", storage=storage, event_counter=counter)
     budget = Budget(max_turns=5)
-    r = TurnRecorder(traj)
     tool = MonitoredTool(
         _SyncEchoTool(),
-        traj,
-        budget,
+        trajectory_id="t",
+        budget=budget,
         parent_event_id_getter=r.current_turn_id,
+        storage=storage,
+        event_counter=counter,
     )
 
     eid = r.record(_agent_output())
     tool.execute_action(_action("echo"))
 
     # Sequence: AgentEvent → ToolCallEvent with parent_event_id == eid.
-    assert isinstance(traj.events[0].output, AgentEvent)
-    assert isinstance(traj.events[1].output, ToolCallEvent)
-    assert traj.events[1].output.parent_event_id == eid
+    outputs = storage.event_outputs()
+    assert isinstance(outputs[0], AgentEvent)
+    assert isinstance(outputs[1], ToolCallEvent)
+    assert outputs[1].parent_event_id == eid
 
 
 def test_current_turn_id_before_any_record_is_reset_sentinel() -> None:
-    traj = Trajectory(id="t")
-    r = TurnRecorder(traj)
+    r, _, _ = _make_recorder()
     assert r.current_turn_id() == RESET_PARENT_EVENT_ID
 
 
@@ -223,34 +255,30 @@ def test_current_turn_id_before_any_record_is_reset_sentinel() -> None:
 
 
 def test_record_external_run_emits_one_event_with_final_text() -> None:
-    traj = Trajectory(id="t")
-    r = TurnRecorder(traj)
+    r, st, _ = _make_recorder()
     r.record_external_run(final_text="the answer is 42")
-    assert traj.n_agent_events == 1
-    ev = traj.events[0].output
+    ev = st.event_outputs()[0]
     assert isinstance(ev, AgentEvent)
     assert ev.response_text == "the answer is 42"
 
 
-def test_record_external_run_stashes_usage_on_trajectory_metadata() -> None:
-    traj = Trajectory(id="t")
-    r = TurnRecorder(traj)
+def test_record_external_run_stashes_usage_on_metadata_updates() -> None:
+    r, _, meta_updates = _make_recorder()
     r.record_external_run(
         final_text=None,
         usage=Usage(prompt_tokens=100, completion_tokens=50, total_tokens=150, cost=0.05),
     )
-    assert "external_run_usage" in traj.metadata
-    assert traj.metadata["external_run_usage"][0]["prompt_tokens"] == 100
+    assert "external_run_usage" in meta_updates
+    assert meta_updates["external_run_usage"][0]["prompt_tokens"] == 100
 
 
-def test_record_external_run_stashes_raw_events_on_trajectory_metadata() -> None:
-    traj = Trajectory(id="t")
-    r = TurnRecorder(traj)
+def test_record_external_run_stashes_raw_events_on_metadata_updates() -> None:
+    r, _, meta_updates = _make_recorder()
     r.record_external_run(
         final_text="ok",
         raw_events=[{"event": "message_start"}, {"event": "tool_call"}],
     )
-    assert traj.metadata["external_run_raw_events"] == [
+    assert meta_updates["external_run_raw_events"] == [
         {"event": "message_start"},
         {"event": "tool_call"},
     ]
@@ -261,28 +289,11 @@ def test_record_external_run_stashes_raw_events_on_trajectory_metadata() -> None
 # ---------------------------------------------------------------------------
 
 
-class _FakeStorage:
-    def __init__(self) -> None:
-        self.saved: list[tuple[str, int]] = []
-
-    def save_event(self, te, trajectory_id: str, n: int) -> None:
-        self.saved.append((trajectory_id, n))
-
-
-class _FakeSummary:
-    def __init__(self) -> None:
-        self.seen = 0
-
-    def on_event(self, te) -> None:
-        self.seen += 1
-
-
 def test_recorder_invokes_storage_and_summary_hooks() -> None:
-    traj = Trajectory(id="t")
     storage = _FakeStorage()
     summary = _FakeSummary()
-    r = TurnRecorder(traj, storage=storage, summary=summary)
+    r = TurnRecorder(trajectory_id="t", storage=storage, summary=summary)
     r.record(_agent_output())
     r.record_evaluation(reward=1.0)
-    assert storage.saved == [("t", 0), ("t", 1)]
+    assert [(tid, n) for tid, n, _ in storage.events] == [("t", 0), ("t", 1)]
     assert summary.seen == 2

@@ -100,12 +100,10 @@ class TestCubeEpisode:
         assert trajectory.reward_info["reward"] == 1.0
         assert trajectory.reward_info["done"] is True
 
-    def test_run_streams_steps_to_disk_and_returns_step_less(self, tmp_dir, mock_agent_config, mock_cube_task_config):
-        """RFC agent-owns-loop: events stream to disk; the returned
-        Trajectory carries metadata + summary_stats + reward_info but
-        NO steps / NO events (load lazily from disk). Keeps driver/worker
-        RAM flat on image-heavy benchmarks (same invariant as
-        stream-trajectory-steps, evolved for the event model)."""
+    def test_run_streams_events_to_disk(self, tmp_dir, mock_agent_config, mock_cube_task_config):
+        """RFC agent-owns-loop scope expansion: events stream to disk;
+        the returned `EpisodeView` is a lazy reader (no in-memory event
+        list). Keeps driver/worker RAM flat on image-heavy benchmarks."""
         episode = Episode(
             id=0,
             output_dir=tmp_dir,
@@ -116,25 +114,24 @@ class TestCubeEpisode:
             storage=None,
             runtime_context=None,
         )
-        trajectory = episode.run()
+        view = episode.run()
 
-        # Returned trajectory is event-less but fully summarised.
-        assert trajectory.steps == []
-        # Phase E currently keeps trajectory.events populated in the
-        # returned instance to keep the migration commit small; Phase 2
-        # drops them once streaming-events is fully wired. The summary
-        # is the authoritative source.
-        assert trajectory.summary_stats["n_env_steps"] >= 1
-        assert trajectory.reward_info["reward"] == 1.0
+        # The view is empty in RAM at construction — its index is built
+        # from the directory listing; per-event payloads decode on
+        # demand. Summary fields come from the eager metadata.json read.
+        assert view.summary_stats["n_env_steps"] >= 1
+        assert view.reward_info["reward"] == 1.0
+        # Cache empty until something iterates / indexes.
+        assert view._cache == {}
 
-        # Events fully persisted; reload survives the round-trip.
-        loaded = episode.storage.load_trajectory(trajectory.id)
-        assert len(loaded.events) >= 3
-        assert loaded.summary_stats == trajectory.summary_stats
+        # Re-opening the same episode dir gives an equivalent view.
+        reopened = episode.storage.load_episode(view.id)
+        assert reopened.summary_stats == view.summary_stats
+        assert len(reopened) >= 3
 
     def test_failed_episode_persists_summary_stats(self, tmp_dir, mock_cube_task_config):
-        """A FAILED episode must persist summary_stats to its metadata stub, so the XRay
-        tables render correct stats without loading steps (no background bulk-loader)."""
+        """A FAILED episode must persist summary_stats to its metadata, so the XRay
+        tables render correct stats without loading any events."""
         episode = Episode(
             id=0,
             output_dir=tmp_dir,
@@ -148,12 +145,11 @@ class TestCubeEpisode:
         with pytest.raises(RuntimeError):
             episode.run()
 
-        trajs = FileStorage(tmp_dir).load_all_trajectory_metadata()
-        assert len(trajs) == 1
-        # Metadata loaded with steps=[] — stats must come from persisted summary_stats.
-        assert not trajs[0].steps
-        assert trajs[0].summary_stats
-        assert "n_env_steps" in trajs[0].summary_stats
+        episodes = FileStorage(tmp_dir).list_episodes()
+        assert len(episodes) == 1
+        # Stats persisted on the failed-path metadata stub.
+        assert episodes[0].summary_stats
+        assert "n_env_steps" in episodes[0].summary_stats
 
     def test_episode_load_from_config_round_trip(self, tmp_dir, mock_agent_config, mock_cube_task_config):
         """Save EpisodeConfig to disk; reload via load_episode_from_config() without benchmark arg."""

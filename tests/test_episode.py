@@ -10,6 +10,7 @@ from cube.task import TaskConfig, TaskMetadata
 from cube_harness.agent import AgentConfig
 from cube_harness.core import AgentEvent, AgentOutput, ToolCallEvent, Trajectory, TrajectoryStep
 from cube_harness.episode import Episode
+from cube_harness.storage import EpisodeView
 from tests.conftest import MockAgent, MockAgentConfig, MockCubeTask, MockCubeTaskConfig, MockToolConfig
 
 
@@ -51,16 +52,15 @@ class TestEpisode:
 
     def test_episode_run_completes(self, mock_episode):
         """Test Episode run completes successfully."""
-        trajectory = mock_episode.run()
+        view = mock_episode.run()
 
-        assert isinstance(trajectory, Trajectory)
-        assert "task_id" in trajectory.metadata
+        assert isinstance(view, EpisodeView)
+        assert "task_id" in view.metadata
         # RFC agent-owns-loop: events stream to disk; the returned
-        # trajectory carries metadata + summary only.
-        loaded = mock_episode.storage.load_trajectory(trajectory.id)
+        # view is a lazy reader (no in-memory event list).
         # Minimum: reset event + at least one agent event + at least one
         # tool call + final evaluation event.
-        assert len(loaded.events) >= 2
+        assert len(view) >= 2
 
     def test_episode_run_saves_trajectory(self, mock_episode, tmp_dir):
         """Test Episode run saves trajectory files."""
@@ -73,7 +73,7 @@ class TestEpisode:
         assert len(ep_dirs) >= 1
         assert (ep_dirs[0] / "episode.metadata.json").exists()
         assert (ep_dirs[0] / "episode_config.json").exists()
-        assert (ep_dirs[0] / "steps").exists()
+        assert (ep_dirs[0] / "events").exists()
 
     def test_episode_run_metadata_file_content(self, mock_episode, tmp_dir):
         """Test Episode run creates correct metadata file."""

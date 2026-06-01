@@ -2,7 +2,7 @@ from typing import Callable
 from uuid import uuid4
 
 from cube.core import Action, EnvironmentOutput, StepError, TypedBaseModel
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from cube_harness.llm import LLMCall
 
@@ -211,13 +211,18 @@ class Trajectory(TypedBaseModel):
         return sum(1 for e in self.events if isinstance(e.output, EvaluationEvent))
 
 
-class EpisodeMetadata(TypedBaseModel):
+class EpisodeMetadata(BaseModel):
     """The scalar metadata of an episode — persisted as `episode.metadata.json`.
 
     Replaces the metadata half of the legacy `Trajectory` class (RFC
     `agent-owns-loop` scope expansion). The event list itself never lives
     here — events stream to `events/*.msgpack.zst` and are read back lazily
     via `EpisodeView` (cube_harness.storage).
+
+    Plain `BaseModel` (not `TypedBaseModel`) — EpisodeMetadata is never
+    polymorphic, and the `_type` discriminator that `TypedBaseModel`
+    injects would shadow the legacy on-disk format that `load_trajectory`
+    consumers still read.
 
     Written twice per episode:
 

@@ -218,7 +218,7 @@ class TestEpisodeViewCrashedMidRun:
         view = storage.load_episode("crashed_id")
         assert view.is_complete is False
         assert len(view) == 1
-        assert view.metadata.end_time is None
+        assert view.end_time is None
 
 
 class TestEpisodeViewLegacyStepsLayout:

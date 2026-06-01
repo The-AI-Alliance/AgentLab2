@@ -28,6 +28,7 @@ possible.
 
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from cube.core import Action, EnvironmentOutput, StepError
@@ -37,13 +38,33 @@ from cube_harness.core import (
     AgentOutput,
     EvaluationEvent,
     ToolCallEvent,
-    Trajectory,
     TrajectoryEvent,
 )
 from cube_harness.llm import LLMCall, Usage
 
 if TYPE_CHECKING:
     from cube_harness.summary import SummaryProcessor
+
+
+@dataclass
+class EventCounter:
+    """Monotonic event numbering shared by `TurnRecorder` and `MonitoredTool`.
+
+    Both writers emit `TrajectoryEvent`s onto the same event stream;
+    each needs a globally-unique sequence number so files land at
+    `events/000_*.msgpack.zst`, `events/001_*.msgpack.zst`, … without
+    overwriting each other. Episode constructs one counter per episode
+    and hands it to both writers.
+    """
+
+    n: int = 0
+
+    def next(self) -> int:
+        """Return the current value and increment for the next call."""
+        n = self.n
+        self.n += 1
+        return n
+
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +155,8 @@ class Turn:
 class TurnRecorder:
     """The agent's outbound telemetry sink. Built by Episode; passed to agent.run.
 
-    Cross-turn state (trajectory, storage, summary) lives on Episode and
-    is bound here at construction. The agent never reads any of that
+    Cross-turn state (storage, summary, episode metadata) lives on Episode
+    and is bound here at construction. The agent never reads any of that
     state directly — only writes to it through this recorder.
 
     `current_turn_id` is a read-only view onto the active turn's id, used
@@ -144,16 +165,23 @@ class TurnRecorder:
     `RESET_PARENT_EVENT_ID` (anything fired during reset or
     finalization is attributed to that boundary, not to an absent
     agent turn).
+
+    Events stream to disk via `storage.save_event(event, trajectory_id, n)`
+    where `n` comes from the shared `EventCounter`. There is no in-memory
+    accumulation — `Episode.run` returns an `EpisodeView` and consumers
+    read from storage.
     """
 
     def __init__(
         self,
-        trajectory: Trajectory,
+        trajectory_id: str,
         storage: object | None = None,
         summary: "SummaryProcessor | None" = None,
         budget: object | None = None,
+        event_counter: EventCounter | None = None,
+        metadata_updates: dict | None = None,
     ) -> None:
-        self.trajectory = trajectory
+        self.trajectory_id = trajectory_id
         self.storage = storage
         self.summary = summary
         # Budget is `cube_harness.tool.Budget` but we keep the type loose
@@ -162,6 +190,14 @@ class TurnRecorder:
         # AgentEvent bumps budget.turns so MonitoredTool's
         # max-turns check fires correctly.
         self.budget = budget
+        # Shared with MonitoredTool so both writers emit unique event nums.
+        # Default: a recorder-private counter (used by tests that don't
+        # install monitoring on a task).
+        self.event_counter = event_counter if event_counter is not None else EventCounter()
+        # Mutable side-channel dict passed from Episode. record_external_run
+        # writes connector-specific data here; Episode merges it into the
+        # final EpisodeMetadata.metadata at finalize_episode time.
+        self.metadata_updates = metadata_updates if metadata_updates is not None else {}
         self._current_turn_id: str | None = None
         self._n_turns_emitted = 0
 
@@ -212,13 +248,14 @@ class TurnRecorder:
         truly opaque frameworks.
         """
         event = AgentEvent(response_text=final_text)
-        # Stash side-channel data on Trajectory.metadata rather than
-        # mangling AgentEvent typed fields. Connectors can re-read it
-        # post-run (XRay, scoring scripts, ADP export, ...).
+        # Stash side-channel data on the metadata_updates dict — Episode
+        # merges it into the final EpisodeMetadata.metadata at
+        # finalize_episode time. Connectors can re-read it post-run
+        # (XRay, scoring scripts, ADP export, ...).
         if usage is not None:
-            self.trajectory.metadata.setdefault("external_run_usage", []).append(usage.model_dump(mode="json"))
+            self.metadata_updates.setdefault("external_run_usage", []).append(usage.model_dump(mode="json"))
         if raw_events:
-            self.trajectory.metadata.setdefault("external_run_raw_events", []).extend(raw_events)
+            self.metadata_updates.setdefault("external_run_raw_events", []).extend(raw_events)
         start = time.time()
         self._current_turn_id = event.id
         self._flush_agent_event(event, start, start)
@@ -306,14 +343,12 @@ class TurnRecorder:
             raise BudgetExceeded()
 
     def _append_event(self, te: TrajectoryEvent) -> None:
-        """Persist an event to storage + summary; honour `trajectory.streaming`
-        for the in-memory list (stream-trajectory-steps invariant)."""
-        if not self.trajectory.streaming:
-            self.trajectory.events.append(te)
+        """Stream one event to storage + summary. Never keeps a copy in
+        memory — the EpisodeView is the read interface, this writes."""
         if self.storage is not None:
             save_event = getattr(self.storage, "save_event", None)
             if save_event is not None:
-                save_event(te, self.trajectory.id, len(self.trajectory.events) - 1)
+                save_event(te, self.trajectory_id, self.event_counter.next())
         if self.summary is not None:
             on_event = getattr(self.summary, "on_event", None)
             if on_event is not None:
