@@ -79,6 +79,42 @@ class _ScriptedParallel(GennyParallel):
         )
 
 
+def test_genny_parallel_config_forces_parallel_tool_calls() -> None:
+    """GennyParallelConfig.make() must enforce llm_config.parallel_tool_calls=True.
+
+    Without this, the LLM emits one action per turn and asyncio.gather
+    in run() fans out over a single-element list — a no-op. Caught by
+    the gpt-5.4-mini TerminalBench-2 reference baseline reproduction,
+    which reached parity on accuracy but never actually exercised
+    parallel dispatch. Asserting on the agent class enforces the
+    invariant at construction time rather than trusting the caller."""
+    from cube_harness.agents.genny_parallel import GennyParallelConfig
+    from cube_harness.llm import LLMConfig
+
+    # Caller leaves parallel_tool_calls at its default (False).
+    cfg = GennyParallelConfig(llm_config=LLMConfig(model_name="openai/gpt-4o-mini"))
+    assert cfg.llm_config.parallel_tool_calls is False, "test precondition"
+
+    cfg.make(action_set=[])
+    # GennyParallelConfig.make should have flipped it.
+    assert cfg.llm_config.parallel_tool_calls is True, (
+        "GennyParallelConfig.make must force parallel_tool_calls=True; "
+        "without it, the LLM emits one action per turn and the parallel "
+        "dispatch is a no-op."
+    )
+
+
+def test_genny_parallel_config_respects_explicit_true() -> None:
+    """If the caller already set parallel_tool_calls=True, the make()
+    path should not re-set it (avoids spurious log line)."""
+    from cube_harness.agents.genny_parallel import GennyParallelConfig
+    from cube_harness.llm import LLMConfig
+
+    cfg = GennyParallelConfig(llm_config=LLMConfig(model_name="openai/gpt-4o-mini", parallel_tool_calls=True))
+    cfg.make(action_set=[])
+    assert cfg.llm_config.parallel_tool_calls is True
+
+
 def test_parallel_dispatch_records_sibling_tool_calls() -> None:
     """N actions returned from one assistant turn should produce N
     sibling ToolCallEvents sharing the parent AgentEvent's id as

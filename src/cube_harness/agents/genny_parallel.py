@@ -47,12 +47,30 @@ logger = logging.getLogger(__name__)
 
 
 class GennyParallelConfig(GennyConfig):
-    """Same as GennyConfig — set `llm_config.parallel_tool_calls=True`
-    in the config so the model is allowed to emit multiple tool calls
-    per turn (otherwise this agent serializes by accident at the LLM
-    level)."""
+    """Same as GennyConfig, but **forces** `llm_config.parallel_tool_calls=True`
+    at `make()` time.
+
+    Without this, GennyParallel silently degrades: `LLMConfig`'s default
+    is `parallel_tool_calls=False`, so the LLM emits one tool call per
+    turn and the `asyncio.gather` in `run()` fans out over a
+    one-element list — same wall-clock as sequential dispatch.
+
+    Caught by the agent-owns-loop reference baseline reproduction
+    (gpt-5.4-mini on TerminalBench-2): the run reached parity with
+    plain Genny on accuracy, but it never actually exercised parallel
+    dispatch because nothing flipped the flag. The fix is to enforce
+    it on the agent class that needs it, not to rely on the caller
+    remembering to set it.
+    """
 
     def make(self, action_set=None, task_id: str | None = None, **kwargs) -> "GennyParallel":
+        if not self.llm_config.parallel_tool_calls:
+            logger.info(
+                "GennyParallelConfig: forcing llm_config.parallel_tool_calls=True "
+                "(was False — the LLM would otherwise emit one tool call per turn "
+                "and the parallel dispatch would be a no-op)."
+            )
+            self.llm_config = self.llm_config.model_copy(update={"parallel_tool_calls": True})
         return GennyParallel(config=self, action_schemas=action_set or [], task_id=task_id)
 
 
