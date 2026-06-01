@@ -72,34 +72,44 @@ class Turn:
 
     @property
     def id(self) -> str:
+        """The AgentEvent.id that this turn will flush as — exposed so
+        callers (and MonitoredTool's parent_event_id_getter) can read
+        the active turn id mid-turn."""
         return self._event.id
 
     # --- granular adders ---
 
     def add_llm_call(self, call: LLMCall) -> None:
+        """Append one LLMCall record (full prompt / response / usage) to
+        the in-progress turn."""
         self._event.llm_calls.append(call)
 
     def add_thought(self, text: str) -> None:
-        # Multiple add_thought calls in one turn concatenate so streaming
-        # reasoning chunks don't lose history.
+        """Append a reasoning chunk. Multiple add_thought calls within
+        one turn concatenate so streaming reasoning isn't lost."""
         if self._event.thoughts is None:
             self._event.thoughts = text
         else:
             self._event.thoughts += text
 
     def add_response_text(self, text: str) -> None:
+        """Append assistant prose. Concatenates across multiple calls in
+        the same turn (streaming-friendly)."""
         if self._event.response_text is None:
             self._event.response_text = text
         else:
             self._event.response_text += text
 
     def add_action(self, action: Action) -> None:
+        """Append one action to the turn's outbound action list."""
         self._event.actions.append(action)
 
     def add_profile(self, label: str, start: float, end: float) -> None:
+        """Record a labelled timing span (used by XRay's profiling tab)."""
         self._event.profiling[label] = (start, end)
 
     def add_error(self, err: StepError) -> None:
+        """Mark this turn as failed with the supplied StepError."""
         self._event.error = err
 
     # --- context manager ---
@@ -266,11 +276,18 @@ class TurnRecorder:
     # --- read-only state surfaced for MonitoredTool's getter ---
 
     def current_turn_id(self) -> str:
+        """The id of the most recently opened AgentEvent. Used by
+        MonitoredTool's `parent_event_id_getter` so tool calls fired
+        inside a turn record that turn's id as parent. Returns the
+        RESET sentinel when no turn has been opened yet."""
         return self._current_turn_id or RESET_PARENT_EVENT_ID
 
     # --- internals ---
 
     def _flush_agent_event(self, event: AgentEvent, start: float, end: float) -> None:
+        """Persist a finished AgentEvent — bumps `budget.turns`, raises
+        BudgetExceeded if that puts us past `max_turns`, then writes
+        through `_append_event` (storage + summary, optional in-memory)."""
         self._n_turns_emitted += 1
         if self.budget is not None:
             # Bump budget.turns so MonitoredTool's exhausted check fires

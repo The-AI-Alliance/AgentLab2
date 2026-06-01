@@ -79,6 +79,8 @@ class Episode:
 
     @classmethod
     def load_episode_from_config(cls, config_path: Path, benchmark: Benchmark | None = None) -> Self:
+        """Recreate an Episode from a persisted EpisodeConfig — used by
+        the retry / resume path to rerun a previously-prepared episode."""
         # Unchanged — relies on EpisodeConfig.model_validate_json.
         with open(config_path) as f:
             episode_config = EpisodeConfig.model_validate_json(f.read())

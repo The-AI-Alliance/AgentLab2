@@ -8,6 +8,8 @@ from cube_harness.llm import LLMCall
 
 
 def _new_event_id() -> str:
+    """Allocate a fresh per-event id used as the AgentEvent.id and the
+    `turn_id` of its child ToolCallEvent siblings."""
     return uuid4().hex
 
 
@@ -145,6 +147,13 @@ class Trajectory(TypedBaseModel):
     streaming: bool = False
 
     def last_env_step(self) -> EnvironmentOutput:
+        """Return the most recent EnvironmentOutput in the trajectory.
+
+        Prefers the new event stream (ToolCallEvent.output) over the
+        legacy steps view. Raises ValueError if neither stream has any
+        env output. With `streaming=True` the in-memory streams are
+        empty during a run — call this on a loaded trajectory, not a
+        live one."""
         # Prefer events stream when present.
         for event in reversed(self.events):
             if isinstance(event.output, ToolCallEvent):
@@ -171,6 +180,7 @@ class Trajectory(TypedBaseModel):
 
     @property
     def n_agent_steps(self) -> int:
+        """Number of agent turns in this trajectory (legacy alias)."""
         # When the events stream is populated, it is authoritative —
         # `steps` may be a synthesized legacy view (see storage
         # _events_to_legacy_steps) so adding both would double-count.
@@ -180,20 +190,24 @@ class Trajectory(TypedBaseModel):
 
     @property
     def n_env_steps(self) -> int:
+        """Number of env interactions in this trajectory (legacy alias)."""
         if self.events:
             return self.n_tool_calls
         return sum(1 for step in self.steps if isinstance(step.output, EnvironmentOutput))
 
     @property
     def n_agent_events(self) -> int:
+        """Number of AgentEvent entries in the event stream."""
         return sum(1 for e in self.events if isinstance(e.output, AgentEvent))
 
     @property
     def n_tool_calls(self) -> int:
+        """Number of ToolCallEvent entries in the event stream."""
         return sum(1 for e in self.events if isinstance(e.output, ToolCallEvent))
 
     @property
     def n_evaluations(self) -> int:
+        """Number of EvaluationEvent entries (≤1 per trajectory in practice)."""
         return sum(1 for e in self.events if isinstance(e.output, EvaluationEvent))
 
 

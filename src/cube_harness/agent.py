@@ -58,7 +58,10 @@ class AgentConfig(ValidatedConfig, ABC):
 
     @abstractmethod
     def make(self, action_set: list[ActionSchema] | None = None, **kwargs) -> "Agent":
-        pass
+        """Instantiate the live Agent from this config + the task's action_set.
+
+        Called by Episode after task.reset; subclasses wire in the
+        action schemas, model handle, and any per-task overrides."""
 
 
 class Agent(ABC):

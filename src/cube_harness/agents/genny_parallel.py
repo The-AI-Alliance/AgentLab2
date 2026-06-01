@@ -64,6 +64,8 @@ class GennyParallelConfig(GennyConfig):
     """
 
     def make(self, action_set=None, task_id: str | None = None, **kwargs) -> "GennyParallel":
+        """Instantiate GennyParallel; flip llm_config.parallel_tool_calls
+        to True if the caller left it at the default False."""
         if not self.llm_config.parallel_tool_calls:
             logger.info(
                 "GennyParallelConfig: forcing llm_config.parallel_tool_calls=True "
@@ -83,6 +85,8 @@ class GennyParallel(Genny):
     """
 
     async def run(self, initial_obs: Observation, task: Task, recorder: TurnRecorder) -> None:
+        """Drive the agent loop with `asyncio.gather` parallel dispatch
+        of the N actions returned per assistant turn."""
         obs = initial_obs
         while True:
             agent_output = await asyncio.to_thread(self.step, obs)

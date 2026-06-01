@@ -46,7 +46,9 @@ class Storage(Protocol):
 
     def save_step(self, step: TrajectoryStep, trajectory_id: str, step_num: int) -> None: ...
 
-    def save_event(self, event: TrajectoryEvent, trajectory_id: str, event_num: int) -> None: ...
+    def save_event(self, event: TrajectoryEvent, trajectory_id: str, event_num: int) -> None:
+        """Persist one TrajectoryEvent (agent-owns-loop event stream)."""
+        ...
 
     def save_episode_config(self, episode_config: "EpisodeConfig") -> None: ...
 
@@ -91,6 +93,8 @@ def _step_filename(step_num: int, step: TrajectoryStep) -> str:
 
 
 def _event_kind(event: TrajectoryEvent) -> str:
+    """Map a TrajectoryEvent to its on-disk filename suffix
+    (`agent` / `tool_call` / `eval`)."""
     if isinstance(event.output, AgentEvent):
         return "agent"
     if isinstance(event.output, ToolCallEvent):
@@ -101,16 +105,20 @@ def _event_kind(event: TrajectoryEvent) -> str:
 
 
 def _event_filename(event_num: int, event: TrajectoryEvent) -> str:
+    """Build the on-disk filename for one event: `NNN_<kind>.msgpack.zst`."""
     return f"{event_num:03d}_{_event_kind(event)}.msgpack.zst"
 
 
 def _serialize_event(event: TrajectoryEvent) -> bytes:
+    """Compress a TrajectoryEvent to bytes (msgpack + zstd, level 3)."""
     data = json.loads(event.model_dump_json())
     packed = msgpack.packb(data, use_bin_type=True)
     return _get_compressor().compress(packed)
 
 
 def _deserialize_event(raw: bytes) -> dict:
+    """Decode bytes written by `_serialize_event` back to a dict ready
+    for `TrajectoryEvent.model_validate`."""
     decompressed = _get_decompressor().decompress(raw)
     return msgpack.unpackb(decompressed, raw=False)
 

@@ -72,6 +72,10 @@ class Budget(TypedBaseModel):
 
     @property
     def exhausted(self) -> bool:
+        """True iff any configured limit (turns / tool_calls / cost /
+        wallclock) is at-or-past its cap. Checked by MonitoredTool on
+        entry to every execute_action and by TurnRecorder after every
+        AgentEvent flush."""
         if self.turns >= self.max_turns:
             return True
         if self.max_tool_calls is not None and self.tool_calls >= self.max_tool_calls:
@@ -125,6 +129,10 @@ def _record_tool_call(
     storage: object | None,
     summary: "SummaryProcessor | None",
 ) -> None:
+    """Persist a ToolCallEvent to storage + summary, and append to the
+    in-memory event list when `trajectory.streaming` is False. Bumps
+    `budget.tool_calls`. Shared between MonitoredTool (sync) and
+    AsyncMonitoredTool (async)."""
     env_output = _to_env_output(result)
     event = ToolCallEvent(
         parent_event_id=parent_event_id,
@@ -176,6 +184,9 @@ class _MonitorState:
         self.summary = summary
 
     def parent_event_id(self) -> str:
+        """Resolve the parent_event_id to attribute to the next recorded
+        ToolCallEvent — late-bound to the TurnRecorder's current turn,
+        with a `RESET` sentinel fallback when no turn is active."""
         if self.parent_event_id_getter is not None:
             value = self.parent_event_id_getter()
             if value is not None:
@@ -220,17 +231,23 @@ class MonitoredTool(AbstractTool):
 
     @property
     def action_set(self) -> list[ActionSchema]:
+        """Delegate to the wrapped tool — transparent action discovery."""
         return self.inner.action_set
 
     def reset(self) -> None:
+        """Delegate reset to the wrapped tool."""
         self.inner.reset()
 
     def close(self) -> None:
+        """Delegate close to the wrapped tool."""
         self.inner.close()
 
     # --- monitored execution ---
 
     def execute_action(self, action: Action) -> Observation | StepError:
+        """Run the wrapped tool's execute_action while recording a
+        ToolCallEvent + bumping the budget. Raises BudgetExceeded if the
+        budget is already exhausted on entry."""
         if self._state.budget.exhausted:
             raise BudgetExceeded(action=action)
         start = time.time()
@@ -298,15 +315,21 @@ class AsyncMonitoredTool(AbstractAsyncTool):
 
     @property
     def action_set(self) -> list[ActionSchema]:
+        """Delegate to the wrapped tool — transparent action discovery."""
         return self.inner.action_set
 
     async def reset(self) -> None:
+        """Delegate reset to the wrapped async tool."""
         await self.inner.reset()
 
     async def close(self) -> None:
+        """Delegate close to the wrapped async tool."""
         await self.inner.close()
 
     async def execute_action(self, action: Action) -> Observation | StepError:
+        """Run the wrapped async tool's execute_action while recording a
+        ToolCallEvent + bumping the budget. Raises BudgetExceeded if the
+        budget is already exhausted on entry."""
         if self._state.budget.exhausted:
             raise BudgetExceeded(action=action)
         start = time.time()
@@ -414,6 +437,9 @@ def _wrap_toolbox_in_place(
     storage: object | None,
     summary: "SummaryProcessor | None",
 ) -> None:
+    """Recursively wrap each leaf tool of a Toolbox / AsyncToolbox with
+    its sync/async MonitoredTool variant, rebuilding the dispatch index
+    so action-name lookups resolve to the wrappers."""
     new_tools: list = []
     for tool in toolbox.tools:
         if isinstance(tool, (Toolbox, AsyncToolbox)):
