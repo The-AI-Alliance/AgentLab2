@@ -8,7 +8,6 @@ from cube.benchmark import Benchmark, RuntimeContext
 from cube.core import EnvironmentOutput, TypedBaseModel
 from cube.resource import IncompatibleInfraError
 from cube.task import TaskConfig
-from cube.tool import Toolbox
 from opentelemetry.trace import StatusCode
 from termcolor import colored
 
@@ -233,20 +232,13 @@ class Episode:
                     event_counter=event_counter,
                 )
 
-                # 4. Compose the toolbox the agent will see: the task's
-                # (now-monitored) tools + the agent's own non-monitored
-                # tools (memory, scratchpad, …). From the agent's POV,
-                # everything is just a tool — no `task` reference leaks.
-                task_tool = getattr(task, "tool", None) or getattr(task, "toolbox", None)
-                own_tools = [cfg.make() for cfg in self.config.agent_config.own_tool_configs]
-                if isinstance(task_tool, Toolbox) and own_tools:
-                    toolbox = Toolbox([*task_tool.tools, *own_tools])
-                elif own_tools:
-                    # Single task tool + own tools → wrap into a Toolbox.
-                    toolbox = Toolbox([task_tool, *own_tools]) if task_tool is not None else Toolbox(own_tools)
-                else:
-                    # No own tools — pass the task's tool/toolbox through.
-                    toolbox = task_tool
+                # 4. The toolbox the agent will see is just the task's
+                # (now-monitored) tool. Agent-private tools (memory,
+                # scratchpad, …) live on the agent itself — the agent
+                # composes them locally if it wants a unified dispatch:
+                #     combined = Toolbox([toolbox, self.memory])
+                # Or calls them directly. The framework stays out of it.
+                toolbox = getattr(task, "tool", None) or getattr(task, "toolbox", None)
 
                 # 5. Record the initial obs as a synthetic ToolCallEvent
                 # whose parent is the RESET sentinel.

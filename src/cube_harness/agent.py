@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from cube.core import ActionSchema, Observation, StepError, ValidatedConfig
-from cube.tool import AbstractAsyncTool, ToolConfig
+from cube.tool import AbstractAsyncTool
 from pydantic import Field
 
 from cube_harness.core import AgentOutput
@@ -49,17 +49,6 @@ class AgentConfig(ValidatedConfig, ABC):
             "before the tool schema is built — a toggleable knob for testing better "
             "wording without editing the tool. A proven override graduates into the "
             "tool's docstring at the source via a PR."
-        ),
-    )
-    own_tool_configs: list[ToolConfig] = Field(
-        default_factory=list,
-        description=(
-            "Tools the agent brings to the toolbox (memory, scratchpad, planner, …). "
-            "Episode merges these with the task's monitored toolbox before passing to "
-            "`agent.run`. Default: no own tools — agent only has the task's tools. "
-            "Agent-owned tools are NOT wrapped in MonitoredTool: their calls don't "
-            "appear in the trajectory and don't trigger task.finished/evaluate. "
-            "Treat them as private agent infrastructure."
         ),
     )
 

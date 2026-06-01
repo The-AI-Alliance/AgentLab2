@@ -237,15 +237,16 @@ Agents that don't override get the one-at-a-time default for free.
 
 The three parameters:
 - **`initial_obs`** — the observation from `task.reset()`, supplied by `Episode`.
-- **`toolbox`** — a `cube.tool.Toolbox` (or single-tool `AbstractTool`)
-  composed by Episode: the task's tools wrapped in `MonitoredTool` +
-  the agent's own (non-monitored) tools from
-  `AgentConfig.own_tool_configs`. The agent calls
-  `toolbox.execute_action(action)` for ANY tool — the same call site
-  whether the action is the task's `bash` or the agent's `remember`.
-  No `task` reference reaches the agent. Done detection, step-wise
-  evaluation, and obs_postprocess are absorbed by MonitoredTool —
-  the agent's view is `Observation | StepError`.
+- **`toolbox`** — the task's tool (a `cube.tool.Toolbox` or single
+  `AbstractTool`), with `MonitoredTool` wrappers installed in place by
+  Episode. The agent calls `toolbox.execute_action(action)`; no `task`
+  reference reaches the agent. Done detection, step-wise evaluation,
+  and obs_postprocess are absorbed by MonitoredTool — the agent's
+  view of the return value is just `Observation | StepError`. Agents
+  that want their own private tools (memory, scratchpad, planner) hold
+  them as instance fields and compose locally if they want a unified
+  dispatch: `combined = Toolbox([toolbox, self.memory])`. The framework
+  doesn't have a hook for this — agents have full Python.
 - **`recorder`** — what the agent reports out. Telemetry-only. Agents
   emit LLM calls, thoughts, response text, profiling.
 
@@ -307,19 +308,25 @@ Episode owns lifecycle; MonitoredTool absorbs cube-standard's
 `Task.step` semantics (STOP_ACTION, obs_postprocess, validate_per_step,
 finished) transparently.
 
-#### A2. Agent with its own (non-monitored) tools
+#### A2. Agent with its own private tools
 
-The toolbox is composed — the agent can declare its own tools in
-`AgentConfig.own_tool_configs` and call them through the same
-`toolbox.execute_action` surface:
+The framework doesn't have a hook for agent-private tools — agents
+have full Python. Hold tools as instance fields and use them directly
+or compose locally:
 
 ```python
 class AgentWithMemory(Agent):
-    """Memory tool is just another tool in the toolbox. The agent
-    doesn't know which tools are task-side vs its own; dispatch by
-    action name routes each call."""
+    def __init__(self, config, llm):
+        super().__init__(config)
+        self.llm = llm
+        self.memory = MemoryTool()  # private; never reaches Episode
 
     async def run(self, initial_obs, toolbox, recorder):
+        # Option A: compose locally if you want a unified dispatch.
+        # `remember` (the agent's own) and `bash` (the task's) become
+        # the same call site. Agent-owned tools don't appear in the
+        # trajectory and don't trigger task.finished() polling.
+        combined = Toolbox([toolbox, self.memory])
         obs = initial_obs
         while True:
             with recorder.begin_turn() as turn:
@@ -330,21 +337,11 @@ class AgentWithMemory(Agent):
                     turn.add_action(a)
             if not actions:
                 return
-            # `remember` is the agent's own (non-monitored) tool;
-            # `bash` is the task's (monitored) tool. Same call site.
-            obs = await toolbox.execute_action(actions[0])
+            obs = await combined.execute_action(actions[0])
 
-# AgentConfig:
-class MyAgentConfig(AgentConfig):
-    own_tool_configs: list[ToolConfig] = Field(
-        default_factory=lambda: [MemoryToolConfig(), ScratchpadToolConfig()]
-    )
+        # Option B: call self.memory.read(...) directly inside step logic
+        # when the agent decides to remember — no toolbox involvement.
 ```
-
-Episode merges: `Toolbox([*task.tool.tools, *agent_own_tools])`.
-Agent-owned tools are NOT wrapped in MonitoredTool — they don't
-appear in the trajectory and don't trigger `task.finished()` polling.
-Treat them as private agent infrastructure.
 
 #### B. Sync agent (option 1) — `async def` with no awaits inside
 
