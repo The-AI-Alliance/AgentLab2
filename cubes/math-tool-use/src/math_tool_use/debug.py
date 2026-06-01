@@ -15,7 +15,7 @@ from cube.benchmark import Benchmark
 from cube.core import Action, ActionSchema, Observation
 from cube.task import TaskConfig
 from cube.testing import run_debug_suite
-from math_tool_use.benchmark import MathToolUseBenchmark
+from math_tool_use.benchmark import MathToolUseBenchmarkConfig
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class DebugAgent:
 
 
 def get_debug_benchmark() -> Benchmark:
-    return MathToolUseBenchmark().subset_from_list(list(_TASK_ACTIONS.keys()))
+    return MathToolUseBenchmarkConfig().subset_from_list(list(_TASK_ACTIONS.keys()))
 
 
 def get_debug_task_configs() -> list[TaskConfig]:

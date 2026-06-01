@@ -1,14 +1,22 @@
-from math_tool_use.benchmark import MathToolUseBenchmark
+from math_tool_use.benchmark import MathToolUseBenchmark, MathToolUseBenchmarkConfig
 from math_tool_use.debug import DebugAgent, get_debug_benchmark, make_debug_agent
-from math_tool_use.task import MathToolUseTaskConfig, SolveMathToolUseTask
+from math_tool_use.task import (
+    MathToolUseTask,
+    MathToolUseTaskConfig,
+    MathToolUseTaskExecutionInfo,
+    MathToolUseTaskMetadata,
+)
 from math_tool_use.tool import MathToolUseTool, MathToolUseToolConfig
 
 __all__ = [
     "MathToolUseTool",
     "MathToolUseToolConfig",
+    "MathToolUseTask",
     "MathToolUseTaskConfig",
-    "SolveMathToolUseTask",
+    "MathToolUseTaskMetadata",
+    "MathToolUseTaskExecutionInfo",
     "MathToolUseBenchmark",
+    "MathToolUseBenchmarkConfig",
     "DebugAgent",
     "get_debug_benchmark",
     "make_debug_agent",
