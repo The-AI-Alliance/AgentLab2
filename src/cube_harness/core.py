@@ -135,6 +135,14 @@ class Trajectory(TypedBaseModel):
     end_time: float | None = None
     reward_info: dict = Field(default_factory=dict)
     summary_stats: dict | None = None
+    # When True, MonitoredTool / TurnRecorder skip the in-memory
+    # `events.append(...)` step — events stream to storage + summary
+    # ONLY. Preserves the stream-trajectory-steps invariant: driver /
+    # worker RAM stays flat regardless of trajectory size (the
+    # OSWorld-style 20 GB-per-job fix). Unit tests build trajectories
+    # with streaming=False (the default) so they can inspect events
+    # in-memory; Episode flips it to True for production runs.
+    streaming: bool = False
 
     def last_env_step(self) -> EnvironmentOutput:
         # Prefer events stream when present.

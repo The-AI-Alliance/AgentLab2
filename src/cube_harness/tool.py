@@ -133,7 +133,11 @@ def _record_tool_call(
         turn_id=parent_event_id,
     )
     trajectory_event = TrajectoryEvent(output=event, start_time=start, end_time=end)
-    trajectory.events.append(trajectory_event)
+    # Only accumulate in RAM when the trajectory opts in. Episode flips
+    # `streaming=True` (stream-trajectory-steps invariant); unit tests
+    # leave the default False so they can inspect traj.events directly.
+    if not trajectory.streaming:
+        trajectory.events.append(trajectory_event)
 
     if storage is not None:
         save_event = getattr(storage, "save_event", None)

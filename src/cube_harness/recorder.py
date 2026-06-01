@@ -289,7 +289,10 @@ class TurnRecorder:
             raise BudgetExceeded()
 
     def _append_event(self, te: TrajectoryEvent) -> None:
-        self.trajectory.events.append(te)
+        """Persist an event to storage + summary; honour `trajectory.streaming`
+        for the in-memory list (stream-trajectory-steps invariant)."""
+        if not self.trajectory.streaming:
+            self.trajectory.events.append(te)
         if self.storage is not None:
             save_event = getattr(self.storage, "save_event", None)
             if save_event is not None:

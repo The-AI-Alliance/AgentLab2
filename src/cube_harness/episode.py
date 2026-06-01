@@ -179,8 +179,14 @@ class Episode:
                 initial = EnvironmentOutput(obs=obs, info=info)
 
                 agent_name = self.config.agent_config.agent_name
+                # `streaming=True` keeps driver / worker RAM flat:
+                # MonitoredTool + TurnRecorder write each event to
+                # storage + summary but skip the in-memory
+                # `events.append` (stream-trajectory-steps invariant
+                # extended to the event-stream model).
                 trajectory = Trajectory(
                     id=trajectory_id,
+                    streaming=True,
                     metadata={
                         "task_id": task_id,
                         "agent_name": agent_name,
@@ -235,17 +241,16 @@ class Episode:
                     raise
 
                 # 6. Terminal evaluation. cube-standard's Task.evaluate
-                # signature accepts obs=None — tasks track their own
-                # final state internally. We pass the last observation
-                # we saw if any, for the common case. Errors propagate
-                # so callers (legacy episode tests, retry logic) see the
-                # real exception; the `finally` block still finalizes the
-                # trajectory.
-                final_obs = trajectory.last_env_output()
-                if final_obs is None:
-                    reward, info = task.evaluate()
-                else:
-                    reward, info = task.evaluate(final_obs.obs)
+                # accepts obs=None — tasks track their own final state
+                # internally. We pass None deliberately: with
+                # `trajectory.streaming=True` the in-memory events list
+                # is empty, so `trajectory.last_env_output()` would also
+                # be None and the conditional was pointless. Cube tasks
+                # that need a final obs reach for `self._latest_obs`
+                # set inside their own `step()` — that path is
+                # untouched. Errors propagate so callers see the real
+                # exception; `finally` still finalizes the trajectory.
+                reward, info = task.evaluate()
                 recorder.record_evaluation(reward, info)
 
                 # Finalize: summary_stats + final save + record.
