@@ -116,20 +116,20 @@ def _check(label: str, exp: Experiment, result: ExpResult) -> int:
     if len(result.trajectories) != N_TASKS:
         return _fail(f"[{label}] expected {N_TASKS} trajectories, got {len(result.trajectories)}")
 
-    for traj_id, traj in result.trajectories.items():
-        # 1. Returned trajectory is step-less but summarised (nothing accumulated in RAM).
-        if traj.steps:
-            return _fail(f"[{label}] {traj_id}: returned trajectory still holds {len(traj.steps)} steps in RAM")
-        if not traj.summary_stats:
-            return _fail(f"[{label}] {traj_id}: summary_stats missing on returned trajectory")
-        if (traj.reward_info or {}).get("reward") != 1.0:
-            return _fail(f"[{label}] {traj_id}: reward_info missing/wrong: {traj.reward_info}")
+    for traj_id, view in result.trajectories.items():
+        # 1. Returned EpisodeView holds no decoded events in RAM (cache empty).
+        if view._cache:
+            return _fail(f"[{label}] {traj_id}: returned view cache pre-populated with {len(view._cache)} events")
+        if not view.summary_stats:
+            return _fail(f"[{label}] {traj_id}: summary_stats missing on returned view")
+        if (view.reward_info or {}).get("reward") != 1.0:
+            return _fail(f"[{label}] {traj_id}: reward_info missing/wrong: {view.reward_info}")
 
-        # 2. Steps are fully persisted and reload from disk.
-        loaded = storage.load_trajectory(traj_id)
-        if len(loaded.steps) < 2:
-            return _fail(f"[{label}] {traj_id}: expected >=2 persisted steps, got {len(loaded.steps)}")
-        if loaded.summary_stats != traj.summary_stats:
+        # 2. Events are fully persisted and reload from disk.
+        reopened = storage.load_episode(traj_id)
+        if len(reopened) < 2:
+            return _fail(f"[{label}] {traj_id}: expected >=2 persisted events, got {len(reopened)}")
+        if reopened.summary_stats != view.summary_stats:
             return _fail(f"[{label}] {traj_id}: summary_stats changed across disk round-trip")
 
     # 3. Stats + eval-log export work off summary_stats (would raise/return 0 if broken).

@@ -150,10 +150,10 @@ def main() -> int:
 
         storage = FileStorage(exp.output_dir)
         traj_id = next(iter(result.trajectories))
-        loaded = storage.load_trajectory(traj_id)
+        view = storage.load_episode(traj_id)
 
-        agent_events = [e for e in loaded.events if isinstance(e.output, AgentEvent)]
-        tool_calls = [e for e in loaded.events if isinstance(e.output, ToolCallEvent)]
+        agent_events = [e for e in view if isinstance(e.output, AgentEvent)]
+        tool_calls = [e for e in view if isinstance(e.output, ToolCallEvent)]
 
         # Expect ≥1 AgentEvent + 3 tool-call siblings + the reset
         # ToolCallEvent + possibly a graceful-stop AgentEvent.

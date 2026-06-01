@@ -141,40 +141,40 @@ def main() -> int:
         traj_id = next(iter(result.trajectories))
 
         storage = FileStorage(exp.output_dir)
-        loaded = storage.load_trajectory(traj_id)
+        view = storage.load_episode(traj_id)
 
         # The new event stream is the source of truth.
-        if loaded.n_agent_events < 1:
+        if view.n_agent_events < 1:
             return _fail("no AgentEvent in event stream")
-        if loaded.n_tool_calls < 1:
+        if view.n_tool_calls < 1:
             return _fail("no ToolCallEvent in event stream")
 
-        # The legacy steps view is materialized for XRay compat.
-        if not loaded.steps:
-            return _fail("trajectory.steps is empty — XRay legacy view not materialized")
+        # The legacy steps view is still materialized by load_trajectory
+        # so XRay's existing UI keeps rendering through the migration window.
+        legacy = storage.load_trajectory(traj_id)
+        if not legacy.steps:
+            return _fail("legacy trajectory.steps empty — XRay backward-compat broken")
 
-        # last_env_step walks events first (per Phase A), but the legacy
-        # consumers walk .steps. Both paths should agree.
-        last_env = loaded.last_env_step()
+        last_env = legacy.last_env_step()
         if last_env is None or not isinstance(last_env, EnvironmentOutput):
             return _fail("last_env_step did not return an EnvironmentOutput")
 
         # XRay's "agent step" finder pattern: walk steps looking for AgentOutput.
-        agent_outputs = [s for s in loaded.steps if isinstance(s.output, AgentOutput)]
+        agent_outputs = [s for s in legacy.steps if isinstance(s.output, AgentOutput)]
         if not agent_outputs:
             return _fail("no AgentOutput-shaped step in legacy view (XRay would render no agent panel)")
 
-        # Counters fold correctly when events are present.
-        if loaded.n_agent_steps != loaded.n_agent_events:
+        # Counters fold correctly through both views.
+        if legacy.n_agent_steps != view.n_agent_events:
             return _fail(
-                f"n_agent_steps={loaded.n_agent_steps} ≠ n_agent_events={loaded.n_agent_events} "
-                "— counters double-counted (legacy steps were not deduped)"
+                f"legacy n_agent_steps={legacy.n_agent_steps} ≠ view n_agent_events={view.n_agent_events} "
+                "— materialization is inconsistent"
             )
 
         print(
-            f"  ✓ {traj_id}: {loaded.n_agent_events} agent events, "
-            f"{loaded.n_tool_calls} tool calls, "
-            f"legacy steps view has {len(loaded.steps)} steps (XRay sees something to render)"
+            f"  ✓ {traj_id}: {view.n_agent_events} agent events, "
+            f"{view.n_tool_calls} tool calls, "
+            f"legacy steps view has {len(legacy.steps)} steps (XRay sees something to render)"
         )
         print(f"SMOKE OK: {NAME}")
         return 0

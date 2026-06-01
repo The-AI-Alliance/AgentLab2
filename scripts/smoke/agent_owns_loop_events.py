@@ -128,18 +128,18 @@ def _check_trajectory(storage: FileStorage, traj_id: str) -> int:
     if not any("eval" in k for k in kinds):
         return _fail(f"no eval event files: {kinds}")
 
-    loaded = storage.load_trajectory(traj_id)
-    if loaded.n_agent_events < 1:
-        return _fail(f"expected ≥1 AgentEvent, got {loaded.n_agent_events}")
-    if loaded.n_tool_calls < 1:
-        return _fail(f"expected ≥1 ToolCallEvent, got {loaded.n_tool_calls}")
-    if loaded.n_evaluations != 1:
-        return _fail(f"expected exactly 1 EvaluationEvent, got {loaded.n_evaluations}")
+    view = storage.load_episode(traj_id)
+    if view.n_agent_events < 1:
+        return _fail(f"expected ≥1 AgentEvent, got {view.n_agent_events}")
+    if view.n_tool_calls < 1:
+        return _fail(f"expected ≥1 ToolCallEvent, got {view.n_tool_calls}")
+    if view.n_evaluations != 1:
+        return _fail(f"expected exactly 1 EvaluationEvent, got {view.n_evaluations}")
 
     # Back-reference invariant: each ToolCallEvent.parent_event_id must
     # be a preceding AgentEvent.id (or the RESET sentinel).
     agent_event_ids: set[str] = {"reset"}
-    for e in loaded.events:
+    for e in view:
         if isinstance(e.output, AgentEvent):
             agent_event_ids.add(e.output.id)
         elif isinstance(e.output, ToolCallEvent):
@@ -152,12 +152,12 @@ def _check_trajectory(storage: FileStorage, traj_id: str) -> int:
 
     # Summary stats fold the new event stream into the legacy counters
     # so XRay tables keep working.
-    if loaded.summary_stats is None:
-        return _fail("summary_stats missing on loaded trajectory")
-    if loaded.summary_stats.get("n_env_steps", 0) < 1:
-        return _fail(f"summary_stats.n_env_steps={loaded.summary_stats.get('n_env_steps')} — expected ≥1")
+    if view.summary_stats is None:
+        return _fail("summary_stats missing on loaded view")
+    if view.summary_stats.get("n_env_steps", 0) < 1:
+        return _fail(f"summary_stats.n_env_steps={view.summary_stats.get('n_env_steps')} — expected ≥1")
 
-    print(f"  ✓ {traj_id}: {loaded.n_agent_events} agent, {loaded.n_tool_calls} tool_call, {loaded.n_evaluations} eval")
+    print(f"  ✓ {traj_id}: {view.n_agent_events} agent, {view.n_tool_calls} tool_call, {view.n_evaluations} eval")
     return 0
 
 
