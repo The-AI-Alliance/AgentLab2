@@ -8,6 +8,7 @@ Post-Trajectory-removal: events stream to a Storage hook; tests inspect
 what was sent there rather than walking an in-memory list.
 """
 
+import pytest
 from cube.core import Action, ActionSchema, EnvironmentOutput, Observation
 from cube.tool import AbstractTool
 
@@ -297,3 +298,61 @@ def test_recorder_invokes_storage_and_summary_hooks() -> None:
     r.record_evaluation(reward=1.0)
     assert [(tid, n) for tid, n, _ in storage.events] == [("t", 0), ("t", 1)]
     assert summary.seen == 2
+
+
+# ---------------------------------------------------------------------------
+# Budget cost tracking
+# ---------------------------------------------------------------------------
+
+
+def _agent_output_with_cost(cost: float) -> AgentOutput:
+    """AgentOutput carrying a single LLMCall whose usage.cost is `cost`."""
+    return AgentOutput(
+        actions=[_action()],
+        llm_calls=[
+            LLMCall(
+                tag="act",
+                llm_config=LLMConfig(model_name="openai/gpt-4o-mini"),
+                prompt=Prompt(messages=[{"role": "user", "content": "hi"}]),
+                output=Message(content="ok", role="assistant"),
+                usage=Usage(prompt_tokens=10, completion_tokens=2, total_tokens=12, cost=cost),
+            )
+        ],
+    )
+
+
+def test_recorder_accumulates_cost_into_budget() -> None:
+    """Every flushed AgentEvent must add its LLM calls' `usage.cost` to
+    `budget.cost_usd` — otherwise `max_cost_usd` is a footgun (set the
+    ceiling, run never trips it)."""
+    budget = Budget(max_turns=100)  # cost cap unset → ceiling check is None
+    r = TurnRecorder(trajectory_id="t", budget=budget)
+    r.record(_agent_output_with_cost(0.05))
+    r.record(_agent_output_with_cost(0.03))
+    assert budget.cost_usd == 0.08
+
+
+def test_recorder_triggers_budget_exceeded_on_cost() -> None:
+    """Cost crossing `max_cost_usd` must raise BudgetExceeded just like
+    turns / tool_calls do. Three turns at $0.04 each → $0.12 > $0.10 cap."""
+    from cube_harness.tool import BudgetExceeded
+
+    budget = Budget(max_turns=100, max_cost_usd=0.10)
+    r = TurnRecorder(trajectory_id="t", budget=budget)
+    r.record(_agent_output_with_cost(0.04))
+    r.record(_agent_output_with_cost(0.04))
+    # Third call pushes cost to 0.12 → exceeds 0.10.
+    with pytest.raises(BudgetExceeded):
+        r.record(_agent_output_with_cost(0.04))
+    assert budget.cost_usd >= 0.10
+
+
+def test_recorder_handles_agent_event_with_no_llm_calls() -> None:
+    """An AgentEvent with no llm_calls (e.g. a thought-only turn or a
+    connector path) shouldn't crash budget cost bumping."""
+    output = AgentOutput(actions=[_action()], llm_calls=[])
+    budget = Budget(max_turns=100, max_cost_usd=10.0)
+    r = TurnRecorder(trajectory_id="t", budget=budget)
+    r.record(output)
+    assert budget.cost_usd == 0.0
+    assert budget.turns == 1

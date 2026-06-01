@@ -330,17 +330,29 @@ class TurnRecorder:
     # --- internals ---
 
     def _flush_agent_event(self, event: AgentEvent, start: float, end: float) -> None:
-        """Persist a finished AgentEvent — bumps `budget.turns`, raises
-        BudgetExceeded if that puts us past `max_turns`, then writes
-        through `_append_event` (storage + summary, optional in-memory)."""
+        """Persist a finished AgentEvent — bumps `budget.turns` and
+        `budget.cost_usd` from the event's LLM calls, raises
+        BudgetExceeded if that puts us past any cap, then writes
+        through `_append_event` (storage + summary).
+
+        Cost accumulation mirrors what SummaryProcessor does for the
+        per-episode summary — same `llm_call.usage.cost` source — but
+        also feeds `Budget.cost_usd` so `Budget.exhausted` enforces
+        `max_cost_usd` end-to-end."""
         self._n_turns_emitted += 1
         if self.budget is not None:
             # Bump budget.turns so MonitoredTool's exhausted check fires
             # on the right boundary (one LLM turn = one increment).
             self.budget.turns += 1
+            # Bump budget.cost_usd from this turn's LLM calls so the
+            # max_cost_usd ceiling actually trips. Each LLMCall.usage.cost
+            # is the dollar cost the LiteLLM wrapper recorded for that call.
+            for call in event.llm_calls:
+                if call.usage is not None:
+                    self.budget.cost_usd += call.usage.cost
         self._append_event(TrajectoryEvent(output=event, start_time=start, end_time=end))
         # Enforce budget AFTER the flush so the AgentEvent that took us
-        # past max_turns is recorded before we abort the run. This
+        # past the cap is recorded before we abort the run. This
         # mirrors what MonitoredTool does on tool dispatch, but covers
         # the case where the task's step() bypasses the toolbox entirely
         # (e.g. tests with hand-rolled task.step that doesn't dispatch
