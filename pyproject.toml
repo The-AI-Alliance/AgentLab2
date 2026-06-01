@@ -15,6 +15,7 @@ dependencies = [
     "cube-browser-playwright>=0.2.0",  # used by cubes/workarena (PlaywrightSessionConfig)
     "pydantic~=2.0",
     "litellm~=1.80.8",
+    "transformers>=4.51.0",  # llm.py: AutoTokenizer for RoutedLLM/VLLMTokenCounter (RL token counting)
     "Pillow~=11.0",
     "beautifulsoup4~=4.14",
     "numpy>=1.26,<2.3",

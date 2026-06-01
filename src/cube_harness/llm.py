@@ -376,12 +376,17 @@ class LLM:
     def _response_from_completion(self, response: Any) -> LLMResponse:
         usage = self._extract_usage(response)
         completion_logprobs = self._extract_completion_logprobs(response)
+        # Real providers send a str/None finish_reason; coerce anything else to None
+        # so a malformed (or mocked) response can't fail LLMResponse validation.
+        finish_reason = getattr(response.choices[0], "finish_reason", None)
+        if not isinstance(finish_reason, str):
+            finish_reason = None
         return LLMResponse(
             message=response.choices[0].message,
             usage=usage,
             logprobs=[entry["logprob"] for entry in completion_logprobs] if completion_logprobs else None,
             completion_token_ids=[entry["token_id"] for entry in completion_logprobs] if completion_logprobs else None,
-            finish_reason=getattr(response.choices[0], "finish_reason", None),
+            finish_reason=finish_reason,
         )
 
     def _completion_with_retry(self, **kwargs: Any) -> Any:

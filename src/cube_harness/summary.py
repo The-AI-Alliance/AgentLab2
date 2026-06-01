@@ -51,13 +51,10 @@ class ExperimentSummary(BaseModel):
     # Previously named "success_rate" — actually avg reward, not a success rate
     avg_reward: float = Field(0.0, validation_alias=AliasChoices("avg_reward", "success_rate"))
 
-class SummaryProcessor:
-    def on_step(self, step_num: int, step: TrajectoryStep) -> None: ...
-    def on_episode_complete(self, trajectory: Trajectory, storage: "FileStorage") -> None: ...
 
-class PersistentSummaryProcessor(SummaryProcessor):
-    def __init__(self, episode_dir: Path | None) -> None:
-        self._summary_path = episode_dir / "episode_summary.jsonl" if episode_dir is not None else None
+class SummaryProcessor:
+    def __init__(self, episode_dir: Path) -> None:
+        self._summary_path = episode_dir / "episode_summary.jsonl"
         self._n_env_steps = 0
         self._n_agent_steps = 0
         self._total_actions = 0
@@ -89,9 +86,8 @@ class PersistentSummaryProcessor(SummaryProcessor):
         )
 
     def _append(self, entry: StepSummary) -> None:
-        if self._summary_path is not None:
-            with open(self._summary_path, "a") as f:
-                f.write(entry.model_dump_json() + "\n")
+        with open(self._summary_path, "a") as f:
+            f.write(entry.model_dump_json() + "\n")
 
     def on_step(self, step_num: int, step: TrajectoryStep) -> None:
         # Capture the first step-level error so EpisodeRecord can report it without
@@ -149,14 +145,3 @@ class PersistentSummaryProcessor(SummaryProcessor):
         status = EpisodeStatus.FAILED if self.has_error else EpisodeStatus.DONE
         self._append(self._build_entry(-1, status))
         storage.update_experiment_summary(trajectory)
-
-
-class NoopSummaryProcessor(SummaryProcessor):
-    def __init__(self, episode_dir: Path | None) -> None:
-        self._summary_path = None
-
-    def on_step(self, step_num: int, step: TrajectoryStep) -> None:
-        pass
-
-    def on_episode_complete(self, trajectory: Trajectory, storage: "FileStorage") -> None:
-        pass
