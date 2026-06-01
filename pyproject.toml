@@ -17,16 +17,16 @@ dependencies = [
     "litellm~=1.80.8",
     "Pillow~=11.0",
     "beautifulsoup4~=4.14",
-    "numpy~=2.3.5",
-    "ray[default]>=2.52.1",
+    "numpy>=1.26,<2.3",
+    "ray[default]>=2.47,<2.48",
     "tenacity>=8.5.0",
     "typer~=0.25",
     "python-dotenv~=1.2.0",
     "termcolor~=3.2",
-    "opentelemetry-api>=1.20.0",
-    "opentelemetry-sdk>=1.20.0",
-    "opentelemetry-exporter-otlp-proto-http>=1.20.0",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
+    "opentelemetry-api>=1.39.1,<2.0.0",
+    "opentelemetry-sdk>=1.39.1,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.39.1,<2.0.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.39.1,<2.0.0",
     "browsergym-core>=0.14.3",
     "mcp[cli]>=1.26",
     "msgpack>=1.0.0",
@@ -52,6 +52,8 @@ build-backend = "uv_build"
 [tool.uv]
 constraint-dependencies = ["pyasn1>=0.6.2", "cryptography>=46.0.5", "protobuf>=6.33.5"]
 
+[tool.uv.sources]
+cube-standard = { path = "../cube-standard", editable = true }
 
 [tool.ruff]
 fix = true

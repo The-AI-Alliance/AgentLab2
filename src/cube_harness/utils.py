@@ -39,6 +39,8 @@ def parse_actions(llm_output: Message) -> list[Action]:
             if isinstance(arguments, str):
                 try:
                     arguments = json.loads(arguments)
+                    if not isinstance(arguments, dict):
+                        raise ValueError(f"Tool call arguments must be a dictionary object: {arguments}")
                 except json.JSONDecodeError:
                     raise ValueError(f"Invalid JSON arguments in tool call: {arguments}")
             if tc.function.name is None:

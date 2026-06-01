@@ -2,9 +2,16 @@ from typing import Callable
 
 from cube.core import Action, EnvironmentOutput, StepError, TypedBaseModel
 from pydantic import Field
+from enum import Enum
 
 from cube_harness.llm import LLMCall
 
+class TerminationReason(str, Enum):
+    NO_ACTION = "no_action"
+    ENV_DONE = "env_done"
+    MAX_STEPS = "max_steps"
+    AGENT_ERROR = "agent_error"
+    ENV_ERROR = "env_error"
 
 class AgentOutput(TypedBaseModel):
     actions: list[Action] = Field(default_factory=list)
@@ -41,6 +48,7 @@ class Trajectory(TypedBaseModel):
     start_time: float | None = None
     end_time: float | None = None
     reward_info: dict = Field(default_factory=dict)
+    termination_reason: TerminationReason | None = None
     summary_stats: dict | None = None
 
     def last_env_step(self) -> EnvironmentOutput:

@@ -7,6 +7,7 @@ from cube_harness.agents.legacy_generic_agent import (
     GenericPromptFlags,
 )
 from cube_harness.agents.react import ReactAgent, ReactAgentConfig
+from cube_harness.agents.tir import TirAgent, TirAgentConfig
 
 __all__ = [
     "Genny",
@@ -16,4 +17,6 @@ __all__ = [
     "GenericPromptFlags",
     "ReactAgent",
     "ReactAgentConfig",
+    "TirAgent",
+    "TirAgentConfig",
 ]

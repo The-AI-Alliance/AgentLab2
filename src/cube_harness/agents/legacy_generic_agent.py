@@ -1188,6 +1188,10 @@ class GenericAgent(Agent):
                     prompt=prompt,
                     output=llm_response.message,
                     usage=llm_response.usage,
+                    logprobs=llm_response.logprobs,
+                    completion_token_ids=llm_response.completion_token_ids,
+                    finish_reason=llm_response.finish_reason,
+                    metadata=llm_response.metadata,
                 )
 
                 # Extract text response for parsing think/plan/memory/criticise tags

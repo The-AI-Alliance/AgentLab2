@@ -1,9 +1,11 @@
 """LLM interaction abstractions, LiteLLM based."""
 
 import pprint
+import time
+from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
-from typing import Any, Callable, List, Literal
+from typing import Any, Callable, List, Literal, Protocol
 from uuid import uuid4
 
 import litellm
@@ -22,6 +24,7 @@ from litellm.exceptions import (
 )
 from litellm.utils import token_counter
 from pydantic import Field, field_validator, model_validator
+from transformers import AutoTokenizer
 
 # NOTE: Do not set litellm.callbacks = ["otel"] here at module level.
 # When no TracerProvider is configured, litellm falls back to ConsoleSpanExporter
@@ -91,8 +94,11 @@ class LLMConfig(ValidatedConfig):
     """Thin LLM wrapper around LiteLLM completion API."""
 
     model_name: str
+    api_base: str | None = None
+    api_key: str | None = None
     temperature: float = 1.0
     max_tokens: int = 128000
+    max_model_len: int = 128000
     max_completion_tokens: int = 8192
     reasoning_effort: Literal["minimal", "low", "medium", "high"] | None = None
     # Thinking cadence (Anthropic only — OpenAI/Azure gpt-5 reasoning is server-managed,
@@ -105,6 +111,13 @@ class LLMConfig(ValidatedConfig):
     interleaved_thinking: bool = False
     tool_choice: Literal["auto", "none", "required"] | None = "auto"
     parallel_tool_calls: bool = False
+    logprobs: bool = False
+    include_stop_str_in_output: bool | None = None
+    skip_special_tokens: bool | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    training: bool = False  # whether the call is for training (vs inference); may affect caching and logging behavior
+    extra_body: dict = Field(default_factory=dict)
     num_retries: int = 5
     retry_strategy: Literal["exponential_backoff_retry", "constant_retry"] = "exponential_backoff_retry"
     timeout: float | None = 120.0  # seconds per attempt; None = no timeout
@@ -195,6 +208,10 @@ class LLMResponse(TypedBaseModel):
 
     message: Message
     usage: Usage
+    logprobs: list[float] | None = None
+    completion_token_ids: list[int] | None = None
+    finish_reason: str | None = None
+    metadata: dict = Field(default_factory=dict)
 
     @property
     def reasoning_text(self) -> str:
@@ -294,7 +311,7 @@ class LLM:
     def __init__(self, config: LLMConfig):
         self.config = config
 
-    def __call__(self, prompt: Prompt) -> LLMResponse:
+    def _completion_kwargs(self, prompt: Prompt) -> dict[str, Any]:
         tools = prompt.tools
         kwargs: dict[str, Any] = {
             "model": self.config.model_name,
@@ -305,6 +322,18 @@ class LLM:
             "messages": prompt.messages,
             "timeout": self.config.timeout,
         }
+        if self.config.api_base is not None:
+            kwargs["api_base"] = self.config.api_base
+        if self.config.api_key is not None:
+            kwargs["api_key"] = self.config.api_key
+        if self.config.logprobs:
+            kwargs["logprobs"] = True
+        if self.config.top_p is not None:
+            kwargs["top_p"] = self.config.top_p
+        if self.config.top_k is not None:
+            kwargs["top_k"] = self.config.top_k
+        if self.config.extra_body:
+            kwargs["extra_body"] = self.config.extra_body
         if self.config.reasoning_effort is not None:
             kwargs["reasoning_effort"] = self.config.reasoning_effort
             # auto-fix(412)↓ Anthropic only emits a thinking block AFTER a
@@ -321,6 +350,10 @@ class LLM:
                 hdrs["anthropic-beta"] = ",".join(betas)
                 kwargs["extra_headers"] = hdrs
             # /auto-fix(412)
+        if self.config.include_stop_str_in_output is not None:
+            kwargs["include_stop_str_in_output"] = self.config.include_stop_str_in_output
+        if self.config.skip_special_tokens is not None:
+            kwargs["skip_special_tokens"] = self.config.skip_special_tokens
         if self.config.set_cache_control == "auto" and _is_anthropic_model(self.config.model_name):
             injection_points = _build_cache_injection_points(prompt.messages)
             if injection_points:
@@ -333,9 +366,23 @@ class LLM:
             # reject tool_choice without a tools list) or when the caller opted out (None).
             kwargs.pop("tool_choice", None)
             kwargs.pop("parallel_tool_calls", None)
+        return kwargs
+
+    def __call__(self, prompt: Prompt) -> LLMResponse:
+        kwargs = self._completion_kwargs(prompt)
         response = self._completion_with_retry(**kwargs)
+        return self._response_from_completion(response)
+
+    def _response_from_completion(self, response: Any) -> LLMResponse:
         usage = self._extract_usage(response)
-        return LLMResponse(message=response.choices[0].message, usage=usage)
+        completion_logprobs = self._extract_completion_logprobs(response)
+        return LLMResponse(
+            message=response.choices[0].message,
+            usage=usage,
+            logprobs=[entry["logprob"] for entry in completion_logprobs] if completion_logprobs else None,
+            completion_token_ids=[entry["token_id"] for entry in completion_logprobs] if completion_logprobs else None,
+            finish_reason=getattr(response.choices[0], "finish_reason", None),
+        )
 
     def _completion_with_retry(self, **kwargs: Any) -> Any:
         """Call litellm.completion with exponential backoff on transient errors.
@@ -416,6 +463,154 @@ class LLM:
             cost=cost,
         )
 
+    def _extract_completion_logprobs(self, response) -> list[dict[str, int | float]]:
+        """Extract completion logprobs and token IDs from an OpenAI-compatible response."""
+        result: list[dict[str, int | float]] = []
+        choice = response.choices[0]
+        logprobs = getattr(choice, "logprobs", None)
+        if logprobs is None:
+            return result
+        content = getattr(logprobs, "content", None)
+        if content is None:
+            return result
+        for entry in content:
+            token_str = getattr(entry, "token", None)
+            token_id: int | None = None
+            if isinstance(token_str, str) and token_str.startswith("token_id:"):
+                try:
+                    token_id = int(token_str.split(":", 1)[1])
+                except ValueError:
+                    token_id = None
+            logprob = getattr(entry, "logprob", None)
+            if token_id is None or not isinstance(logprob, (int, float)):
+                continue
+            result.append({"token_id": token_id, "logprob": float(logprob)})
+        return result
+
+@dataclass(frozen=True)
+class LLMRouteLease:
+    """A temporary route assignment for one generation request."""
+
+    route_id: str
+    api_base: str | None = None
+    api_key: str | None = None
+    model_name: str | None = None
+    metadata: dict | None = None
+
+
+class LLMRouter(Protocol):
+    """Routes individual LLM calls for `RoutedLLM`."""
+
+    def acquire(self, config: LLMConfig, prompt: Prompt) -> LLMRouteLease: ...
+
+    def release(
+        self,
+        lease: LLMRouteLease,
+        response: LLMResponse | None = None,
+        error: BaseException | None = None,
+    ) -> None: ...
+
+class DummyRouter(LLMRouter):
+    """A dummy router that performs no routing and returns an empty lease."""
+
+    def acquire(self, config: LLMConfig, prompt: Prompt) -> LLMRouteLease:
+        return LLMRouteLease(route_id="dummy")
+
+    def release(
+        self,
+        lease: LLMRouteLease,
+        response: LLMResponse | None = None,
+        error: BaseException | None = None,
+    ) -> None:
+        pass
+
+class VLLMTokenCounter:
+    def __init__(self, tokenizer_name: str):
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            tokenizer_name,
+            trust_remote_code=True,
+        )
+
+    def count_prompt_tokens(self, messages, tools=None) -> int:
+        token_ids = self.tokenizer.apply_chat_template(
+            messages,
+            tools=tools,
+            add_special_tokens=True,
+            add_generation_prompt=True,
+            tokenize=True,
+        )
+        return len(token_ids)
+
+
+class RoutedLLMConfig(LLMConfig):
+    """LLM config variant that routes each generation through a router.
+
+    The router is intentionally excluded from serialization so existing episode
+    configs and result artifacts stay portable.
+    """
+
+    tokenizer_name: str # used for token counting; can differ from model_name in LLMConfig when routing to different models
+    router: Any = Field(default=None, exclude=True)
+
+    def make(self) -> "RoutedLLM":
+        return RoutedLLM(config=self)
+
+    def make_counter(self) -> Callable[..., int]:
+        """Get a token counter function for the LLM model."""
+        return VLLMTokenCounter(tokenizer_name=self.tokenizer_name).count_prompt_tokens
+
+
+class RoutedLLM(LLM):
+    """LLM wrapper with per-request routing and admission control."""
+
+    config: RoutedLLMConfig
+
+    def __init__(self, config: RoutedLLMConfig):
+        super().__init__(config=config)
+
+    def __call__(self, prompt: Prompt) -> LLMResponse:
+        if self.config.router is None:
+            return super().__call__(prompt)
+
+        lease: LLMRouteLease | None = None
+        response_obj: LLMResponse | None = None
+        error: BaseException | None = None
+        started_at: datetime | None = None
+        started_perf: float | None = None
+        try:
+            lease = self.config.router.acquire(self.config, prompt)
+            kwargs = self._completion_kwargs(prompt)
+            if lease.api_base is not None:
+                kwargs["api_base"] = lease.api_base
+            if lease.api_key is not None:
+                kwargs["api_key"] = lease.api_key
+            if lease.model_name is not None:
+                kwargs["model"] = lease.model_name
+
+            started_at = datetime.now()
+            started_perf = time.perf_counter()
+            raw_response = self._completion_with_retry(**kwargs)
+            response_obj = self._response_from_completion(raw_response)
+            finished_at = datetime.now()
+            response_obj.metadata.update(lease.metadata or {})
+            response_obj.metadata.update(
+                {
+                    "route_id": lease.route_id,
+                    "route_api_base": lease.api_base,
+                    "route_model_name": lease.model_name,
+                    "llm_started_at": started_at.isoformat(),
+                    "llm_finished_at": finished_at.isoformat(),
+                    "llm_latency_s": time.perf_counter() - started_perf if started_perf is not None else None,
+                }
+            )
+            return response_obj
+        except BaseException as exc:
+            error = exc
+            raise
+        finally:
+            if lease is not None:
+                self.config.router.release(lease, response=response_obj, error=error)
+
 
 class LLMCall(TypedBaseModel):
     """Represents a call to an LLM model."""
@@ -425,8 +620,14 @@ class LLMCall(TypedBaseModel):
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
     llm_config: LLMConfig
     prompt: Prompt
+    prompt_tokens: int = -1  # Number of tokens in the prompt; set to -1 if unknown or not applicable
     output: Message
+    output_tokens: int = -1  # Number of tokens in the output; set to -1 if unknown or not applicable
     usage: Usage = Field(default_factory=Usage)
+    logprobs: list[float] | None = None
+    completion_token_ids: list[int] | None = None
+    finish_reason: str | None = None
+    metadata: dict = Field(default_factory=dict)
 
 
 # === auto-fix notes ===

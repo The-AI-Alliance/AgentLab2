@@ -95,6 +95,18 @@ def _resolve_llm_call_file(output_dir: Path, step_id: str, llm_call_id: str) -> 
         return flat
     return output_dir / "llm_calls" / f"{step_id}_{llm_call_id}.json"
 
+class NoopStorage:
+    def save_trajectory(self, trajectory: Trajectory, allow_overwrite: bool = False) -> None:
+        pass
+
+    def save_step(self, step: TrajectoryStep, trajectory_id: str, step_num: int) -> None:
+        pass
+
+    def save_episode_config(self, episode_config: "EpisodeConfig") -> None:
+        pass
+
+    def update_experiment_summary(self, trajectory: Trajectory) -> None:
+        pass
 
 class FileStorage:
     def __init__(self, output_dir: str | Path) -> None:
