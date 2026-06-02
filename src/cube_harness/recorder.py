@@ -28,6 +28,7 @@ possible.
 
 import logging
 import time
+from types import TracebackType
 from typing import TYPE_CHECKING
 
 from cube.core import Action, EnvironmentOutput, StepError
@@ -124,7 +125,12 @@ class Turn:
     def __enter__(self) -> "Turn":
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> None:
         if self._closed:
             return
         self._closed = True
@@ -322,20 +328,17 @@ class TurnRecorder:
         `max_cost_usd` end-to-end."""
         self._n_turns_emitted += 1
         if self.budget is not None:
-            # Bump budget.turns so MonitoredTool's exhausted check fires
-            # on the right boundary (one LLM turn = one increment).
-            self.budget.turns += 1
-            # Bump cost + token counters from this turn's LLM calls so
+            # Atomic bump of turn counter + LLM-usage totals against
+            # parallel `_record_tool_call` workers. See `Budget._lock`.
             # max_cost_usd / max_prompt_tokens / max_completion_tokens
-            # ceilings actually trip. Mirrors what SummaryProcessor does
+            # ceilings actually trip; mirrors what SummaryProcessor does
             # for the per-episode summary, but feeds the live Budget so
             # `Budget.exhausted` enforces end-to-end and `str(budget)`
             # reports current consumption to agents that introspect it.
-            for call in event.llm_calls:
-                if call.usage is not None:
-                    self.budget.cost_usd += call.usage.cost
-                    self.budget.prompt_tokens += call.usage.prompt_tokens
-                    self.budget.completion_tokens += call.usage.completion_tokens
+            cost = sum(call.usage.cost for call in event.llm_calls if call.usage is not None)
+            prompt = sum(call.usage.prompt_tokens for call in event.llm_calls if call.usage is not None)
+            completion = sum(call.usage.completion_tokens for call in event.llm_calls if call.usage is not None)
+            self.budget.bump_turn_and_usage(cost=cost, prompt=prompt, completion=completion)
         self._append_event(TrajectoryEvent(output=event, start_time=start, end_time=end))
         # Enforce budget AFTER the flush so the AgentEvent that took us
         # past the cap is recorded before we abort the run. This

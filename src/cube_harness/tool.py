@@ -27,6 +27,7 @@ with shared recording logic, and let `install_monitoring` pick.
 """
 
 import asyncio
+import threading
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -39,7 +40,7 @@ from cube.tool import (
     AsyncToolbox,
     Toolbox,
 )
-from pydantic import Field
+from pydantic import Field, PrivateAttr
 
 from cube_harness.core import EvaluationEvent, ToolCallEvent, TrajectoryEvent
 
@@ -91,24 +92,71 @@ class Budget(TypedBaseModel):
     completion_tokens: int = 0
     started_at: float = Field(default_factory=time.time)
 
+    # Guards the bump methods + the `exhausted` read. GennyParallel
+    # dispatches N tool calls via `asyncio.gather` over an
+    # `_SyncToolAsAsync` adapter, whose `execute_action` hops into a
+    # real OS thread via `asyncio.to_thread`. Without this lock the
+    # `tool_calls += 1` in `_record_tool_call` would race across N
+    # workers and `max_tool_calls` could overrun. Mirrors the
+    # `SummaryProcessor` lock added for the same parallel path.
+    _lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
+
+    def bump_tool_calls(self) -> None:
+        """Atomic +1 on `tool_calls`. Called by `_record_tool_call`
+        from MonitoredTool workers — may run on multiple threads in
+        parallel."""
+        with self._lock:
+            self.tool_calls += 1
+
+    def bump_turn_and_usage(self, cost: float, prompt: int, completion: int) -> None:
+        """Atomic bump of the AgentEvent-side counters (turns + LLM
+        usage). Called only by `TurnRecorder._flush_agent_event` —
+        single-task by construction, but the lock keeps reads from
+        parallel `_record_tool_call` workers coherent."""
+        with self._lock:
+            self.turns += 1
+            self.cost_usd += cost
+            self.prompt_tokens += prompt
+            self.completion_tokens += completion
+
     @property
     def exhausted(self) -> bool:
         """True iff any configured cap is at-or-past its limit. Checked
         by MonitoredTool on entry to every execute_action and by
-        TurnRecorder after every AgentEvent flush."""
-        if self.turns >= self.max_turns:
-            return True
-        if self.max_tool_calls is not None and self.tool_calls >= self.max_tool_calls:
-            return True
-        if self.max_cost_usd is not None and self.cost_usd >= self.max_cost_usd:
-            return True
-        if self.max_prompt_tokens is not None and self.prompt_tokens >= self.max_prompt_tokens:
-            return True
-        if self.max_completion_tokens is not None and self.completion_tokens >= self.max_completion_tokens:
-            return True
-        if self.max_wallclock_s is not None and (time.time() - self.started_at) >= self.max_wallclock_s:
-            return True
-        return False
+        TurnRecorder after every AgentEvent flush.
+
+        Lock-protected so the multi-field read is coherent against
+        concurrent bumps from parallel tool-call workers."""
+        with self._lock:
+            if self.turns >= self.max_turns:
+                return True
+            if self.max_tool_calls is not None and self.tool_calls >= self.max_tool_calls:
+                return True
+            if self.max_cost_usd is not None and self.cost_usd >= self.max_cost_usd:
+                return True
+            if self.max_prompt_tokens is not None and self.prompt_tokens >= self.max_prompt_tokens:
+                return True
+            if self.max_completion_tokens is not None and self.completion_tokens >= self.max_completion_tokens:
+                return True
+            if self.max_wallclock_s is not None and (time.time() - self.started_at) >= self.max_wallclock_s:
+                return True
+            return False
+
+    def __getstate__(self) -> dict:
+        # Strip the unpicklable Lock so Budget can ride along inside
+        # any future serialized config without blowing up on Ray.
+        state = super().__getstate__()
+        state = dict(state)
+        private = dict(state.get("__pydantic_private__") or {})
+        private.pop("_lock", None)
+        state["__pydantic_private__"] = private
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        super().__setstate__(state)
+        # Recreate the lock — the deserialized instance is a fresh one,
+        # no contention to inherit.
+        self._lock = threading.Lock()
 
     def __str__(self) -> str:
         """Concise human-readable summary of budget usage — suitable for
@@ -232,7 +280,7 @@ def _record_tool_call(
     )
     trajectory_event = TrajectoryEvent(output=event, start_time=start, end_time=end)
     _stream_event(trajectory_event, trajectory_id, storage, summary)
-    budget.tool_calls += 1
+    budget.bump_tool_calls()
     return event.id
 
 

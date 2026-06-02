@@ -11,6 +11,7 @@ Fixed by adding `threading.Lock` to SummaryProcessor in this PR's
 review pass. This test guards it.
 """
 
+import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -67,8 +68,6 @@ def test_on_event_concurrent_jsonl_lines_well_formed(tmp_path: Path) -> None:
     """The episode_summary.jsonl file must contain one valid JSON line
     per event — no interleaved / truncated rows from concurrent
     writes."""
-    import json
-
     sp = SummaryProcessor(tmp_path)
     n_calls = 200
     barrier = threading.Barrier(n_calls)

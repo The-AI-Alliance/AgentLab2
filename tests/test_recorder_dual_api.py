@@ -22,7 +22,7 @@ from cube_harness.recorder import (
     TurnRecorder,
     equivalent_agent_events,
 )
-from cube_harness.tool import Budget, MonitoredTool
+from cube_harness.tool import Budget, BudgetExceeded, MonitoredTool
 
 # ---------------------------------------------------------------------------
 # Construction helpers
@@ -339,8 +339,6 @@ def test_recorder_accumulates_cost_into_budget() -> None:
 def test_recorder_triggers_budget_exceeded_on_cost() -> None:
     """Cost crossing `max_cost_usd` must raise BudgetExceeded just like
     turns / tool_calls do. Three turns at $0.04 each → $0.12 > $0.10 cap."""
-    from cube_harness.tool import BudgetExceeded
-
     budget = Budget(max_turns=100, max_cost_usd=0.10)
     r = TurnRecorder(trajectory_id="t", budget=budget)
     r.record(_agent_output_with_cost(0.04))

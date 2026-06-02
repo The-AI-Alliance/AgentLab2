@@ -103,6 +103,13 @@ class GennyParallel(Genny):
         agent calls toolbox.execute_action(action) uniformly — no
         `task` reference; done/eval semantics are absorbed by the
         MonitoredTool wrappers."""
+        # Mirror Agent.run's contract: stash the recorder so the
+        # inherited Genny.step() can read self._recorder.budget for the
+        # graceful self-stop (STOP_ACTION at budget.exhausted) and the
+        # `display_budget_every_k` in-prompt summary. Without this,
+        # both behaviors silently no-op and only the hard MonitoredTool
+        # → BudgetExceeded net bounds the run.
+        self._recorder = recorder
         obs = initial_obs
         while True:
             agent_output = await asyncio.to_thread(self.step, obs)
