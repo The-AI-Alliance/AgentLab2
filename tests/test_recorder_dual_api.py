@@ -19,7 +19,6 @@ from cube_harness.core import AgentEvent, AgentOutput, EvaluationEvent, ToolCall
 from cube_harness.llm import LLMCall, LLMConfig, Prompt, Usage
 from cube_harness.recorder import (
     RESET_PARENT_EVENT_ID,
-    EventCounter,
     TurnRecorder,
     equivalent_agent_events,
 )
@@ -50,13 +49,20 @@ def _llm_call() -> LLMCall:
 
 class _FakeStorage:
     """Captures every save_event call so tests can inspect what the
-    recorder streamed without needing a real FileStorage backend."""
+    recorder streamed without needing a real FileStorage backend.
+
+    Storage assigns + returns the event_num (matches the new
+    `Storage.save_event(event, trajectory_id) -> int` contract)."""
 
     def __init__(self) -> None:
         self.events: list[tuple[str, int, TrajectoryEvent]] = []
+        self._next_num = 0
 
-    def save_event(self, te: TrajectoryEvent, trajectory_id: str, n: int) -> None:
+    def save_event(self, te: TrajectoryEvent, trajectory_id: str) -> int:
+        n = self._next_num
+        self._next_num += 1
         self.events.append((trajectory_id, n, te))
+        return n
 
     def event_outputs(self) -> list:
         """Convenience: list[TrajectoryEvent.output] in save order."""
@@ -222,9 +228,8 @@ class _SyncEchoTool(AbstractTool):
 
 def test_current_turn_id_propagates_to_monitored_tool_via_getter() -> None:
     """Tool calls fired inside a turn record that turn's id as parent."""
-    counter = EventCounter()
     storage = _FakeStorage()
-    r = TurnRecorder(trajectory_id="t", storage=storage, event_counter=counter)
+    r = TurnRecorder(trajectory_id="t", storage=storage)
     budget = Budget(max_turns=5)
     tool = MonitoredTool(
         _SyncEchoTool(),
@@ -232,7 +237,6 @@ def test_current_turn_id_propagates_to_monitored_tool_via_getter() -> None:
         budget=budget,
         parent_event_id_getter=r.current_turn_id,
         storage=storage,
-        event_counter=counter,
     )
 
     eid = r.record(_agent_output())

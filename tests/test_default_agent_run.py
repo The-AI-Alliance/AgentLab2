@@ -17,7 +17,7 @@ from cube.tool import AbstractTool
 
 from cube_harness.agent import Agent, AgentConfig
 from cube_harness.core import AgentEvent, AgentOutput, ToolCallEvent, TrajectoryEvent
-from cube_harness.recorder import EventCounter, TurnRecorder
+from cube_harness.recorder import TurnRecorder
 from cube_harness.tool import Budget, install_monitoring
 
 # ---------------------------------------------------------------------------
@@ -93,32 +93,34 @@ def _action(name: str = "inc") -> Action:
 
 
 class _FakeStorage:
-    """Captures every save_event call so the default-run tests can
-    inspect what the recorder + MonitoredTool streamed."""
+    """Captures every save_event call + assigns event_nums itself
+    (matches the new Storage.save_event(event, id) -> int contract)."""
 
     def __init__(self) -> None:
         self.events: list[tuple[str, int, TrajectoryEvent]] = []
+        self._next_num = 0
 
-    def save_event(self, te: TrajectoryEvent, trajectory_id: str, n: int) -> None:
+    def save_event(self, te: TrajectoryEvent, trajectory_id: str) -> int:
+        n = self._next_num
+        self._next_num += 1
         self.events.append((trajectory_id, n, te))
+        return n
 
     def outputs(self) -> list:
         return [te.output for _, _, te in self.events]
 
 
 def _setup(task, budget: Budget) -> tuple[TurnRecorder, _FakeStorage]:
-    """Build TurnRecorder + storage + install monitoring with a shared
-    EventCounter — the way Episode does it."""
+    """Build TurnRecorder + storage + install monitoring — the way
+    Episode does it. Storage owns event numbering; nothing to thread."""
     storage = _FakeStorage()
-    counter = EventCounter()
-    recorder = TurnRecorder(trajectory_id="t", storage=storage, budget=budget, event_counter=counter)
+    recorder = TurnRecorder(trajectory_id="t", storage=storage, budget=budget)
     install_monitoring(
         task,
         trajectory_id="t",
         budget=budget,
         parent_event_id_getter=recorder.current_turn_id,
         storage=storage,
-        event_counter=counter,
     )
     return recorder, storage
 

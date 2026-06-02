@@ -1,4 +1,5 @@
 import fcntl
+import itertools
 import json
 import logging
 import threading
@@ -49,8 +50,10 @@ class Storage(Protocol):
 
     def finalize_episode(self, meta: TrajectoryMetadata) -> None: ...
 
-    def save_event(self, event: TrajectoryEvent, trajectory_id: str, event_num: int) -> None:
-        """Persist one TrajectoryEvent (agent-owns-loop event stream)."""
+    def save_event(self, event: TrajectoryEvent, trajectory_id: str) -> int:
+        """Persist one TrajectoryEvent and return its assigned event_num.
+
+        Storage owns numbering — callers don't coordinate."""
         ...
 
     def load_episode(self, trajectory_id: str) -> "TrajectoryView": ...
@@ -413,6 +416,25 @@ def _legacy_agent_id(num: int) -> str:
     return f"legacy_agent_{num:03d}"
 
 
+def _max_event_num_on_disk(events_dir: Path) -> int:
+    """Return the highest event-num present in `events_dir`, or -1 if
+    empty / missing. Used by `FileStorage._get_event_counter` to seed
+    its lazy counter so a resumed episode continues numbering past
+    whatever was already written."""
+    if not events_dir.exists():
+        return -1
+    highest = -1
+    for path in events_dir.iterdir():
+        if not path.name.endswith(".msgpack.zst"):
+            continue
+        num_str = path.name.split("_", 1)[0]
+        try:
+            highest = max(highest, int(num_str))
+        except ValueError:
+            continue
+    return highest
+
+
 def _build_events_index(events_dir: Path) -> list[_EventIndexEntry]:
     """Scan events/ and build an index entry per `NNN_<kind>.msgpack.zst`."""
     entries: list[_EventIndexEntry] = []
@@ -514,6 +536,34 @@ class FileStorage:
     def __init__(self, output_dir: str | Path) -> None:
         self.output_dir = Path(output_dir)
         self._saved_ids: set[str] = set()
+        # Per-trajectory event-number counter. Lazily seeded from the
+        # existing events/ dir on first save_event call (so resumes /
+        # retries continue numbering past the prior run). `itertools.count`
+        # is thread-safe in CPython — `next()` on it is one C call, no
+        # read-modify-write window — so parallel `save_event` from
+        # `asyncio.to_thread` workers never collide. The dict access
+        # itself is guarded by `_event_counter_lock` for first-init only.
+        self._event_counters: dict[str, itertools.count] = {}
+        self._event_counter_lock = threading.Lock()
+
+    def __getstate__(self) -> dict:
+        # threading.Lock can't be pickled. Ray pickles FileStorage when
+        # it ships Episodes to workers; this hook strips the lock for
+        # transport. __setstate__ reseeds a fresh lock + empty counters
+        # on the worker side — the worker will lazily re-init counters
+        # from its own filesystem state on first save_event.
+        state = self.__dict__.copy()
+        state.pop("_event_counter_lock", None)
+        state["_event_counters"] = {}
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        self.__dict__.update(state)
+        self._event_counter_lock = threading.Lock()
+        # _event_counters was reset to {} in __getstate__; this is a
+        # no-op safeguard against future pickle formats.
+        if not hasattr(self, "_event_counters"):
+            self._event_counters = {}
 
     # --- V2 episode directory helpers ---
 
@@ -667,24 +717,47 @@ class FileStorage:
 
     # --- Event-stream layout (RFC: agent-owns-loop, Phase F) ---
 
-    def save_event(self, event: TrajectoryEvent, trajectory_id: str, event_num: int) -> None:
-        """Persist one TrajectoryEvent.
+    def save_event(self, event: TrajectoryEvent, trajectory_id: str) -> int:
+        """Persist one TrajectoryEvent; return the assigned event_num.
 
         Files land at episodes/<trajectory_id>/events/<NNN>_<kind>.msgpack.zst
         with kind ∈ {agent, tool_call, eval}. The episodes/ dir must
-        exist (call save_trajectory first); the events/ dir is created
-        lazily on first save.
-        """
+        exist (call save_metadata first); the events/ dir is created
+        lazily on first save. Numbering is owned by the storage —
+        callers don't pass an event_num and don't coordinate. Safe
+        under concurrent writes from `asyncio.to_thread` workers
+        (e.g. GennyParallel's parallel tool dispatch)."""
         ep_dir = self._episode_dir(trajectory_id)
         if not ep_dir.exists():
-            raise ValueError(f"Episode directory does not exist: {ep_dir}. Call save_trajectory first.")
+            raise ValueError(f"Episode directory does not exist: {ep_dir}. Call save_metadata first.")
         events_dir = ep_dir / EVENTS_DIR
         events_dir.mkdir(exist_ok=True)
+        event_num = next(self._get_event_counter(trajectory_id, events_dir))
         try:
             (events_dir / _event_filename(event_num, event)).write_bytes(_serialize_event(event))
         except Exception as e:
             logger.exception(f"Error saving event to trajectory {trajectory_id}: {e}")
             raise e
+        return event_num
+
+    def _get_event_counter(self, trajectory_id: str, events_dir: Path) -> itertools.count:
+        """Return the per-trajectory event-number counter.
+
+        Lazily seeded from existing events/ contents the first time —
+        resumes / retries continue past the prior run's last number.
+        Locked only on first init; steady-state lookup is dict-read
+        + `next(counter)`, both safe under CPython's GIL."""
+        counter = self._event_counters.get(trajectory_id)
+        if counter is not None:
+            return counter
+        with self._event_counter_lock:
+            counter = self._event_counters.get(trajectory_id)
+            if counter is not None:
+                return counter
+            start = _max_event_num_on_disk(events_dir) + 1
+            counter = itertools.count(start)
+            self._event_counters[trajectory_id] = counter
+            return counter
 
     def load_event(self, trajectory_id: str, event_num: int) -> TrajectoryEvent:
         ep_dir = self._episode_dir(trajectory_id)

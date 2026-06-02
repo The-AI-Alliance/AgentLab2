@@ -18,7 +18,6 @@ from cube.core import Action, ActionSchema, Observation, StepError
 from cube.tool import AbstractAsyncTool, AbstractTool, AsyncToolbox, Toolbox
 
 from cube_harness.core import ToolCallEvent, TrajectoryEvent
-from cube_harness.recorder import EventCounter
 from cube_harness.tool import (
     AsyncMonitoredTool,
     Budget,
@@ -66,13 +65,20 @@ def _action(name: str, **args: object) -> Action:
 
 class _FakeStorage:
     """Captures every save_event call so tests can inspect what
-    MonitoredTool streamed without needing a real FileStorage."""
+    MonitoredTool streamed without needing a real FileStorage.
+
+    Storage assigns + returns the event_num (matches the new
+    `Storage.save_event(event, trajectory_id) -> int` contract)."""
 
     def __init__(self) -> None:
         self.events: list[tuple[str, int, TrajectoryEvent]] = []
+        self._next_num = 0
 
-    def save_event(self, te: TrajectoryEvent, trajectory_id: str, n: int) -> None:
+    def save_event(self, te: TrajectoryEvent, trajectory_id: str) -> int:
+        n = self._next_num
+        self._next_num += 1
         self.events.append((trajectory_id, n, te))
+        return n
 
     def tool_call_events(self) -> list[ToolCallEvent]:
         """Convenience: only the ToolCallEvent outputs in order."""
@@ -87,7 +93,6 @@ def _make_monitored(
     parent_event_id_getter=None,
 ) -> MonitoredTool | AsyncMonitoredTool:
     storage = storage if storage is not None else _FakeStorage()
-    counter = EventCounter()
     if isinstance(inner, AbstractAsyncTool):
         return AsyncMonitoredTool(
             inner,
@@ -95,7 +100,6 @@ def _make_monitored(
             budget=budget,
             parent_event_id_getter=parent_event_id_getter,
             storage=storage,
-            event_counter=counter,
         )
     return MonitoredTool(
         inner,
@@ -103,7 +107,6 @@ def _make_monitored(
         budget=budget,
         parent_event_id_getter=parent_event_id_getter,
         storage=storage,
-        event_counter=counter,
     )
 
 
@@ -145,11 +148,10 @@ def test_monitored_tool_records_event_per_call() -> None:
 
 def test_wrong_inner_type_raises() -> None:
     budget = Budget(max_turns=5)
-    counter = EventCounter()
     with pytest.raises(TypeError):
-        MonitoredTool(_AsyncEchoTool(), trajectory_id="t", budget=budget, event_counter=counter)  # type: ignore[arg-type]
+        MonitoredTool(_AsyncEchoTool(), trajectory_id="t", budget=budget)  # type: ignore[arg-type]
     with pytest.raises(TypeError):
-        AsyncMonitoredTool(_SyncEchoTool(), trajectory_id="t", budget=budget, event_counter=counter)  # type: ignore[arg-type]
+        AsyncMonitoredTool(_SyncEchoTool(), trajectory_id="t", budget=budget)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -268,18 +270,16 @@ def test_monitored_tool_forwards_direct_method_calls_to_inner() -> None:
 
 def test_wrap_tool_picks_sync_or_async_by_inner_type() -> None:
     budget = Budget(max_turns=5)
-    counter = EventCounter()
-    sync_wrapped = wrap_tool(_SyncEchoTool(), trajectory_id="t", budget=budget, event_counter=counter)
-    async_wrapped = wrap_tool(_AsyncEchoTool(), trajectory_id="t", budget=budget, event_counter=counter)
+    sync_wrapped = wrap_tool(_SyncEchoTool(), trajectory_id="t", budget=budget)
+    async_wrapped = wrap_tool(_AsyncEchoTool(), trajectory_id="t", budget=budget)
     assert isinstance(sync_wrapped, MonitoredTool)
     assert isinstance(async_wrapped, AsyncMonitoredTool)
 
 
 def test_wrap_tool_is_idempotent() -> None:
     budget = Budget(max_turns=5)
-    counter = EventCounter()
-    once = wrap_tool(_SyncEchoTool(), trajectory_id="t", budget=budget, event_counter=counter)
-    twice = wrap_tool(once, trajectory_id="t", budget=budget, event_counter=counter)
+    once = wrap_tool(_SyncEchoTool(), trajectory_id="t", budget=budget)
+    twice = wrap_tool(once, trajectory_id="t", budget=budget)
     assert twice is once
 
 

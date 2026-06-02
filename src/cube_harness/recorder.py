@@ -28,7 +28,6 @@ possible.
 
 import logging
 import time
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from cube.core import Action, EnvironmentOutput, StepError
@@ -44,26 +43,6 @@ from cube_harness.llm import LLMCall, Usage
 
 if TYPE_CHECKING:
     from cube_harness.summary import SummaryProcessor
-
-
-@dataclass
-class EventCounter:
-    """Monotonic event numbering shared by `TurnRecorder` and `MonitoredTool`.
-
-    Both writers emit `TrajectoryEvent`s onto the same event stream;
-    each needs a globally-unique sequence number so files land at
-    `events/000_*.msgpack.zst`, `events/001_*.msgpack.zst`, … without
-    overwriting each other. Episode constructs one counter per episode
-    and hands it to both writers.
-    """
-
-    n: int = 0
-
-    def next(self) -> int:
-        """Return the current value and increment for the next call."""
-        n = self.n
-        self.n += 1
-        return n
 
 
 logger = logging.getLogger(__name__)
@@ -166,10 +145,10 @@ class TurnRecorder:
     finalization is attributed to that boundary, not to an absent
     agent turn).
 
-    Events stream to disk via `storage.save_event(event, trajectory_id, n)`
-    where `n` comes from the shared `EventCounter`. There is no in-memory
-    accumulation — `Episode.run` returns an `TrajectoryView` and consumers
-    read from storage.
+    Events stream to disk via `storage.save_event(event, trajectory_id)`,
+    which assigns + returns the event_num internally. No shared counter
+    needs to be threaded through. There is no in-memory accumulation —
+    `Episode.run` returns a `TrajectoryView` and consumers read from storage.
     """
 
     def __init__(
@@ -178,7 +157,6 @@ class TurnRecorder:
         storage: object | None = None,
         summary: "SummaryProcessor | None" = None,
         budget: object | None = None,
-        event_counter: EventCounter | None = None,
         metadata_updates: dict | None = None,
     ) -> None:
         self.trajectory_id = trajectory_id
@@ -190,10 +168,6 @@ class TurnRecorder:
         # AgentEvent bumps budget.turns so MonitoredTool's
         # max-turns check fires correctly.
         self.budget = budget
-        # Shared with MonitoredTool so both writers emit unique event nums.
-        # Default: a recorder-private counter (used by tests that don't
-        # install monitoring on a task).
-        self.event_counter = event_counter if event_counter is not None else EventCounter()
         # Mutable side-channel dict passed from Episode. record_external_run
         # writes connector-specific data here; Episode merges it into the
         # final TrajectoryMetadata.metadata at finalize_episode time.
@@ -369,11 +343,16 @@ class TurnRecorder:
 
     def _append_event(self, te: TrajectoryEvent) -> None:
         """Stream one event to storage + summary. Never keeps a copy in
-        memory — the TrajectoryView is the read interface, this writes."""
+        memory — the TrajectoryView is the read interface, this writes.
+
+        Event numbering is owned by `storage.save_event` — no shared
+        counter to thread through. Storage uses its per-trajectory
+        `itertools.count` to assign monotonic event_nums, safe under
+        concurrent writes from multiple `asyncio.to_thread` workers."""
         if self.storage is not None:
             save_event = getattr(self.storage, "save_event", None)
             if save_event is not None:
-                save_event(te, self.trajectory_id, self.event_counter.next())
+                save_event(te, self.trajectory_id)
         if self.summary is not None:
             on_event = getattr(self.summary, "on_event", None)
             if on_event is not None:

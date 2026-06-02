@@ -18,7 +18,7 @@ from cube_harness.episode_status import TERMINAL_STATUSES, EpisodeStatus, next_r
 from cube_harness.eval_log import EpisodeRecord
 from cube_harness.llm import is_permanent_llm_error
 from cube_harness.metrics.tracer import get_tracer
-from cube_harness.recorder import EventCounter, TurnRecorder
+from cube_harness.recorder import TurnRecorder
 from cube_harness.storage import FileStorage, Storage, TrajectoryView
 from cube_harness.summary import SummaryProcessor
 from cube_harness.tool import Budget, BudgetExceeded, TaskDone, install_monitoring
@@ -211,21 +211,18 @@ class Episode:
                 # 3. Build budget + recorder + install monitoring on the
                 # task's toolbox in place. Tool calls fired during the
                 # run record their parent via the recorder's current
-                # turn id. The shared EventCounter is what makes
-                # recorder writes and monitored-tool writes land on a
-                # single global event-numbering sequence on disk.
+                # turn id. Event numbering is owned by storage.save_event
+                # — writers don't coordinate, no counter to thread.
                 budget = Budget(
                     max_turns=self.config.max_steps,
                     max_cost_usd=self.config.max_cost_usd,
                 )
-                event_counter = EventCounter()
                 metadata_updates: dict = {}
                 recorder = TurnRecorder(
                     trajectory_id=trajectory_id,
                     storage=self.storage,
                     summary=summary_proc,
                     budget=budget,
-                    event_counter=event_counter,
                     metadata_updates=metadata_updates,
                 )
                 install_monitoring(
@@ -235,7 +232,6 @@ class Episode:
                     parent_event_id_getter=recorder.current_turn_id,
                     storage=self.storage,
                     summary=summary_proc,
-                    event_counter=event_counter,
                 )
 
                 # 4. The toolbox the agent will see is just the task's

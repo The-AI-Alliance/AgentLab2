@@ -106,7 +106,7 @@ class TestTrajectoryViewIteration:
         storage.save_metadata(meta)
         events = [_agent_event(0), _tool_call_event("agent_0"), _eval_event()]
         for i, ev in enumerate(events):
-            storage.save_event(ev, "t1", i)
+            storage.save_event(ev, "t1")
         storage.finalize_episode(meta.model_copy(update={"end_time": 2.0}))
 
         view = storage.load_episode("t1")
@@ -123,7 +123,7 @@ class TestTrajectoryViewIteration:
         storage.save_metadata(meta)
         events = [_agent_event(0), _tool_call_event("agent_0")]
         for i, ev in enumerate(events):
-            storage.save_event(ev, "t1", i)
+            storage.save_event(ev, "t1")
 
         view = storage.load_episode("t1")
         # First access decodes; second access hits the cache.
@@ -143,7 +143,7 @@ class TestTrajectoryViewIteration:
             _eval_event(),
         ]
         for i, ev in enumerate(events):
-            storage.save_event(ev, "t1", i)
+            storage.save_event(ev, "t1")
 
         view = storage.load_episode("t1")
         assert view.n_agent_events == 2
@@ -162,7 +162,7 @@ class TestTrajectoryViewIteration:
             _tool_call_event("agent_0"),
         ]
         for i, ev in enumerate(siblings):
-            storage.save_event(ev, "t1", i)
+            storage.save_event(ev, "t1")
 
         view = storage.load_episode("t1")
         turn = view.events_of_turn("agent_0")
@@ -180,7 +180,7 @@ class TestTrajectoryViewIteration:
             _tool_call_event("agent_1", env_output=final_obs),
         ]
         for i, ev in enumerate(events):
-            storage.save_event(ev, "t1", i)
+            storage.save_event(ev, "t1")
 
         view = storage.load_episode("t1")
         last = view.last_env_output()
@@ -195,7 +195,7 @@ class TestTrajectoryViewIteration:
         storage = FileStorage(tmp_path)
         meta = TrajectoryMetadata(id="t1")
         storage.save_metadata(meta)
-        storage.save_event(_agent_event(0), "t1", 0)
+        storage.save_event(_agent_event(0), "t1")
 
         view = storage.load_episode("t1")
         assert view.last_env_output() is None

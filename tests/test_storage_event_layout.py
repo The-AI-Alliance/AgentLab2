@@ -57,7 +57,7 @@ def test_save_and_load_event_round_trip(tmp_path: Path) -> None:
 
     parent = _agent_event()
     te = TrajectoryEvent(output=parent, start_time=0.0, end_time=0.1)
-    storage.save_event(te, "t", 0)
+    storage.save_event(te, "t")
 
     # Loaded event round-trips through msgpack+zstd serialization.
     loaded = storage.load_event("t", 0)
@@ -70,16 +70,16 @@ def test_save_event_creates_events_dir_lazily(tmp_path: Path) -> None:
     _prime(storage, "t")
     ep_dir = tmp_path / "episodes" / "t"
     assert not (ep_dir / EVENTS_DIR).exists()
-    storage.save_event(TrajectoryEvent(output=_eval_event(), start_time=0.0, end_time=0.0), "t", 0)
+    storage.save_event(TrajectoryEvent(output=_eval_event(), start_time=0.0, end_time=0.0), "t")
     assert (ep_dir / EVENTS_DIR).exists()
 
 
 def test_save_event_filename_carries_kind(tmp_path: Path) -> None:
     storage = FileStorage(tmp_path)
     _prime(storage, "t")
-    storage.save_event(TrajectoryEvent(output=_agent_event()), "t", 0)
-    storage.save_event(TrajectoryEvent(output=_tool_call_event("p")), "t", 1)
-    storage.save_event(TrajectoryEvent(output=_eval_event()), "t", 2)
+    storage.save_event(TrajectoryEvent(output=_agent_event()), "t")
+    storage.save_event(TrajectoryEvent(output=_tool_call_event("p")), "t")
+    storage.save_event(TrajectoryEvent(output=_eval_event()), "t")
     files = sorted((tmp_path / "episodes" / "t" / EVENTS_DIR).iterdir())
     names = [f.name for f in files]
     assert "000_agent.msgpack.zst" in names
@@ -90,7 +90,7 @@ def test_save_event_filename_carries_kind(tmp_path: Path) -> None:
 def test_save_event_requires_episode_dir(tmp_path: Path) -> None:
     storage = FileStorage(tmp_path)
     with pytest.raises(ValueError):
-        storage.save_event(TrajectoryEvent(output=_eval_event()), "missing", 0)
+        storage.save_event(TrajectoryEvent(output=_eval_event()), "missing")
 
 
 def test_load_event_missing_raises(tmp_path: Path) -> None:
