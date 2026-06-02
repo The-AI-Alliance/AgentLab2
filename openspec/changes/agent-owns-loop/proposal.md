@@ -279,10 +279,30 @@ The two parameters:
   doesn't have a hook for this — agents have full Python.
 
 The recorder is attached separately via `agent.attach_recorder(recorder)`
-before `run()`. Subclasses override `attach_recorder` to propagate
-the recorder down to held LLMs (so `LLM.call(prompt, tag)` auto-emits
-`LLMCallEvent`). The base implementation just stashes it on
-`self._recorder` for budget introspection.
+before `run()`. Two reasons to override:
+
+1. **Propagate to held LLMs.** Subclasses with one or more `LLM`
+   instances call `self.llm.attach_recorder(recorder)` so
+   `LLM.call(prompt, tag)` auto-emits `LLMCallEvent`. Multi-LLM
+   agents attach selectively — LLMs they don't attach are excluded
+   from the trajectory.
+
+2. **Reach the live `Budget`.** The base impl stashes the recorder
+   on `self._recorder`, exposing the live `Budget` at
+   `self._recorder.budget`. Agent authors use this for two patterns:
+
+   - **Soft self-stop** when `budget.exhausted` is True — return a
+     `STOP_ACTION` from `step()` so the episode terminates cleanly
+     rather than letting `MonitoredTool` raise `BudgetExceeded`
+     mid-call.
+   - **Prompt injection** with `str(budget)` (concise summary of
+     configured caps + current usage) so the LLM can plan against
+     remaining budget. Genny does this every K turns via
+     `display_budget_every_k`.
+
+   Read-only fields available: `turns`, `tool_calls`, `cost_usd`,
+   `prompt_tokens`, `completion_tokens`, plus the `exhausted`
+   property.
 
 ### User experience: writing an agent
 

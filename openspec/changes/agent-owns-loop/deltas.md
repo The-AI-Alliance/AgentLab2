@@ -186,9 +186,22 @@ class Agent(ABC):
 `agent.attach_recorder(recorder)` BEFORE `run()`. Recording happens
 automatically: `LLM.call(prompt, tag)` emits `LLMCallEvent` if its
 `_recorder` is set; `MonitoredTool.execute_action` emits `ToolCallEvent`.
-Agent code never touches the recorder directly. `self._recorder.budget`
-is available for introspection (Genny.step uses it for graceful
-self-stop).
+Agent code never touches the recorder directly.
+
+**Budget introspection.** `attach_recorder`'s default stashes the
+recorder on `self._recorder`, exposing the live `Budget` at
+`self._recorder.budget` for two agent-side patterns:
+
+- **Soft self-stop:** check `budget.exhausted` in `step()` and return
+  `STOP_ACTION` for clean termination instead of letting
+  `MonitoredTool` raise `BudgetExceeded` mid-call.
+- **Prompt injection:** `str(budget)` returns a concise human-readable
+  summary of configured caps and current usage; inject every K turns
+  (Genny does this via `display_budget_every_k`) so the LLM can plan
+  against remaining budget.
+
+Agents that override `attach_recorder` must call `super()` to keep
+this wiring intact.
 
 **Async-uniform env_tool.** `Agent.run`'s `env_tool` parameter is
 narrowed to `AbstractAsyncTool` (NOT `AbstractTool | AbstractAsyncTool`).

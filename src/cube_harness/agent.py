@@ -81,19 +81,41 @@ class Agent(ABC):
 
     def attach_recorder(self, recorder: "TurnRecorder") -> None:
         """Wire the recorder into this agent and its event-producing
-        children (LLMs, etc). Default: stash on `self._recorder`.
+        children (LLMs, etc). Called by `Episode` once, before `run()`.
 
-        Subclasses that hold one or more `LLM` instances override this
-        to propagate down — e.g.::
+        **Two reasons agent authors override this:**
 
-            class MyAgent(Agent):
-                def attach_recorder(self, recorder):
-                    super().attach_recorder(recorder)
-                    self.llm.attach_recorder(recorder)
+        1. **Propagate to held LLMs** so `LLM.call(...)` auto-emits
+           `LLMCallEvent`. Multi-LLM agents call `.attach_recorder()` on
+           each LLM they want recorded; LLMs whose calls should NOT
+           appear in the trajectory are simply left unattached::
 
-        Multi-LLM agents call `.attach_recorder()` on each LLM they
-        want recorded; LLMs whose calls should NOT appear in the
-        trajectory are simply left unattached.
+               class MyAgent(Agent):
+                   def attach_recorder(self, recorder):
+                       super().attach_recorder(recorder)
+                       self.llm.attach_recorder(recorder)
+                       # self.scratch_llm intentionally NOT attached
+
+        2. **Reach the live `Budget`** for graceful self-stop /
+           prompt injection. The default impl stashes the recorder on
+           `self._recorder`, exposing the live budget at
+           `self._recorder.budget`::
+
+               def step(self, obs):
+                   budget = self._recorder.budget
+                   if budget is not None and budget.exhausted:
+                       # Soft self-stop — friendly path that returns a
+                       # STOP_ACTION rather than letting MonitoredTool
+                       # raise BudgetExceeded mid-call.
+                       return AgentOutput(actions=[STOP_ACTION])
+                   # Inject budget summary into the prompt every K turns
+                   # so the LLM can plan against remaining budget:
+                   budget_msg = str(budget) if budget.turns % 10 == 0 else None
+
+           Read-only fields available on Budget: `turns`, `tool_calls`,
+           `cost_usd`, `prompt_tokens`, `completion_tokens`, plus the
+           `exhausted` property and `__str__` (concise human-readable
+           summary of all configured caps and current usage).
         """
         self._recorder = recorder
 
