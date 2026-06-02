@@ -6,7 +6,7 @@ import pytest
 from cube.core import Observation
 
 from cube_harness.agent import Agent, AgentConfig
-from cube_harness.core import AgentEvent, AgentOutput, EvaluationEvent
+from cube_harness.core import AgentOutput, EvaluationEvent, LLMCallEvent
 from cube_harness.episode import Episode
 from cube_harness.storage import FileStorage
 
@@ -59,7 +59,7 @@ class TestCubeEpisode:
         Under RFC agent-owns-loop, MockAgent sends final_step immediately
         and the event stream is:
           events[0]  ToolCallEvent — synthetic reset event (initial obs)
-          events[1]  AgentEvent    — agent.step() output with final_step action
+          events[1]  LLMCallEvent    — agent.step() output with final_step action
           events[2]  ToolCallEvent — task.step intercepts final_step,
                                      evaluate() runs, reward=1.0, done=True
           events[3]  EvaluationEvent — terminal recorder.record_evaluation
@@ -81,12 +81,12 @@ class TestCubeEpisode:
 
         assert view.metadata["task_id"] == mock_cube_task_config.task_id
         kinds = [type(e.output).__name__ for e in view]
-        assert "AgentEvent" in kinds
+        assert "LLMCallEvent" in kinds
         assert "ToolCallEvent" in kinds
         assert "EvaluationEvent" in kinds
 
         # The first agent event carries the final_step action.
-        agent_event = next(e.output for e in view if isinstance(e.output, AgentEvent))
+        agent_event = next(e.output for e in view if isinstance(e.output, LLMCallEvent))
         assert agent_event.actions[0].name == "final_step"
 
         # The terminal EvaluationEvent reports the final reward.

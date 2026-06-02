@@ -14,18 +14,21 @@ def _new_event_id() -> str:
 
 
 class AgentOutput(TypedBaseModel):
+    """What `Agent.step()` returns — the actions the agent intends to dispatch
+    this turn, and (optionally) an agent-side error.
+
+    Under the post-`agent-owns-loop-auto-recorder` model, the LLM emits its
+    own `LLMCallEvent` to the recorder (auto-emit at `LLM.call()` time), so
+    the agent does NOT bundle LLM calls or prose into its return value.
+    `AgentOutput` is now the minimal "what to dispatch next" payload —
+    everything else streams as events.
+    """
+
     actions: list[Action] = Field(default_factory=list)
-    # All LLM calls made during this step. Set LLMCall.tag to label each call (e.g. "act", "summary").
-    llm_calls: list[LLMCall] = Field(default_factory=list)
     error: StepError | None = None
-    # Maps label → (start_time, end_time) as absolute Unix timestamps.
-    # Used by the XRay viewer to render a profiling breakdown inside each timeline segment.
-    profiling: dict[str, tuple[float, float]] = Field(default_factory=dict)
-    # Agent's chain-of-thought, rationale, or extended thinking for this step.
-    thoughts: str | None = None
 
     def __str__(self) -> str:
-        return self.model_dump_json(exclude={"llm_calls"})
+        return self.model_dump_json()
 
 
 class TrajectoryStep(TypedBaseModel):
@@ -39,46 +42,52 @@ class TrajectoryStep(TypedBaseModel):
     end_time: float | None = None
 
 
-# --- New event-stream model (RFC: agent-owns-loop) -------------------------
-# AgentEvent / ToolCallEvent / EvaluationEvent replace the binary
-# `EnvironmentOutput | AgentOutput` union in trajectories. They live
-# alongside the legacy `TrajectoryStep` during migration; Phase F (storage)
-# converts on read and Phase E (Episode) flips the writer.
+# --- Event-stream model (RFC: agent-owns-loop + auto-recorder) -------------
+# LLMCallEvent / ToolCallEvent / EvaluationEvent are the canonical trajectory
+# stream. LLM auto-emits LLMCallEvent on every `.call()` / `.acall()` (when
+# a recorder is attached); MonitoredTool auto-emits ToolCallEvent on every
+# dispatch. The agent never explicitly records anything — its loop is just
+# `llm.acall(...) + env_tool.execute_action(...)`.
 
 
-class AgentEvent(TypedBaseModel):
-    """One agent turn — LLM call(s), thoughts, and the actions emitted.
+class AgentErrorEvent(TypedBaseModel):
+    """An agent-side or framework-side failure event.
 
-    Each tool call spawned from this turn lives in a separate
-    `ToolCallEvent` that references `AgentEvent.id` via
-    `ToolCallEvent.parent_event_id` and one of `AgentEvent.actions[i].id`
-    via `ToolCallEvent.action_id`.
+    Used by Episode + TurnRecorder.record_failure to capture exceptions
+    that don't naturally belong on an LLMCallEvent or ToolCallEvent
+    (BudgetExceeded, agent-side crashes outside an LLM/tool call, etc).
+    Carries just the StepError payload — no need for a turn id since the
+    failure terminates the trajectory.
     """
 
     id: str = Field(default_factory=_new_event_id)
-    actions: list[Action] = Field(default_factory=list)
-    llm_calls: list[LLMCall] = Field(default_factory=list)
-    thoughts: str | None = None
-    # Assistant response text alongside the tool calls (the prose the LLM
-    # emitted on top of the structured actions). Lets XRay render what the
-    # agent "said" even when several tool calls land in parallel.
-    response_text: str | None = None
+    error: StepError
+
+
+class LLMCallEvent(TypedBaseModel):
+    """One LLM API call — the canonical "agent turn" event.
+
+    Replaces the prior batched `AgentEvent`. The shift to one event per LLM
+    call drops the explicit Turn context manager: events stream as they
+    happen instead of being bundled and flushed at the end of a turn.
+
+    Back-references:
+
+    - `id` becomes the `turn_id` of any `ToolCallEvent` dispatched as a
+      direct consequence of this LLM call. The recorder stashes the most
+      recent `LLMCallEvent.id` as the current turn id; subsequent
+      `MonitoredTool.execute_action` calls inherit it via the recorder's
+      `parent_event_id_getter`.
+    """
+
+    id: str = Field(default_factory=_new_event_id)
+    # Optional only to support the legacy V1/V2-steps decode path, which
+    # synthesizes an LLMCallEvent from a step record that has no
+    # corresponding LLMCall on disk. Live emissions always set this.
+    call: LLMCall | None = None
     # Maps label → (start_time, end_time) as absolute Unix timestamps.
     profiling: dict[str, tuple[float, float]] = Field(default_factory=dict)
     error: StepError | None = None
-
-    @classmethod
-    def from_agent_output(cls, output: AgentOutput, response_text: str | None = None) -> "AgentEvent":
-        """Build from a legacy `AgentOutput`. Used by the default Agent.run
-        and by the storage migration shim."""
-        return cls(
-            actions=list(output.actions),
-            llm_calls=list(output.llm_calls),
-            thoughts=output.thoughts,
-            response_text=response_text,
-            profiling=dict(output.profiling),
-            error=output.error,
-        )
 
 
 class ToolCallEvent(TypedBaseModel):
@@ -96,16 +105,20 @@ class ToolCallEvent(TypedBaseModel):
 
     Back-references:
 
-    - `parent_event_id` references the originating `AgentEvent.id`.
-    - `action_id` references one of that agent event's `actions[i].id`.
-    - `turn_id` groups parallel siblings of a single agent turn (it equals
-      the parent `AgentEvent.id` by default — agents emitting N parallel
+    - `parent_event_id` references the originating `LLMCallEvent.id`.
+    - `action_id` echoes the `Action.id` emitted by the LLM.
+    - `turn_id` groups parallel siblings of a single LLM turn (it equals
+      the parent `LLMCallEvent.id` by default — agents emitting N parallel
       tool calls in one turn share that `turn_id`).
+    - `action` carries the full `Action` payload so the on-disk trajectory
+      is self-contained — no need to cross-reference back to an
+      `LLMCallEvent` to know what was dispatched.
     """
 
     id: str = Field(default_factory=_new_event_id)
     parent_event_id: str
     action_id: str | None = None  # echoes Action.id; nullable for legacy actions
+    action: Action | None = None  # full action payload (nullable for legacy decode)
     obs: Observation = Field(default_factory=Observation)  # empty when error is set
     error: StepError | None = None
     turn_id: str
@@ -132,7 +145,7 @@ class EvaluationEvent(TypedBaseModel):
     parent_event_id: str | None = None
 
 
-TrajectoryEventOutput = AgentEvent | ToolCallEvent | EvaluationEvent
+TrajectoryEventOutput = LLMCallEvent | ToolCallEvent | EvaluationEvent | AgentErrorEvent
 
 
 class TrajectoryEvent(TypedBaseModel):

@@ -1,10 +1,14 @@
 """LLM interaction abstractions, LiteLLM based."""
 
 import pprint
+import time
 from datetime import datetime
 from functools import partial
-from typing import Any, Callable, List, Literal
+from typing import TYPE_CHECKING, Any, Callable, List, Literal
 from uuid import uuid4
+
+if TYPE_CHECKING:
+    from cube_harness.recorder import TurnRecorder
 
 import litellm
 import tenacity
@@ -293,6 +297,39 @@ def _mark_last_tool_for_cache(tools: list[dict]) -> list[dict]:
 class LLM:
     def __init__(self, config: LLMConfig):
         self.config = config
+        # Optional recorder for auto-emit of LLMCallEvent. Set via
+        # `attach_recorder(recorder)` from the agent's `attach_recorder`
+        # override (Agent / Genny / etc). When unset, `LLM.call()` returns
+        # the LLMCall without emitting — useful for tests and for agents
+        # that hold an LLM but don't want its calls in the trajectory.
+        self._recorder: "TurnRecorder | None" = None
+
+    def attach_recorder(self, recorder: "TurnRecorder") -> None:
+        """Wire this LLM to a recorder so `.call()` auto-emits an
+        `LLMCallEvent` per API call. Idempotent — re-attaching to a new
+        recorder is safe (replaces the prior ref)."""
+        self._recorder = recorder
+
+    def call(self, prompt: Prompt, tag: str = "") -> "LLMCall":
+        """Invoke the LLM and return a complete `LLMCall` record.
+
+        Auto-emits an `LLMCallEvent` to the attached recorder (if any).
+        This is the canonical entry-point for agent code: one call,
+        one event, no manual recording at the call site.
+        """
+        start = time.time()
+        response = self(prompt)
+        end = time.time()
+        call = LLMCall(
+            tag=tag,
+            llm_config=self.config,
+            prompt=prompt,
+            output=response.message,
+            usage=response.usage,
+        )
+        if self._recorder is not None:
+            self._recorder.on_llm_call(call, profiling={"llm": (start, end)})
+        return call
 
     def __call__(self, prompt: Prompt) -> LLMResponse:
         tools = prompt.tools

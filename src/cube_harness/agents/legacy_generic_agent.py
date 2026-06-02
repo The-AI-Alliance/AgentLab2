@@ -26,8 +26,8 @@ from PIL import Image
 from pydantic import Field
 
 from cube_harness.agent import Agent, AgentConfig
-from cube_harness.core import AgentOutput, LLMCall
-from cube_harness.llm import LLMConfig, Message, Prompt
+from cube_harness.core import AgentOutput
+from cube_harness.llm import LLMCall, LLMConfig, Message, Prompt
 from cube_harness.utils import parse_actions
 
 logger = logging.getLogger(__name__)
@@ -926,7 +926,7 @@ class GenericAgent(Agent):
     output_content_types: list[str] = ["text/plain"]
 
     def __init__(self, config: GenericAgentConfig, action_set: list[ActionSchema]):
-        self.config = config
+        super().__init__(config)
         self.llm = config.llm_config.make()
         self.token_counter = config.llm_config.make_counter()
 
@@ -948,6 +948,10 @@ class GenericAgent(Agent):
         self.goal: str = ""
         self._actions_cnt = 0
 
+    def attach_recorder(self, recorder) -> None:
+        super().attach_recorder(recorder)
+        self.llm.attach_recorder(recorder)
+
     def step(self, obs: Observation) -> AgentOutput:
         """Process observation and produce action(s)."""
         # Check if max actions reached
@@ -955,7 +959,6 @@ class GenericAgent(Agent):
             logger.info("Max actions reached, issuing STOP action.")
             return AgentOutput(
                 actions=[Action(id="stop", name=STOP_ACTION.name, arguments={})],
-                action_rationale="Reached max actions, stopping.",
             )
 
         # Extract observation data (text for history + raw components for shrinkable observation)
@@ -1013,7 +1016,11 @@ class GenericAgent(Agent):
         self._actions_cnt += 1
 
         # Build output
-        return AgentOutput(actions=actions, llm_calls=[llm_call] if llm_call else [], action_rationale=thoughts)
+        # llm_call already auto-emitted by self.llm.call(). Discard
+        # the local; action_rationale + llm_calls are no longer on
+        # the AgentOutput shape (auto-recorder PR).
+        _ = (llm_call, thoughts)
+        return AgentOutput(actions=actions)
 
     def _extract_obs_data(self, obs: Observation) -> tuple[str, dict[str, str | None]]:
         """Extract both formatted text and raw components from observation in one pass.
@@ -1182,16 +1189,11 @@ class GenericAgent(Agent):
 
         for retry_num in range(self.config.max_retry + 1):
             try:
-                llm_response = self.llm(prompt)
-                llm_call = LLMCall(
-                    llm_config=self.config.llm_config,
-                    prompt=prompt,
-                    output=llm_response.message,
-                    usage=llm_response.usage,
-                )
+                llm_call = self.llm.call(prompt, tag="act")
+                llm_response = llm_call  # local alias used below for output / usage
 
                 # Extract text response for parsing think/plan/memory/criticise tags
-                text_response = llm_response.message.content or ""
+                text_response = llm_response.output.content or ""
                 if isinstance(text_response, list):
                     text_response = " ".join(
                         item.get("text", "") if isinstance(item, dict) else str(item) for item in text_response
@@ -1201,8 +1203,8 @@ class GenericAgent(Agent):
                 ans_dict = main_prompt.parse_answer(text_response)
 
                 # Extract extended thinking from model's native thinking (reasoning_effort)
-                reasoning_content = getattr(llm_response.message, "reasoning_content", None)
-                thinking_blocks = getattr(llm_response.message, "thinking_blocks", None)
+                reasoning_content = getattr(llm_response.output, "reasoning_content", None)
+                thinking_blocks = getattr(llm_response.output, "thinking_blocks", None)
 
                 if reasoning_content:
                     if "thoughts" not in ans_dict:
@@ -1224,7 +1226,7 @@ class GenericAgent(Agent):
                     ans_dict["thoughts"] = text_response.strip()
 
                 # Parse actions from tool calls
-                actions = parse_actions(llm_response.message)
+                actions = parse_actions(llm_response.output)
                 if actions:
                     # Return first action (multiaction not supported in legacy agent)
                     ans_dict["actions"] = actions

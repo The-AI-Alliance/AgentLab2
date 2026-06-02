@@ -6,7 +6,7 @@ from litellm import Message
 from termcolor import colored
 
 from cube_harness.agent import Agent, AgentConfig, apply_description_overrides
-from cube_harness.core import AgentOutput, LLMCall
+from cube_harness.core import AgentOutput
 from cube_harness.llm import LLMConfig, Prompt
 from cube_harness.utils import parse_actions
 
@@ -58,7 +58,7 @@ class ReactAgent(Agent):
     output_content_types: list[str] = ["application/json"]
 
     def __init__(self, config: ReactAgentConfig, tools: list[ActionSchema]):
-        self.config = config
+        super().__init__(config)
         self.llm = config.llm_config.make()
         self.token_counter = config.llm_config.make_counter()
         self.tools: list[dict] = [tool.as_dict() for tool in tools]
@@ -74,6 +74,10 @@ class ReactAgent(Agent):
         self.history: list[dict | Message] = []
         self._actions_cnt = 0
 
+    def attach_recorder(self, recorder) -> None:
+        super().attach_recorder(recorder)
+        self.llm.attach_recorder(recorder)
+
     def step(self, obs: Observation) -> AgentOutput:
         if self.max_actions_reached():
             logger.info("Max actions reached, issuing STOP action.")
@@ -86,21 +90,20 @@ class ReactAgent(Agent):
         logger.info(f"Prompt tokens (estimated): {prompt_tokens}")
         try:
             logger.debug(f"Prompt: {prompt}")
-            llm_response = self.llm(prompt)
-            logger.debug(f"LLM Response: {llm_response}")
+            call = self.llm.call(prompt, tag="act")
+            logger.debug(f"LLM Response: {call.output}")
         except Exception as e:
             logger.exception(colored(f"Error getting LLM response: {e}. Prompt: {prompt}", "red"))
             raise e
-        usage = llm_response.usage
+        usage = call.usage
         logger.info(
             f"LLM usage - prompt: {usage.prompt_tokens}, completion: {usage.completion_tokens}, "
             f"cached: {usage.cached_tokens}, cache_created: {usage.cache_creation_tokens}, cost: ${usage.cost:.4f}"
         )
-        llm_output = llm_response.message
+        llm_output = call.output
         self.history.append(llm_output)
         self._actions_cnt += 1
-        llm_call = LLMCall(llm_config=self.config.llm_config, prompt=prompt, output=llm_output, usage=usage)
-        return AgentOutput(actions=parse_actions(llm_output), llm_calls=[llm_call])
+        return AgentOutput(actions=parse_actions(llm_output))
 
     def choose_steps_to_render(self, history: list[dict | Message]) -> list[dict | Message]:
         """Select which parts of history to include in the prompt based on length."""
@@ -149,12 +152,12 @@ class ReactAgent(Agent):
         ]
         prompt = Prompt(messages=messages)
         try:
-            llm_response = self.llm(prompt)
+            call = self.llm.call(prompt, tag="compact")
         except Exception as e:
             logger.exception(f"Error compacting history: {e}")
             raise
 
-        summary = llm_response.message.content
+        summary = call.output.content
         logger.info(f"Compacted {midpoint} messages into summary:\n{summary}")
         # Rebuild history: system + summary + remaining messages
         summary_message = dict(role="assistant", content=f"## Previous Interactions summary:\n{summary}")

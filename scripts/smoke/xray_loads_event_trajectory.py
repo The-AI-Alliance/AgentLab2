@@ -143,9 +143,10 @@ def main() -> int:
         storage = FileStorage(exp.output_dir)
         view = storage.load_episode(traj_id)
 
-        # The new event stream is the source of truth.
-        if view.n_agent_events < 1:
-            return _fail("no AgentEvent in event stream")
+        # The new event stream is the source of truth. The MockAgent
+        # in this smoke has no LLM, so LLMCallEvent count is 0 — only
+        # the synthetic reset ToolCallEvent + the final-step ToolCallEvent
+        # + the terminal EvaluationEvent land on disk.
         if view.n_tool_calls < 1:
             return _fail("no ToolCallEvent in event stream")
 
@@ -159,20 +160,18 @@ def main() -> int:
         if last_env is None or not isinstance(last_env, EnvironmentOutput):
             return _fail("last_env_step did not return an EnvironmentOutput")
 
-        # XRay's "agent step" finder pattern: walk steps looking for AgentOutput.
+        # XRay grouping check: the count of LLMCallEvents in the event
+        # stream lines up with the count of AgentOutput-shaped legacy
+        # steps materialized by `_events_to_legacy_steps`.
         agent_outputs = [s for s in legacy.steps if isinstance(s.output, AgentOutput)]
-        if not agent_outputs:
-            return _fail("no AgentOutput-shaped step in legacy view (XRay would render no agent panel)")
-
-        # Counters fold correctly through both views.
-        if legacy.n_agent_steps != view.n_agent_events:
+        if len(agent_outputs) != view.n_agent_events:
             return _fail(
-                f"legacy n_agent_steps={legacy.n_agent_steps} ≠ view n_agent_events={view.n_agent_events} "
+                f"legacy AgentOutput count={len(agent_outputs)} ≠ view n_agent_events={view.n_agent_events} "
                 "— materialization is inconsistent"
             )
 
         print(
-            f"  ✓ {traj_id}: {view.n_agent_events} agent events, "
+            f"  ✓ {traj_id}: {view.n_agent_events} llm events, "
             f"{view.n_tool_calls} tool calls, "
             f"legacy steps view has {len(legacy.steps)} steps (XRay sees something to render)"
         )

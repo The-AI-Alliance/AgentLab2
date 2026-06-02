@@ -137,7 +137,9 @@ def _check(label: str, exp: Experiment, result: ExpResult) -> int:
     eval_log = exp.export_eval_log()
     if len(eval_log.episodes) != N_TASKS:
         return _fail(f"[{label}] eval-log has {len(eval_log.episodes)} episodes, expected {N_TASKS}")
-    if not all(ep.num_turns >= 2 and ep.score == 1.0 for ep in eval_log.episodes):
+    # The MockAgent has no LLM, so `n_agent_steps` (= LLMCallEvent count) is 0.
+    # Each task fires 1 env step via the synthetic ToolCallEvent — num_turns counts that.
+    if not all(ep.num_turns >= 1 and ep.score == 1.0 for ep in eval_log.episodes):
         return _fail(f"[{label}] eval-log records have wrong num_turns/score (not derived from summary_stats)")
 
     print(f"  ✓ [{label}] {N_TASKS} step-less returns; steps + summary on disk; eval-log derived from summary")

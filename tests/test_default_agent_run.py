@@ -16,7 +16,7 @@ from cube.core import Action, ActionSchema, Observation
 from cube.tool import AbstractTool
 
 from cube_harness.agent import Agent, AgentConfig
-from cube_harness.core import AgentEvent, AgentOutput, ToolCallEvent, TrajectoryEvent
+from cube_harness.core import AgentOutput, LLMCallEvent, ToolCallEvent, TrajectoryEvent
 from cube_harness.recorder import TurnRecorder
 from cube_harness.tool import Budget, BudgetExceeded, TaskDone, as_async, install_monitoring
 
@@ -84,7 +84,6 @@ class _CounterAgent(Agent):
         self.steps_taken += 1
         return AgentOutput(
             actions=[Action(id=f"a-{self.steps_taken}", name="inc", arguments={})],
-            thoughts=f"bumping at step {self.steps_taken}",
         )
 
 
@@ -140,17 +139,17 @@ def test_default_run_completes_when_task_signals_done() -> None:
     recorder, storage = _setup(task, budget)
 
     agent = _CounterAgent(_CounterAgentConfig())
+    agent.attach_recorder(recorder)
     try:
-        asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.toolbox), recorder=recorder))
+        asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.toolbox)))
     except TaskDone:
         pass  # expected: task.finished() returned True after 3 counter increments
 
     outputs = storage.outputs()
-    n_agent = sum(1 for e in outputs if isinstance(e, AgentEvent))
     n_tool = sum(1 for e in outputs if isinstance(e, ToolCallEvent))
-    # Three rounds: each emits one AgentEvent + one ToolCallEvent. The
-    # 3rd tool call's MonitoredTool raises TaskDone AFTER recording.
-    assert n_agent == 3
+    # MockAgent has no LLM → no LLMCallEvent. Three rounds emit three
+    # ToolCallEvents; the 3rd's MonitoredTool raises TaskDone AFTER
+    # recording.
     assert n_tool == 3
     assert task.counter == 3
 
@@ -172,32 +171,37 @@ def test_default_run_terminates_on_empty_actions() -> None:
     budget = Budget(max_turns=10)
     recorder, storage = _setup(task, budget)
     agent = _NoopAgent(_CounterAgentConfig())
-    asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.toolbox), recorder=recorder))
+    agent.attach_recorder(recorder)
+    asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.toolbox)))
     outputs = storage.outputs()
-    assert sum(1 for e in outputs if isinstance(e, AgentEvent)) == 1
+    # No LLM call + empty actions => nothing was emitted by the agent
+    # loop (LLM auto-emit doesn't fire; ToolCallEvent dispatch doesn't fire).
+    assert sum(1 for e in outputs if isinstance(e, LLMCallEvent)) == 0
     assert sum(1 for e in outputs if isinstance(e, ToolCallEvent)) == 0
     assert task.counter == 0
 
 
 def test_default_run_records_parent_event_id_on_tool_calls() -> None:
-    """Each ToolCallEvent in the stream must reference the AgentEvent
-    that spawned it (Phase A/B/C back-reference invariant)."""
+    """Each ToolCallEvent must reference either the RESET sentinel
+    (LLM-less paths) or a preceding LLMCallEvent."""
 
     task = _MockTask(done_after_n=2)
     budget = Budget(max_turns=10)
     recorder, storage = _setup(task, budget)
+    agent = _CounterAgent(_CounterAgentConfig())
+    agent.attach_recorder(recorder)
     try:
-        asyncio.run(_CounterAgent(_CounterAgentConfig()).run(Observation(), as_async(task.toolbox), recorder))
+        asyncio.run(agent.run(Observation(), as_async(task.toolbox)))
     except TaskDone:
         pass
 
-    agent_event_ids: list[str] = []
+    valid_parents: set[str] = {"reset"}
     for ev in storage.outputs():
-        if isinstance(ev, AgentEvent):
-            agent_event_ids.append(ev.id)
+        if isinstance(ev, LLMCallEvent):
+            valid_parents.add(ev.id)
         elif isinstance(ev, ToolCallEvent):
-            assert ev.parent_event_id in agent_event_ids, (
-                "ToolCallEvent.parent_event_id must reference a preceding AgentEvent.id"
+            assert ev.parent_event_id in valid_parents, (
+                "ToolCallEvent.parent_event_id must reference RESET or a preceding LLMCallEvent.id"
             )
 
 
@@ -210,10 +214,11 @@ def test_default_run_propagates_budget_exceeded() -> None:
     recorder, storage = _setup(task, budget)
 
     agent = _CounterAgent(_CounterAgentConfig())
+    agent.attach_recorder(recorder)
     # The second tool call (turn 2) raises.
     raised: list[BaseException] = []
     try:
-        asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.toolbox), recorder=recorder))
+        asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.toolbox)))
     except BaseException as e:  # noqa: BLE001
         raised.append(e)
     assert any(isinstance(e, BudgetExceeded) for e in raised)

@@ -9,6 +9,7 @@ from cube.core import EnvironmentOutput, TypedBaseModel
 from cube.resource import IncompatibleInfraError
 from cube.task import TaskConfig
 from opentelemetry.trace import StatusCode
+from pydantic import Field
 from termcolor import colored
 
 from cube_harness.agent import AgentConfig
@@ -18,7 +19,7 @@ from cube_harness.episode_status import TERMINAL_STATUSES, EpisodeStatus, next_r
 from cube_harness.eval_log import EpisodeRecord
 from cube_harness.llm import is_permanent_llm_error
 from cube_harness.metrics.tracer import get_tracer
-from cube_harness.recorder import TurnRecorder
+from cube_harness.recorder import RecorderConfig, TurnRecorder
 from cube_harness.storage import FileStorage, Storage, TrajectoryView
 from cube_harness.summary import SummaryProcessor
 from cube_harness.tool import Budget, BudgetExceeded, TaskDone, as_async, install_monitoring
@@ -38,6 +39,9 @@ class EpisodeConfig(TypedBaseModel):
     max_steps: int
     max_cost_usd: float | None = None
     task_config: TaskConfig
+    # Recorder/sink configuration. Default = FileStorage + summary.
+    # Forward seam for OTel / RL HTTP / extra sinks (see RecorderConfig).
+    recorder_config: RecorderConfig = Field(default_factory=RecorderConfig)
 
 
 class Episode:
@@ -253,9 +257,16 @@ class Episode:
                 recorder.record_reset(initial)
                 logger.info(colored("Episode started — reset done", "blue"))
 
-                # 6. Drive the agent. agent.run is the canonical entry.
+                # 6. Attach the recorder to the agent's event producers
+                # (LLM, sub-agents). The agent's `attach_recorder`
+                # propagates to held LLMs so their `.call()` auto-emits
+                # `LLMCallEvent`s — agent code never touches the
+                # recorder directly.
+                agent.attach_recorder(recorder)
+
+                # 7. Drive the agent. agent.run is the canonical entry.
                 try:
-                    await agent.run(initial.obs, env_tool, recorder)
+                    await agent.run(initial.obs, env_tool)
                 except BudgetExceeded as e:
                     logger.info(colored(f"Budget exceeded: {e}", "yellow"))
                     recorder.record_failure(e)

@@ -274,6 +274,7 @@ def _record_tool_call(
     event = ToolCallEvent(
         parent_event_id=parent_event_id,
         action_id=action.id,
+        action=action,
         obs=Observation() if is_error else result,
         error=result if is_error else None,
         turn_id=parent_event_id,

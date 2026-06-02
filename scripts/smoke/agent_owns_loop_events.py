@@ -8,9 +8,9 @@ Episode (RFC `agent-owns-loop`, Phase E) and verifies:
   - the per-event filenames carry the right `kind` suffix
     (NNN_agent / NNN_tool_call / NNN_eval);
   - the trajectory reloads via FileStorage and the event stream is
-    complete (reset ToolCallEvent + per-turn AgentEvent / ToolCallEvent
+    complete (reset ToolCallEvent + per-turn LLMCallEvent / ToolCallEvent
     pairs + final EvaluationEvent);
-  - ToolCallEvents reference their parent AgentEvent.id via
+  - ToolCallEvents reference their parent LLMCallEvent.id via
     parent_event_id and share the same turn_id;
   - summary_stats carries the agent-owns-loop counters (n_agent_events,
     n_tool_calls, n_evaluations folded into n_agent_steps / n_env_steps
@@ -34,7 +34,7 @@ from cube.task import Task, TaskConfig, TaskMetadata
 from cube.tool import Tool, ToolConfig, tool_action
 
 from cube_harness.agent import Agent, AgentConfig
-from cube_harness.core import AgentEvent, AgentOutput, EvaluationEvent, ToolCallEvent
+from cube_harness.core import AgentOutput, EvaluationEvent, LLMCallEvent, ToolCallEvent
 from cube_harness.exp_runner import run_sequentially
 from cube_harness.experiment import Experiment
 from cube_harness.storage import EVENTS_DIR, FileStorage
@@ -121,31 +121,29 @@ def _check_trajectory(storage: FileStorage, traj_id: str) -> int:
         return _fail(f"events/ dir missing under {ep_dir}")
     files = sorted(events_dir.iterdir())
     kinds = [f.name.split("_", 1)[1] for f in files]
-    if not any("agent" in k for k in kinds):
-        return _fail(f"no agent event files: {kinds}")
     if not any("tool_call" in k for k in kinds):
         return _fail(f"no tool_call event files: {kinds}")
     if not any("eval" in k for k in kinds):
         return _fail(f"no eval event files: {kinds}")
+    # MockAgent has no LLM → no LLMCallEvent is expected. LLM agents
+    # (Genny, React, ...) auto-emit LLMCallEvents via `LLM.attach_recorder`.
 
     view = storage.load_episode(traj_id)
-    if view.n_agent_events < 1:
-        return _fail(f"expected ≥1 AgentEvent, got {view.n_agent_events}")
     if view.n_tool_calls < 1:
         return _fail(f"expected ≥1 ToolCallEvent, got {view.n_tool_calls}")
     if view.n_evaluations != 1:
         return _fail(f"expected exactly 1 EvaluationEvent, got {view.n_evaluations}")
 
     # Back-reference invariant: each ToolCallEvent.parent_event_id must
-    # be a preceding AgentEvent.id (or the RESET sentinel).
+    # be a preceding LLMCallEvent.id (or the RESET sentinel).
     agent_event_ids: set[str] = {"reset"}
     for e in view:
-        if isinstance(e.output, AgentEvent):
+        if isinstance(e.output, LLMCallEvent):
             agent_event_ids.add(e.output.id)
         elif isinstance(e.output, ToolCallEvent):
             if e.output.parent_event_id not in agent_event_ids:
                 return _fail(
-                    f"ToolCallEvent.parent_event_id={e.output.parent_event_id!r} references no preceding AgentEvent.id"
+                    f"ToolCallEvent.parent_event_id={e.output.parent_event_id!r} references no preceding LLMCallEvent.id"
                 )
         elif isinstance(e.output, EvaluationEvent):
             pass

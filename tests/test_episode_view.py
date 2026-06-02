@@ -7,9 +7,9 @@ Trajectory class as the consumer-facing trajectory abstraction.
 from cube.core import Action, EnvironmentOutput, Observation
 
 from cube_harness.core import (
-    AgentEvent,
     AgentOutput,
     EvaluationEvent,
+    LLMCallEvent,
     ToolCallEvent,
     TrajectoryEvent,
     TrajectoryMetadata,
@@ -20,11 +20,7 @@ from cube_harness.storage import FileStorage
 
 def _agent_event(turn_index: int = 0) -> TrajectoryEvent:
     return TrajectoryEvent(
-        output=AgentEvent(
-            id=f"agent_{turn_index}",
-            actions=[Action(name="bash", arguments={"cmd": "ls"})],
-            thoughts=f"thought {turn_index}",
-        ),
+        output=LLMCallEvent(id=f"agent_{turn_index}", call=None),
         start_time=1.0 + turn_index,
         end_time=1.5 + turn_index,
     )
@@ -113,7 +109,7 @@ class TestTrajectoryViewIteration:
         assert len(view) == 3
         decoded = list(view)
         assert len(decoded) == 3
-        assert isinstance(decoded[0].output, AgentEvent)
+        assert isinstance(decoded[0].output, LLMCallEvent)
         assert isinstance(decoded[1].output, ToolCallEvent)
         assert isinstance(decoded[2].output, EvaluationEvent)
 
@@ -290,7 +286,7 @@ class TestTrajectoryViewLegacyStepsLayout:
         assert view.n_tool_calls == 1
         first = view[0]
         second = view[1]
-        assert isinstance(first.output, AgentEvent)
+        assert isinstance(first.output, LLMCallEvent)
         assert isinstance(second.output, ToolCallEvent)
         # The synthesized parent_event_id ties them together.
         assert second.output.parent_event_id == first.output.id

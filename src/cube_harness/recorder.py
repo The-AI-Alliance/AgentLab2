@@ -1,46 +1,38 @@
-"""TurnRecorder — the agent's outbound telemetry sink.
+"""TurnRecorder — the trajectory's event sink.
 
-Part of RFC `agent-owns-loop`. Constructed by `Episode` per-episode and
-passed to `agent.run`. The agent reports its internals (LLM calls,
-thoughts, response text, profiling, agent-side errors) through this
-recorder; the toolbox (`MonitoredTool`) handles tool-call events
-separately.
+Part of RFC `agent-owns-loop`. After the `auto-recorder` follow-up,
+agents never call the recorder directly. The recorder is attached to
+each event-producing component:
 
-Two complementary APIs on `TurnRecorder`:
+  - `LLM.attach_recorder(recorder)` — every `.call()` emits an
+    `LLMCallEvent`. The recorder stashes the latest LLMCallEvent.id as
+    the active turn id.
+  - `MonitoredTool` (Episode-installed) — every `.execute_action()`
+    emits a `ToolCallEvent` with `parent_event_id` / `turn_id` resolved
+    via the recorder's `current_turn_id()` getter.
 
-* **Coarse** — `record(agent_output)`. One call per LLM cycle, all
-  fields at once. The default `Agent.run` (Phase D) uses this — matches
-  today's step-style.
-* **Granular** — `begin_turn() -> Turn` context manager. Use when you
-  want to add events incrementally during a turn (streaming LLM
-  responses, mid-turn profiling). On `__exit__` the accumulated state
-  flushes as one `AgentEvent`.
+Agent code is reduced to `await self.llm.call(prompt)` +
+`await env_tool.execute_action(action)`. Recorder is invisible.
 
-Episode-only helpers on the same object: `record_reset`,
-`record_failure`, `record_evaluation`. Agents shouldn't call these; the
-convention is documented but not actively prevented in v1.
-
-A lossy `record_external_run(final_text, usage, raw_events)` path is
-provided for Phase 2 connectors that wrap opaque external frameworks
-(CLI agents, A2A endpoints) where per-turn decomposition isn't
-possible.
+Episode-only helpers (`record_reset`, `record_failure`,
+`record_evaluation`) remain on this object — they emit synthetic events
+at trajectory boundaries that no component naturally owns.
 """
 
 import logging
 import time
-from types import TracebackType
 from typing import TYPE_CHECKING
 
-from cube.core import Action, EnvironmentOutput, StepError
+from cube.core import Action, EnvironmentOutput, StepError, TypedBaseModel
 
 from cube_harness.core import (
-    AgentEvent,
-    AgentOutput,
+    AgentErrorEvent,
     EvaluationEvent,
+    LLMCallEvent,
     ToolCallEvent,
     TrajectoryEvent,
 )
-from cube_harness.llm import LLMCall, Usage
+from cube_harness.llm import LLMCall
 from cube_harness.tool import BudgetExceeded, _stream_event
 
 if TYPE_CHECKING:
@@ -54,114 +46,41 @@ logger = logging.getLogger(__name__)
 RESET_PARENT_EVENT_ID = "reset"
 
 
-class Turn:
-    """Context manager for granular streaming-style event emission.
+class RecorderConfig(TypedBaseModel):
+    """Configuration for the per-episode `TurnRecorder`.
 
-    Returned from `TurnRecorder.begin_turn()`. Accumulate LLM calls,
-    thoughts, response text, profiling, and agent errors on the
-    instance; on `__exit__` the recorder flushes them as one
-    `AgentEvent`.
+    Pydantic config object — follows the same "Python is the config"
+    philosophy as `LLMConfig` / `AgentConfig`. Lives on `EpisodeConfig`
+    so a recipe can opt sinks in or out without touching Episode.
 
-    Coding contract: never reuse a Turn after `__exit__`. Re-entering
-    is a bug — open a new one for the next turn.
+    Phase 1 (this PR): only the file-storage + summary sinks exist;
+    they're always on and don't need configuration. The class exists
+    as a forward seam — future fields:
 
-    NOTE: forward surface for Phase 2 streaming / opaque-connector
-    agents. No in-tree production caller yet — both shipped agents
-    (`Agent.run` default, `GennyParallel.run`) use the coarse
-    `TurnRecorder.record(agent_output)` API. Exercised by
-    `tests/test_recorder_dual_api.py`.
+      * `enable_otel: bool` — emit each event as an OTel span.
+      * `rl_http_endpoint: str | None` — POST events to an RL trainer
+        HTTP endpoint (see `~/dev/cube-harness/docs/rl-integration.md`).
+      * `extra_sinks: list[SinkConfig]` — user-defined sinks for
+        third-party telemetry pipelines.
+
+    Default `RecorderConfig()` is the current Phase-1 behavior:
+    FileStorage + SummaryProcessor, nothing else.
     """
-
-    def __init__(self, recorder: "TurnRecorder") -> None:
-        self._recorder = recorder
-        self._event = AgentEvent()
-        self._start_time = time.time()
-        self._closed = False
-
-    @property
-    def id(self) -> str:
-        """The AgentEvent.id that this turn will flush as — exposed so
-        callers (and MonitoredTool's parent_event_id_getter) can read
-        the active turn id mid-turn."""
-        return self._event.id
-
-    # --- granular adders ---
-
-    def add_llm_call(self, call: LLMCall) -> None:
-        """Append one LLMCall record (full prompt / response / usage) to
-        the in-progress turn."""
-        self._event.llm_calls.append(call)
-
-    def add_thought(self, text: str) -> None:
-        """Append a reasoning chunk. Multiple add_thought calls within
-        one turn concatenate so streaming reasoning isn't lost."""
-        if self._event.thoughts is None:
-            self._event.thoughts = text
-        else:
-            self._event.thoughts += text
-
-    def add_response_text(self, text: str) -> None:
-        """Append assistant prose. Concatenates across multiple calls in
-        the same turn (streaming-friendly)."""
-        if self._event.response_text is None:
-            self._event.response_text = text
-        else:
-            self._event.response_text += text
-
-    def add_action(self, action: Action) -> None:
-        """Append one action to the turn's outbound action list."""
-        self._event.actions.append(action)
-
-    def add_profile(self, label: str, start: float, end: float) -> None:
-        """Record a labelled timing span (used by XRay's profiling tab)."""
-        self._event.profiling[label] = (start, end)
-
-    def add_error(self, err: StepError) -> None:
-        """Mark this turn as failed with the supplied StepError."""
-        self._event.error = err
-
-    # --- context manager ---
-
-    def __enter__(self) -> "Turn":
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc: BaseException | None,
-        tb: TracebackType | None,
-    ) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        end_time = time.time()
-        if exc is not None and self._event.error is None and isinstance(exc, Exception):
-            # Capture agent-side exceptions as an event error so the
-            # trajectory remains coherent even when the agent crashes
-            # mid-turn. We don't try to swallow it — re-raise the original
-            # exception after recording.
-            self._event.error = StepError.from_exception(exc)
-        self._recorder._flush_agent_event(self._event, self._start_time, end_time)
 
 
 class TurnRecorder:
-    """The agent's outbound telemetry sink. Built by Episode; passed to agent.run.
+    """The trajectory's event sink. Built by Episode; attached to event
+    producers (LLM, env_tool) via their respective `attach_recorder`
+    methods.
 
-    Cross-turn state (storage, summary, episode metadata) lives on Episode
-    and is bound here at construction. The agent never reads any of that
-    state directly — only writes to it through this recorder.
+    Cross-turn state (storage, summary, budget) lives on Episode and is
+    bound here at construction. Producers stream events through
+    `_stream_event` (storage + summary); the recorder also bumps the
+    Budget counters and enforces caps after each LLM call.
 
-    `current_turn_id` is a read-only view onto the active turn's id, used
-    by `MonitoredTool`'s parent_event_id_getter so tool calls fired
-    inside a turn record the right parent. Outside a turn, it returns
-    `RESET_PARENT_EVENT_ID` (anything fired during reset or
-    finalization is attributed to that boundary, not to an absent
-    agent turn).
-
-    Events stream to disk via `storage.save_event(event, trajectory_id)`,
-    which assigns + returns the event_num internally. No shared counter
-    needs to be threaded through. There is no in-memory accumulation —
-    `Episode.run` returns a `TrajectoryView` and consumers read from storage.
+    `current_turn_id()` returns the id of the most recent LLMCallEvent,
+    or `RESET_PARENT_EVENT_ID` if no LLM call has fired yet. Used by
+    MonitoredTool's parent_event_id_getter.
     """
 
     def __init__(
@@ -175,80 +94,58 @@ class TurnRecorder:
         self.trajectory_id = trajectory_id
         self.storage = storage
         self.summary = summary
-        # Budget is `cube_harness.tool.Budget` but we keep the type loose
-        # to avoid the circular import (tool imports recorder transitively
-        # through MonitoredTool's state). When set, every flushed
-        # AgentEvent bumps budget.turns so MonitoredTool's
-        # max-turns check fires correctly.
+        # `cube_harness.tool.Budget`; loose-typed to avoid circular import.
         self.budget = budget
-        # Mutable side-channel dict passed from Episode. record_external_run
-        # writes connector-specific data here; Episode merges it into the
-        # final TrajectoryMetadata.metadata at finalize_episode time.
+        # Mutable side-channel dict passed from Episode; merged into
+        # TrajectoryMetadata.metadata at finalize. Connectors that need a
+        # back-channel write here.
         self.metadata_updates = metadata_updates if metadata_updates is not None else {}
         self._current_turn_id: str | None = None
-        self._n_turns_emitted = 0
+        self._n_llm_calls_emitted = 0
 
-    # --- agent-facing API ---
+    # --- producer-facing hook (called by LLM.call() auto-emit) ---
 
-    def record(self, output: AgentOutput, response_text: str | None = None) -> str:
-        """Coarse path — emit one AgentEvent from a complete AgentOutput.
-
-        Returns the AgentEvent.id so callers (Episode's default
-        Agent.run loop) can correlate downstream tool calls.
-        """
-        event = AgentEvent.from_agent_output(output, response_text=response_text)
-        start = time.time()
-        self._current_turn_id = event.id
-        self._flush_agent_event(event, start, start)
-        return event.id
-
-    def begin_turn(self) -> Turn:
-        """Granular path — open a turn, add events incrementally, flush on close."""
-        turn = Turn(self)
-        self._current_turn_id = turn.id
-        return turn
-
-    # --- lossy capture path for opaque external frameworks (Phase 2) ---
-
-    def record_external_run(
+    def on_llm_call(
         self,
-        final_text: str | None,
-        usage: Usage | None = None,
-        raw_events: list[dict] | None = None,
+        call: LLMCall,
+        profiling: dict[str, tuple[float, float]] | None = None,
+        error: StepError | None = None,
     ) -> str:
-        """Emit one synthetic AgentEvent summarising an opaque external run.
-
-        Used by Phase-2 connectors (LangGraph, Pydantic AI, Codex CLI,
-        A2A …) that can't decompose the agent's execution into per-turn
-        events. Carries:
-
-          * `final_text` — the agent's final assistant response.
-          * `usage` — token / cost receipt (best-effort, kept in the
-            trajectory's metadata under `external_run_usage` because
-            `LLMCall` requires a full `llm_config` we don't have here).
-          * `raw_events` — opaque blob preserved on the trajectory's
-            metadata under `external_run_raw_events`.
-
-        Connectors that CAN observe per-turn events (Pydantic AI,
-        LangGraph, OpenAI Agents SDK, Inspect AI) should use `record()`
-        or `begin_turn()` instead — this method is the fallback for
-        truly opaque frameworks.
-        """
-        event = AgentEvent(response_text=final_text)
-        # Stash side-channel data on the metadata_updates dict — Episode
-        # merges it into the final TrajectoryMetadata.metadata at
-        # finalize_episode time. Connectors can re-read it post-run
-        # (XRay, scoring scripts, ADP export, ...).
-        if usage is not None:
-            self.metadata_updates.setdefault("external_run_usage", []).append(usage.model_dump(mode="json"))
-        if raw_events:
-            self.metadata_updates.setdefault("external_run_raw_events", []).extend(raw_events)
-        start = time.time()
+        """Emit one `LLMCallEvent`, bump Budget (turn + LLM usage), then
+        enforce caps. Returns the event id (also stashed as the active
+        turn id for subsequent tool calls)."""
+        event = LLMCallEvent(call=call, profiling=dict(profiling or {}), error=error)
         self._current_turn_id = event.id
-        self._flush_agent_event(event, start, start)
+        self._n_llm_calls_emitted += 1
+        start, end = self._llm_window(profiling)
+        if self.budget is not None:
+            usage = call.usage
+            self.budget.bump_turn_and_usage(
+                cost=usage.cost if usage is not None else 0.0,
+                prompt=usage.prompt_tokens if usage is not None else 0,
+                completion=usage.completion_tokens if usage is not None else 0,
+            )
+        _stream_event(
+            TrajectoryEvent(output=event, start_time=start, end_time=end),
+            self.trajectory_id,
+            self.storage,
+            self.summary,
+        )
+        # Enforce AFTER stream so the LLM call that crossed the cap is
+        # on disk before we abort. Mirrors what MonitoredTool does on
+        # tool dispatch.
+        if self.budget is not None and self.budget.exhausted:
+            raise BudgetExceeded()
         return event.id
 
-    # --- Episode-only helpers ---
+    @staticmethod
+    def _llm_window(profiling: dict[str, tuple[float, float]] | None) -> tuple[float, float]:
+        if profiling and "llm" in profiling:
+            return profiling["llm"]
+        now = time.time()
+        return now, now
+
+    # --- Episode-only helpers (trajectory boundaries) ---
 
     def record_reset(self, initial: EnvironmentOutput) -> None:
         """Synthetic ToolCallEvent capturing the initial observation from `task.reset()`."""
@@ -256,30 +153,26 @@ class TurnRecorder:
         event = ToolCallEvent(
             parent_event_id=RESET_PARENT_EVENT_ID,
             action_id=RESET_PARENT_EVENT_ID,
+            action=synthetic_action,
             obs=initial.obs,
             error=initial.error,
             turn_id=RESET_PARENT_EVENT_ID,
         )
         ts = time.time()
-        self._append_event(TrajectoryEvent(output=event, start_time=ts, end_time=ts))
-        # synthetic_action is only used for debugging logs.
-        logger.debug("record_reset action=%r", synthetic_action)
+        _stream_event(
+            TrajectoryEvent(output=event, start_time=ts, end_time=ts),
+            self.trajectory_id,
+            self.storage,
+            self.summary,
+        )
 
     def record_failure(self, exc: BaseException) -> None:
-        """Capture an agent-side or budget failure as a final AgentEvent.
+        """Capture an Episode-level failure as an `AgentErrorEvent`.
 
-        Episode calls this from its `except` clauses so the failure
-        appears in the trajectory and the post-mortem (XRay, summary).
-        Accepts BaseException because Budget/Episode-level signals
-        (BudgetExceeded, EpisodeDone) extend BaseException.
-
-        A failure event is NOT a normal turn — it doesn't bump
-        budget.turns (we're already past the budget) and it doesn't
-        update current_turn_id. We append directly.
+        Accepts BaseException because the Budget/TaskDone signals
+        extend BaseException. Does NOT bump budget — we are already
+        past the failure point.
         """
-        # StepError.from_exception requires Exception, not BaseException.
-        # Wrap BaseException-only signals so the trajectory still records
-        # their type + message without breaking the StepError contract.
         if isinstance(exc, Exception):
             err = StepError.from_exception(exc)
         else:
@@ -288,88 +181,35 @@ class TurnRecorder:
                 exception_str=str(exc),
                 stack_trace="",
             )
-        event = AgentEvent(error=err)
+        event = AgentErrorEvent(error=err)
         ts = time.time()
-        self._append_event(TrajectoryEvent(output=event, start_time=ts, end_time=ts))
+        _stream_event(
+            TrajectoryEvent(output=event, start_time=ts, end_time=ts),
+            self.trajectory_id,
+            self.storage,
+            self.summary,
+        )
 
     def record_evaluation(self, reward: float, info: dict | None = None, *, is_terminal: bool = True) -> None:
         """Record a `task.evaluate()` result.
 
-        - Terminal flavor (`is_terminal=True`, default): Episode emits
-          exactly one of these in `finally` after `agent.run` returns.
-        - Step-wise flavor: `MonitoredTool` emits via the lower-level
-          `_record_step_evaluation` helper directly (skips this method)
-          so it can pass `parent_event_id`. This API surfaces the
-          terminal-eval path only."""
+        Terminal flavor (default): Episode emits exactly one in
+        `finally`. The step-wise flavor (`is_terminal=False`) is emitted
+        by `MonitoredTool` directly through `_record_step_evaluation`
+        — this API surfaces the terminal path only.
+        """
         ev = EvaluationEvent(reward=float(reward), info=dict(info or {}), is_terminal=is_terminal)
         ts = time.time()
-        self._append_event(TrajectoryEvent(output=ev, start_time=ts, end_time=ts))
+        _stream_event(
+            TrajectoryEvent(output=ev, start_time=ts, end_time=ts),
+            self.trajectory_id,
+            self.storage,
+            self.summary,
+        )
 
-    # --- read-only state surfaced for MonitoredTool's getter ---
+    # --- getter consumed by MonitoredTool.parent_event_id_getter ---
 
     def current_turn_id(self) -> str:
-        """The id of the most recently opened AgentEvent. Used by
-        MonitoredTool's `parent_event_id_getter` so tool calls fired
-        inside a turn record that turn's id as parent. Returns the
-        RESET sentinel when no turn has been opened yet."""
+        """The id of the most recently emitted LLMCallEvent, or
+        `RESET_PARENT_EVENT_ID` if no LLM call has fired yet."""
         return self._current_turn_id or RESET_PARENT_EVENT_ID
-
-    # --- internals ---
-
-    def _flush_agent_event(self, event: AgentEvent, start: float, end: float) -> None:
-        """Persist a finished AgentEvent — bumps `budget.turns` and
-        `budget.cost_usd` from the event's LLM calls, raises
-        BudgetExceeded if that puts us past any cap, then writes
-        through `_append_event` (storage + summary).
-
-        Cost accumulation mirrors what SummaryProcessor does for the
-        per-episode summary — same `llm_call.usage.cost` source — but
-        also feeds `Budget.cost_usd` so `Budget.exhausted` enforces
-        `max_cost_usd` end-to-end."""
-        self._n_turns_emitted += 1
-        if self.budget is not None:
-            # Atomic bump of turn counter + LLM-usage totals against
-            # parallel `_record_tool_call` workers. See `Budget._lock`.
-            # max_cost_usd / max_prompt_tokens / max_completion_tokens
-            # ceilings actually trip; mirrors what SummaryProcessor does
-            # for the per-episode summary, but feeds the live Budget so
-            # `Budget.exhausted` enforces end-to-end and `str(budget)`
-            # reports current consumption to agents that introspect it.
-            cost = sum(call.usage.cost for call in event.llm_calls if call.usage is not None)
-            prompt = sum(call.usage.prompt_tokens for call in event.llm_calls if call.usage is not None)
-            completion = sum(call.usage.completion_tokens for call in event.llm_calls if call.usage is not None)
-            self.budget.bump_turn_and_usage(cost=cost, prompt=prompt, completion=completion)
-        self._append_event(TrajectoryEvent(output=event, start_time=start, end_time=end))
-        # Enforce budget AFTER the flush so the AgentEvent that took us
-        # past the cap is recorded before we abort the run. This
-        # mirrors what MonitoredTool does on tool dispatch, but covers
-        # the case where the task's step() bypasses the toolbox entirely
-        # (e.g. tests with hand-rolled task.step that doesn't dispatch
-        # to tool.execute_action).
-        if self.budget is not None and self.budget.exhausted:
-            raise BudgetExceeded()
-
-    def _append_event(self, te: TrajectoryEvent) -> None:
-        """Stream one event to storage + summary. Never keeps a copy in
-        memory — the TrajectoryView is the read interface, this writes.
-
-        Event numbering is owned by `storage.save_event` — no shared
-        counter to thread through. Storage uses its per-trajectory
-        `itertools.count` to assign monotonic event_nums, safe under
-        concurrent writes from multiple `asyncio.to_thread` workers."""
-        _stream_event(te, self.trajectory_id, self.storage, self.summary)
-
-
-def equivalent_agent_events(a: AgentEvent, b: AgentEvent) -> bool:
-    """Field-by-field equality ignoring `id` and `profiling`.
-
-    Used by tests asserting `record()` and `begin_turn()` produce the
-    same `AgentEvent` for the same payload.
-    """
-    return (
-        a.actions == b.actions
-        and a.llm_calls == b.llm_calls
-        and a.thoughts == b.thoughts
-        and a.response_text == b.response_text
-        and a.error == b.error
-    )

@@ -15,9 +15,10 @@ from cube.core import EnvironmentOutput
 from pydantic import BaseModel
 
 from cube_harness.core import (
-    AgentEvent,
+    AgentErrorEvent,
     AgentOutput,
     EvaluationEvent,
+    LLMCallEvent,
     ToolCallEvent,
     Trajectory,
     TrajectoryEvent,
@@ -104,13 +105,15 @@ def _step_filename(step_num: int, step: TrajectoryStep) -> str:
 
 def _event_kind(event: TrajectoryEvent) -> str:
     """Map a TrajectoryEvent to its on-disk filename suffix
-    (`agent` / `tool_call` / `eval`)."""
-    if isinstance(event.output, AgentEvent):
-        return "agent"
+    (`llm` / `tool_call` / `eval` / `agent_error`)."""
+    if isinstance(event.output, LLMCallEvent):
+        return "llm"
     if isinstance(event.output, ToolCallEvent):
         return "tool_call"
     if isinstance(event.output, EvaluationEvent):
         return "eval"
+    if isinstance(event.output, AgentErrorEvent):
+        return "agent_error"
     raise TypeError(f"Unknown event output type: {type(event.output).__name__}")
 
 
@@ -154,16 +157,17 @@ def _events_to_legacy_steps(events: list[TrajectoryEvent]) -> list[TrajectorySte
     out: list[TrajectoryStep] = []
     for ev in events:
         body = ev.output
-        if isinstance(body, AgentEvent):
+        if isinstance(body, LLMCallEvent):
+            # The legacy step view bundled actions + llm_calls. With one
+            # LLMCallEvent per LLM call (streaming model), actions live
+            # on subsequent ToolCallEvents — we surface an AgentOutput
+            # with empty `actions` and the LLM call recorded indirectly
+            # via the recorder's stream. Legacy XRay sees the call's
+            # tag/cost via the LLMCallEvent itself; actions render from
+            # the ToolCallEvent below.
             out.append(
                 TrajectoryStep(
-                    output=AgentOutput(
-                        actions=list(body.actions),
-                        llm_calls=list(body.llm_calls),
-                        error=body.error,
-                        profiling=dict(body.profiling),
-                        thoughts=body.thoughts,
-                    ),
+                    output=AgentOutput(actions=[], error=body.error),
                     start_time=ev.start_time,
                     end_time=ev.end_time,
                 )
@@ -298,8 +302,15 @@ class TrajectoryView:
 
     @property
     def n_agent_events(self) -> int:
-        """Number of AgentEvent entries — read from the index, no decode."""
-        return sum(1 for e in self._index if e.kind == "agent")
+        """Number of LLMCallEvent entries — read from the index, no decode.
+
+        Kept name `n_agent_events` for back-compat with XRay summaries
+        and existing experiment metadata; the underlying event is now
+        `LLMCallEvent` (file suffix `_llm`). The legacy `_agent` suffix
+        is also counted so V1-steps-layout decodes still report the
+        right count.
+        """
+        return sum(1 for e in self._index if e.kind in ("llm", "agent"))
 
     @property
     def n_tool_calls(self) -> int:
@@ -393,11 +404,18 @@ class TrajectoryView:
         up across decodes).
         """
         if isinstance(step.output, AgentOutput):
-            agent_event = AgentEvent.from_agent_output(step.output)
-            # Override the default UUID with a deterministic id so child
-            # ToolCallEvents can reference it across decodes.
-            agent_event = agent_event.model_copy(update={"id": _legacy_agent_id(entry.num)})
-            return TrajectoryEvent(output=agent_event, start_time=step.start_time, end_time=step.end_time)
+            # Legacy V1/V2-steps: synthesize an LLMCallEvent placeholder
+            # so legacy episodes still produce a turn-id-able event for
+            # ToolCallEvents to reference. The on-disk step doesn't
+            # carry an LLMCall in the new shape (auto-recorder shrank
+            # AgentOutput to just `actions + error`); we emit a
+            # call-less event with a deterministic id.
+            llm_event = LLMCallEvent(
+                id=_legacy_agent_id(entry.num),
+                call=None,
+                error=step.output.error,
+            )
+            return TrajectoryEvent(output=llm_event, start_time=step.start_time, end_time=step.end_time)
         if isinstance(step.output, EnvironmentOutput):
             parent_id = (
                 _legacy_agent_id(entry.legacy_parent_num) if entry.legacy_parent_num is not None else "__reset__"
@@ -454,7 +472,7 @@ def _build_events_index(events_dir: Path) -> list[_EventIndexEntry]:
             num = int(num_str)
         except ValueError:
             continue
-        if kind not in ("agent", "tool_call", "eval"):
+        if kind not in ("llm", "agent", "tool_call", "eval", "agent_error"):
             continue
         entries.append(_EventIndexEntry(num=num, kind=kind, path=path))
     return entries

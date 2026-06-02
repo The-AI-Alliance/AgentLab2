@@ -72,24 +72,46 @@ class Agent(ABC):
 
     def __init__(self, config: AgentConfig):
         self.config = config
-        # Default Agent.run stashes `recorder` here on entry so
-        # subclasses that override only step() can introspect the live
-        # budget via `self._recorder.budget` for graceful self-stop and
-        # prompt injection. None when step() is called outside of run().
+        # Set by Episode via `attach_recorder(recorder)` before `run`.
+        # Subclasses that hold LLM(s) override `attach_recorder` to
+        # propagate it down (Genny does this for its `self.llm`).
+        # Agent-side reads of `self._recorder.budget` for graceful
+        # self-stop and prompt injection rely on this being set.
         self._recorder: "TurnRecorder | None" = None
+
+    def attach_recorder(self, recorder: "TurnRecorder") -> None:
+        """Wire the recorder into this agent and its event-producing
+        children (LLMs, etc). Default: stash on `self._recorder`.
+
+        Subclasses that hold one or more `LLM` instances override this
+        to propagate down — e.g.::
+
+            class MyAgent(Agent):
+                def attach_recorder(self, recorder):
+                    super().attach_recorder(recorder)
+                    self.llm.attach_recorder(recorder)
+
+        Multi-LLM agents call `.attach_recorder()` on each LLM they
+        want recorded; LLMs whose calls should NOT appear in the
+        trajectory are simply left unattached.
+        """
+        self._recorder = recorder
 
     @abstractmethod
     def step(self, obs: Observation) -> AgentOutput:
+        """Perform one agent turn against the observation.
+
+        Returns the minimal `AgentOutput(actions, error)` the framework
+        needs to dispatch through `env_tool` next. LLM calls inside
+        `step()` auto-emit `LLMCallEvent`s through the attached
+        recorder (see `LLM.attach_recorder`) — `step()` does NOT
+        bundle LLM calls into its return value.
         """
-        Perform a step given an observation and return the agent's output with actions.
-        """
-        pass
 
     async def run(
         self,
         initial_obs: Observation,
         env_tool: "AbstractAsyncTool",
-        recorder: "TurnRecorder",
     ) -> None:
         """Default gym-style loop on top of `self.step` — the canonical
         entry point invoked by `Episode` (RFC `agent-owns-loop`).
@@ -105,6 +127,13 @@ class Agent(ABC):
         `await env_tool.execute_action(action) -> Observation | StepError`
         call site regardless of the underlying tool's sync/async nature.
 
+        The recorder is NOT a parameter — Episode attaches it via
+        `agent.attach_recorder(recorder)` BEFORE calling `run()`. LLM
+        calls inside `step()` auto-emit; tool calls auto-emit; the
+        agent code never touches the recorder directly. For
+        introspection (e.g. budget self-stop), `self._recorder.budget`
+        is available.
+
         Termination:
 
           * Graceful: `self.step` returns empty actions with no error.
@@ -114,30 +143,19 @@ class Agent(ABC):
             in its outer `except`. Agents must NOT catch BaseException.
           * `BudgetExceeded` raised by a monitored tool — same
             propagation pattern.
-
-        The agent does NOT call `task.reset` / `task.evaluate` / `task.step` —
-        those belong to Episode (lifecycle) or the env_tool (per-call).
-
-        Side-effect: stashes `recorder` on `self._recorder` so subclasses
-        that override only `step()` can introspect the live budget for
-        graceful self-stop or prompt injection — `self._recorder.budget`.
         """
-        self._recorder = recorder
         obs = initial_obs
         while True:
             agent_output = await asyncio.to_thread(self.step, obs)
-            recorder.record(agent_output)
             if not agent_output.actions and agent_output.error is None:
                 # Graceful "done" by the agent itself.
                 return
-            # Dispatch each action through the env_tool one at a time.
-            # Done detection / step-eval / obs_postprocess happen inside
-            # MonitoredTool — they may raise TaskDone (propagates to Episode).
+            # Dispatch each action through env_tool one at a time.
+            # MonitoredTool auto-emits ToolCallEvent + done/eval signals.
             last_obs = obs
             for action in agent_output.actions:
                 result = await env_tool.execute_action(action)
                 if isinstance(result, StepError):
-                    # Tool error — agent stops; Episode finalizes.
                     return
                 last_obs = result
             obs = last_obs

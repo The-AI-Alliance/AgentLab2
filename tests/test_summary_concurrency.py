@@ -17,8 +17,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from cube.core import Action, Observation
+from litellm import Message
 
-from cube_harness.core import AgentEvent, ToolCallEvent, TrajectoryEvent
+from cube_harness.core import LLMCallEvent, ToolCallEvent, TrajectoryEvent
+from cube_harness.llm import LLMCall, LLMConfig, Prompt, Usage
 from cube_harness.summary import SummaryProcessor
 
 
@@ -36,8 +38,16 @@ def _tool_call_event() -> TrajectoryEvent:
 
 
 def _agent_event() -> TrajectoryEvent:
+    call = LLMCall(
+        tag="act",
+        llm_config=LLMConfig(model_name="openai/gpt-4o-mini"),
+        prompt=Prompt(messages=[{"role": "user", "content": "hi"}]),
+        output=Message(content="ok", role="assistant"),
+        usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2, cost=0.0),
+    )
+    _ = Action  # silence unused
     return TrajectoryEvent(
-        output=AgentEvent(actions=[Action(name="x", arguments={})]),
+        output=LLMCallEvent(call=call),
         start_time=0.0,
         end_time=0.0,
     )

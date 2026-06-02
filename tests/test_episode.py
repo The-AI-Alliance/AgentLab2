@@ -8,7 +8,7 @@ from cube.core import Action, EnvironmentOutput, Observation
 from cube.task import TaskConfig, TaskMetadata
 
 from cube_harness.agent import AgentConfig
-from cube_harness.core import AgentEvent, AgentOutput, ToolCallEvent, Trajectory, TrajectoryStep
+from cube_harness.core import AgentOutput, LLMCallEvent, ToolCallEvent, Trajectory, TrajectoryStep
 from cube_harness.episode import Episode
 from cube_harness.storage import TrajectoryView
 from tests.conftest import MockAgent, MockAgentConfig, MockCubeTask, MockCubeTaskConfig, MockToolConfig
@@ -136,7 +136,7 @@ class TestEpisode:
         # RFC agent-owns-loop: max_steps translates to Budget.max_turns.
         # Budget.exhausted fires when turns >= max_turns. The agent
         # records 3 normal turns; BudgetExceeded surfaces; the failure
-        # AgentEvent (recorder.record_failure) is metadata, not a
+        # LLMCallEvent (recorder.record_failure) is metadata, not a
         # "turn", so the total agent-event count is at most 4
         # (3 turns + 1 failure). Tool calls are bounded by the budget
         # at <=3.
@@ -309,9 +309,9 @@ class TestEpisode:
         traj_id = f"{episode.config.task_config.task_id}_ep{episode.config.id}"
         view = storage.load_episode(traj_id)
 
-        # RFC agent-owns-loop: errors land on an AgentEvent (via
+        # RFC agent-owns-loop: errors land on an LLMCallEvent (via
         # recorder.record_failure) instead of an AgentOutput step.
-        agent_events = [e.output for e in view if isinstance(e.output, AgentEvent)]
+        agent_events = [e.output for e in view if isinstance(e.output, LLMCallEvent)]
         assert len(agent_events) > 0, "No agent events found in trajectory"
         error_event = next((e for e in agent_events if e.error is not None), None)
         assert error_event is not None, "No error found in agent events"
@@ -354,11 +354,11 @@ class TestEpisode:
 
         # RFC agent-owns-loop: env results are ToolCallEvents and the
         # final eval is a separate EvaluationEvent. The error from a
-        # raised evaluate() is captured on the failure AgentEvent
+        # raised evaluate() is captured on the failure LLMCallEvent
         # via recorder.record_failure.
-        agent_events = [e.output for e in view if isinstance(e.output, AgentEvent)]
+        agent_events = [e.output for e in view if isinstance(e.output, LLMCallEvent)]
         error_event = next((e for e in agent_events if e.error is not None), None)
-        assert error_event is not None, "No error found in failure-AgentEvent"
+        assert error_event is not None, "No error found in failure-LLMCallEvent"
         assert "Environment validation failed" in error_event.error.exception_str
         # ToolCallEvents (env step proxies) should also be present from
         # the agent loop before the failure.

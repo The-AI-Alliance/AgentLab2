@@ -34,7 +34,7 @@ def _make_failing_benchmark() -> CubeBenchmarkConfig:
     + the toolbox; `task.step` isn't called anymore. Injecting failure
     via `evaluate()` exercises the equivalent error-capture path — when
     Episode's terminal evaluate raises, `recorder.record_failure` writes
-    an AgentEvent and the outer except tags status FAILED + re-raises."""
+    an LLMCallEvent and the outer except tags status FAILED + re-raises."""
 
     class _FailingTask(MockCubeTask):
         def evaluate(self, obs=None):

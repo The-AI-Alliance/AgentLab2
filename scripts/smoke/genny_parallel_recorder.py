@@ -29,7 +29,7 @@ from cube.tool import Tool, ToolConfig, tool_action
 
 from cube_harness.agent import Agent, AgentConfig
 from cube_harness.agents.genny_parallel import GennyParallel
-from cube_harness.core import AgentEvent, AgentOutput, ToolCallEvent
+from cube_harness.core import AgentOutput, LLMCallEvent, ToolCallEvent
 from cube_harness.exp_runner import run_sequentially
 from cube_harness.experiment import Experiment
 from cube_harness.storage import FileStorage
@@ -116,7 +116,6 @@ class _ScriptedParallelAgent(GennyParallel):
                 Action(id="a-2", name="beta", arguments={"n": 2}),
                 Action(id="a-3", name="gamma", arguments={"n": 3}),
             ],
-            thoughts="three parallel calls",
         )
 
 
@@ -152,30 +151,37 @@ def main() -> int:
         traj_id = next(iter(result.trajectories))
         view = storage.load_episode(traj_id)
 
-        agent_events = [e for e in view if isinstance(e.output, AgentEvent)]
         tool_calls = [e for e in view if isinstance(e.output, ToolCallEvent)]
 
-        # Expect ≥1 AgentEvent + 3 tool-call siblings + the reset
-        # ToolCallEvent + possibly a graceful-stop AgentEvent.
+        # Mock-agent path: no LLM is called, so no LLMCallEvent is
+        # emitted. All 3 parallel tool calls share `parent_event_id` =
+        # RESET (the only prior turn id available).
         non_reset_tool_calls = [t for t in tool_calls if t.output.parent_event_id != "reset"]
-        if len(non_reset_tool_calls) != 3:
-            return _fail(f"expected 3 sibling ToolCallEvents, got {len(non_reset_tool_calls)}")
+        # In the no-LLM path the entire fan-out parents to RESET; the
+        # non_reset filter is therefore empty. Reach the 3 siblings
+        # through the full tool_calls list minus the synthetic reset.
+        fanout = [t for t in tool_calls if t.output.action_id != "reset"]
+        if len(fanout) != 3:
+            return _fail(f"expected 3 fan-out ToolCallEvents, got {len(fanout)}")
 
-        parent_id = non_reset_tool_calls[0].output.parent_event_id
-        if not all(t.output.parent_event_id == parent_id for t in non_reset_tool_calls):
+        parent_id = fanout[0].output.parent_event_id
+        if not all(t.output.parent_event_id == parent_id for t in fanout):
             return _fail("ToolCallEvents have differing parent_event_id — not all siblings")
-        if not all(t.output.turn_id == parent_id for t in non_reset_tool_calls):
+        if not all(t.output.turn_id == parent_id for t in fanout):
             return _fail("ToolCallEvents have differing turn_id — not all in one turn")
 
-        # The parent_event_id must reference a real AgentEvent.id.
-        if parent_id not in {a.output.id for a in agent_events}:
-            return _fail(f"parent_event_id={parent_id!r} does not match any AgentEvent.id")
+        llm_event_ids = {e.output.id for e in view if isinstance(e.output, LLMCallEvent)}
+        # parent must be a real LLMCallEvent.id OR the RESET sentinel
+        # (LLM-less mock-agent fan-outs parent to RESET).
+        if parent_id not in llm_event_ids and parent_id != "reset":
+            return _fail(f"parent_event_id={parent_id!r} matches no LLMCallEvent.id and is not the RESET sentinel")
 
-        names = {t.output.action_id for t in non_reset_tool_calls}
+        names = {t.output.action_id for t in fanout}
         if names != {"a-1", "a-2", "a-3"}:
             return _fail(f"unexpected action_ids: {names}")
+        _ = non_reset_tool_calls
 
-        print(f"  ✓ {traj_id}: 1 parent agent event, 3 sibling tool_calls (turn_id={parent_id[:8]}…), eval=1")
+        print(f"  ✓ {traj_id}: 3 sibling tool_calls (turn_id={parent_id[:8]}…), eval=1")
         print(f"SMOKE OK: {NAME}")
         return 0
     finally:

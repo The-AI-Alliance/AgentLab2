@@ -8,9 +8,10 @@ from cube.core import EnvironmentOutput
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from cube_harness.core import (
-    AgentEvent,
+    AgentErrorEvent,
     AgentOutput,
     EvaluationEvent,
+    LLMCallEvent,
     ToolCallEvent,
     TrajectoryEvent,
     TrajectoryMetadata,
@@ -106,23 +107,22 @@ class SummaryProcessor:
         with open(self._summary_path, "a") as f:
             f.write(entry.model_dump_json() + "\n")
 
-    def _fold_agent_stats(self, actions: list, llm_calls: list, error: object | None) -> None:
-        """Accumulate per-agent-turn stats — shared by `on_step` (legacy
-        `AgentOutput`) and `on_event` (`AgentEvent`). Both expose the
-        same `actions / llm_calls / error` triplet, so the fold is
-        identical. Must be called under `self._lock`."""
+    def _fold_llm_call(self, call) -> None:
+        """Accumulate one LLM call's usage. Must be called under `self._lock`.
+
+        `call` is `None` only on legacy V1/V2 decode (the on-disk step
+        doesn't carry an LLMCall record); count the turn but skip usage.
+        """
         self._n_agent_steps += 1
-        self._total_actions += len(actions)
-        self._total_llm_calls += len(llm_calls)
-        for llm_call in llm_calls:
-            if llm_call.usage:
-                self._prompt_tokens += llm_call.usage.prompt_tokens
-                self._completion_tokens += llm_call.usage.completion_tokens
-                self._cached_tokens += llm_call.usage.cached_tokens
-                self._cache_creation_tokens += llm_call.usage.cache_creation_tokens
-                self._cost_usd += llm_call.usage.cost
-        if error is not None and self._error_type is None:
-            self._error_type = error.error_type
+        self._total_llm_calls += 1
+        if call is None:
+            return
+        if call.usage:
+            self._prompt_tokens += call.usage.prompt_tokens
+            self._completion_tokens += call.usage.completion_tokens
+            self._cached_tokens += call.usage.cached_tokens
+            self._cache_creation_tokens += call.usage.cache_creation_tokens
+            self._cost_usd += call.usage.cost
 
     def on_step(self, step_num: int, step: TrajectoryStep) -> None:
         """DEPRECATED: legacy `TrajectoryStep` accumulator. No live caller
@@ -132,7 +132,10 @@ class SummaryProcessor:
         the XRay-rewrite follow-up PR."""
         with self._lock:
             if isinstance(step.output, AgentOutput):
-                self._fold_agent_stats(step.output.actions, step.output.llm_calls, step.output.error)
+                self._n_agent_steps += 1
+                self._total_actions += len(step.output.actions)
+                if step.output.error is not None and self._error_type is None:
+                    self._error_type = step.output.error.error_type
             elif isinstance(step.output, EnvironmentOutput):
                 self._n_env_steps += 1
                 self._reward = step.output.reward
@@ -143,16 +146,13 @@ class SummaryProcessor:
             self._append(self._build_entry(step_num, EpisodeStatus.RUNNING))
 
     def on_event(self, event: TrajectoryEvent) -> None:
-        """Accumulate per-event stats for the agent-owns-loop event model.
+        """Accumulate per-event stats for the streaming event model.
 
-        AgentEvent  → counts as one agent step (and folds llm/cost tally).
-        ToolCallEvent → counts as one env step; carries reward from the
-                        underlying EnvironmentOutput (zero at the tool
-                        boundary unless task.step wrapped it).
-        EvaluationEvent → records the terminal reward.
-
-        Errors on AgentEvent / ToolCallEvent are captured the same way
-        as in `on_step`.
+        LLMCallEvent → counts as one agent turn; folds token / cost
+                       tally from `event.output.call.usage`.
+        ToolCallEvent → counts as one env step.
+        EvaluationEvent → records terminal reward.
+        AgentErrorEvent → captures the first agent-side failure.
 
         Thread-safe: the lock guards the read-modify-write on the
         counters AND the append-to-jsonl. GennyParallel dispatches N
@@ -164,22 +164,24 @@ class SummaryProcessor:
             # The summary-jsonl `turn` counter walks through events 1:1.
             turn_n = self._n_agent_steps + self._n_env_steps + self._n_evaluations
             out = event.output
-            if isinstance(out, AgentEvent):
-                self._fold_agent_stats(out.actions, out.llm_calls, out.error)
+            if isinstance(out, LLMCallEvent):
+                self._fold_llm_call(out.call)
+                if out.error is not None and self._error_type is None:
+                    self._error_type = out.error.error_type
             elif isinstance(out, ToolCallEvent):
-                # ToolCallEvent now carries only obs + error (reward lives on
-                # the sibling EvaluationEvent; done is a TaskDone signal).
                 self._n_env_steps += 1
+                if out.action is not None:
+                    self._total_actions += 1
                 if out.error is not None and self._error_type is None:
                     self._error_type = out.error.error_type
             elif isinstance(out, EvaluationEvent):
                 self._n_evaluations += 1
-                # Terminal evaluation: overrides reward, marks done.
-                # Step-wise evaluation: also surfaces the reward so the
-                # summary tracks the latest validate_per_step result.
                 self._reward = out.reward
                 if out.is_terminal:
                     self._done = True
+            elif isinstance(out, AgentErrorEvent):
+                if self._error_type is None:
+                    self._error_type = out.error.error_type
             self._append(self._build_entry(turn_n, EpisodeStatus.RUNNING))
 
     @property

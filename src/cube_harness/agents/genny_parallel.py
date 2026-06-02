@@ -41,7 +41,6 @@ from cube.core import ActionSchema, Observation, StepError
 from cube.tool import AbstractAsyncTool
 
 from cube_harness.agents.genny import Genny, GennyConfig
-from cube_harness.recorder import TurnRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +92,6 @@ class GennyParallel(Genny):
         self,
         initial_obs: Observation,
         env_tool: AbstractAsyncTool,
-        recorder: TurnRecorder,
     ) -> None:
         """Drive the agent loop with `asyncio.gather` parallel dispatch
         of the N actions returned per assistant turn.
@@ -102,18 +100,12 @@ class GennyParallel(Genny):
         monitored tools + the agent's own (non-monitored) tools. The
         agent calls env_tool.execute_action(action) uniformly — no
         `task` reference; done/eval semantics are absorbed by the
-        MonitoredTool wrappers."""
-        # Mirror Agent.run's contract: stash the recorder so the
-        # inherited Genny.step() can read self._recorder.budget for the
-        # graceful self-stop (STOP_ACTION at budget.exhausted) and the
-        # `display_budget_every_k` in-prompt summary. Without this,
-        # both behaviors silently no-op and only the hard MonitoredTool
-        # → BudgetExceeded net bounds the run.
-        self._recorder = recorder
+        MonitoredTool wrappers. LLM calls inside the inherited
+        `Genny.step()` auto-emit `LLMCallEvent`s via the recorder
+        attached upstream by Episode (`agent.attach_recorder(recorder)`)."""
         obs = initial_obs
         while True:
             agent_output = await asyncio.to_thread(self.step, obs)
-            recorder.record(agent_output)
             if not agent_output.actions and agent_output.error is None:
                 return  # agent says "done"
 
