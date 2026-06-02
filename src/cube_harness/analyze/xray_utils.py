@@ -1321,7 +1321,13 @@ def _compute_token_stats_for_trajectory(traj: Trajectory) -> dict[str, int | flo
     }
     for traj_step in traj.steps:
         if isinstance(traj_step.output, AgentOutput):
-            for llm_call in traj_step.output.llm_calls:
+            # AgentOutput post-agent-owns-loop has no `llm_calls` field.
+            # New trajectories source token stats from LLMCallEvent in the
+            # event stream — already aggregated into `summary_stats` by
+            # `SummaryProcessor`. This walk is only hit on legacy V1 reads
+            # where llm_calls was bundled into AgentOutput.
+            llm_calls = getattr(traj_step.output, "llm_calls", None) or []
+            for llm_call in llm_calls:
                 if llm_call.usage:
                     stats["prompt"] = int(stats["prompt"]) + llm_call.usage.prompt_tokens
                     stats["completion"] = int(stats["completion"]) + llm_call.usage.completion_tokens
@@ -1351,7 +1357,10 @@ def compute_trajectory_stats(traj: Trajectory) -> dict[str, Any]:
         elif isinstance(traj_step.output, AgentOutput):
             n_agent_steps += 1
             total_actions += len(traj_step.output.actions)
-            total_llm_calls += len(traj_step.output.llm_calls)
+            # AgentOutput.llm_calls is gone post-agent-owns-loop; fall
+            # back to 0 (new trajectories carry token stats in
+            # `summary_stats` already, via SummaryProcessor).
+            total_llm_calls += len(getattr(traj_step.output, "llm_calls", None) or [])
 
     duration = None
     if traj.start_time is not None and traj.end_time is not None:

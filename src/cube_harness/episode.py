@@ -100,6 +100,7 @@ class Episode:
             task_config=episode_config.task_config,
             exp_name=episode_config.exp_name,
             max_steps=episode_config.max_steps,
+            max_cost_usd=episode_config.max_cost_usd,
             storage=storage,
             runtime_context=runtime_context,
         )
@@ -249,7 +250,13 @@ class Episode:
                 # locally if it wants a unified dispatch:
                 #     combined = Toolbox([env_tool, self.memory])
                 # The framework stays out of agent-private tooling.
-                task_tool = getattr(task, "tool", None) or getattr(task, "toolbox", None)
+                # MUST match install_monitoring's lookup order (toolbox
+                # first) — otherwise when a task exposes both attrs the
+                # agent ends up with an UNMONITORED env_tool while the
+                # monitoring wrappers are installed on the other one.
+                # See tool.install_monitoring: `container = getattr(task,
+                # "toolbox", None) or getattr(task, "tool", None)`.
+                task_tool = getattr(task, "toolbox", None) or getattr(task, "tool", None)
                 env_tool = as_async(task_tool) if task_tool is not None else None
 
                 # 5. Record the initial obs as a synthetic ToolCallEvent

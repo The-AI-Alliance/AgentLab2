@@ -108,13 +108,24 @@ class Budget(TypedBaseModel):
         with self._lock:
             self.tool_calls += 1
 
-    def bump_turn_and_usage(self, cost: float, prompt: int, completion: int) -> None:
-        """Atomic bump of the AgentEvent-side counters (turns + LLM
-        usage). Called only by `TurnRecorder._flush_agent_event` —
-        single-task by construction, but the lock keeps reads from
-        parallel `_record_tool_call` workers coherent."""
+    def bump_turn(self) -> None:
+        """Atomic +1 on `turns` — bumped once per Agent.run loop
+        iteration (one agent step). Distinct from LLM-call count: an
+        agent step may make 0..N LLM calls.
+
+        Called by the agent loop (`Agent.run` default + GennyParallel.run
+        override) after each `self.step(obs)` returns, so `max_turns`
+        caps agent steps the way callers expect.
+        """
         with self._lock:
             self.turns += 1
+
+    def bump_llm_usage(self, cost: float, prompt: int, completion: int) -> None:
+        """Atomic bump of LLM-call cost + token counters. Called by
+        `TurnRecorder.on_llm_call` per LLM API call (so a multi-LLM-call
+        step accumulates correctly). Does NOT bump `turns` — that's
+        `bump_turn`'s job."""
+        with self._lock:
             self.cost_usd += cost
             self.prompt_tokens += prompt
             self.completion_tokens += completion

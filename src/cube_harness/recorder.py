@@ -111,19 +111,23 @@ class TurnRecorder:
         profiling: dict[str, tuple[float, float]] | None = None,
         error: StepError | None = None,
     ) -> str:
-        """Emit one `LLMCallEvent`, bump Budget (turn + LLM usage), then
-        enforce caps. Returns the event id (also stashed as the active
-        turn id for subsequent tool calls)."""
+        """Emit one `LLMCallEvent`, bump LLM-usage counters
+        (cost + tokens), enforce caps. Returns the event id (also
+        stashed as the active turn id for subsequent tool calls).
+
+        Note: does NOT bump `budget.turns` — turn-counting is per
+        agent step, not per LLM call (one step may make 0..N calls).
+        The agent loop calls `on_step` per iteration instead.
+        """
         event = LLMCallEvent(call=call, profiling=dict(profiling or {}), error=error)
         self._current_turn_id = event.id
         self._n_llm_calls_emitted += 1
         start, end = self._llm_window(profiling)
-        if self.budget is not None:
-            usage = call.usage
-            self.budget.bump_turn_and_usage(
-                cost=usage.cost if usage is not None else 0.0,
-                prompt=usage.prompt_tokens if usage is not None else 0,
-                completion=usage.completion_tokens if usage is not None else 0,
+        if self.budget is not None and call.usage is not None:
+            self.budget.bump_llm_usage(
+                cost=call.usage.cost,
+                prompt=call.usage.prompt_tokens,
+                completion=call.usage.completion_tokens,
             )
         _stream_event(
             TrajectoryEvent(output=event, start_time=start, end_time=end),
@@ -137,6 +141,19 @@ class TurnRecorder:
         if self.budget is not None and self.budget.exhausted:
             raise BudgetExceeded()
         return event.id
+
+    def on_step(self) -> None:
+        """Bump `budget.turns` and enforce. Called by the agent loop
+        once per `self.step(obs)` iteration. Turn-counting is per-step,
+        NOT per-LLM-call — a step that makes 3 LLM calls (Genny:
+        compact + summarize + act) bumps `turns` by exactly 1.
+
+        Enforcement happens here so a `max_turns` cap kicks in cleanly
+        at the agent-step boundary."""
+        if self.budget is not None:
+            self.budget.bump_turn()
+            if self.budget.exhausted:
+                raise BudgetExceeded()
 
     @staticmethod
     def _llm_window(profiling: dict[str, tuple[float, float]] | None) -> tuple[float, float]:

@@ -106,7 +106,14 @@ class GennyParallel(Genny):
         obs = initial_obs
         while True:
             agent_output = await asyncio.to_thread(self.step, obs)
-            if not agent_output.actions and agent_output.error is None:
+            # Bump `budget.turns` once per agent step (mirror Agent.run).
+            # See Budget.bump_turn / TurnRecorder.on_step for why
+            # turn-counting is per-step, not per-LLM-call.
+            if self._recorder is not None:
+                self._recorder.on_step()
+            if agent_output.error is not None:
+                raise RuntimeError(f"Agent step returned error: {agent_output.error.exception_str}")
+            if not agent_output.actions:
                 return  # agent says "done"
 
             # Parallel fan-out. Each call goes through MonitoredTool's

@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 import litellm
 import tenacity
-from cube.core import TypedBaseModel, ValidatedConfig
+from cube.core import StepError, TypedBaseModel, ValidatedConfig
 from litellm import BadRequestError, Message, get_llm_provider
 from litellm.exceptions import (
     APIConnectionError,
@@ -318,7 +318,28 @@ class LLM:
         one event, no manual recording at the call site.
         """
         start = time.time()
-        response = self(prompt)
+        try:
+            response = self(prompt)
+        except Exception as e:
+            end = time.time()
+            # Emit an LLMCallEvent carrying the prompt + tag + error so
+            # the trajectory captures WHICH call failed (which prompt /
+            # tag / model). Re-raise after — Episode's outer except
+            # records the failure at the trajectory level too.
+            if self._recorder is not None:
+                error_call = LLMCall(
+                    tag=tag,
+                    llm_config=self.config,
+                    prompt=prompt,
+                    output=Message(content="", role="assistant"),
+                    usage=Usage(),
+                )
+                self._recorder.on_llm_call(
+                    error_call,
+                    profiling={"llm": (start, end)},
+                    error=StepError.from_exception(e),
+                )
+            raise
         end = time.time()
         call = LLMCall(
             tag=tag,

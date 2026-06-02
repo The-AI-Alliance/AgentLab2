@@ -147,18 +147,43 @@ class Agent(ABC):
         obs = initial_obs
         while True:
             agent_output = await asyncio.to_thread(self.step, obs)
-            if not agent_output.actions and agent_output.error is None:
-                # Graceful "done" by the agent itself.
+            # Bump `budget.turns` (one agent step) and enforce caps —
+            # AFTER step() so LLM calls inside step() emit first, but
+            # BEFORE dispatching any actions so a turn that crosses
+            # `max_turns` doesn't get to dispatch.
+            if self._recorder is not None:
+                self._recorder.on_step()
+            # Graceful done: empty actions AND no error.
+            # If error is set, raise via StepError so Episode tags the
+            # episode FAILED. A bare return would silently look like
+            # success.
+            if agent_output.error is not None:
+                raise RuntimeError(f"Agent step returned error: {agent_output.error.exception_str}")
+            if not agent_output.actions:
                 return
-            # Dispatch each action through env_tool one at a time.
-            # MonitoredTool auto-emits ToolCallEvent + done/eval signals.
-            last_obs = obs
+            # Dispatch each action sequentially. The default loop is
+            # ONE action per step in practice (Genny.step returns 1
+            # action even with parallel_tool_calls=False); for multi-
+            # action turns, agents override `run` (see GennyParallel)
+            # so they can fan out and merge observations correctly.
+            # We dispatch all N here but accumulate observations into
+            # the next prompt by way of MonitoredTool side-effects;
+            # an env_tool.execute_action returning StepError aborts
+            # the run — Episode finalizes with the failure recorded
+            # via the MonitoredTool's emit + Episode's outer except.
+            last_obs: Observation | None = None
             for action in agent_output.actions:
                 result = await env_tool.execute_action(action)
                 if isinstance(result, StepError):
-                    return
+                    # Surface as failure so Episode records it (record_failure
+                    # via the outer except wraps it in AgentErrorEvent).
+                    raise RuntimeError(f"Tool dispatch returned StepError: {result.exception_str}")
                 last_obs = result
-            obs = last_obs
+            # Feed the LAST observation back. Multi-action agents that
+            # need result merging should override `run` (GennyParallel
+            # does this via `_merge_results`).
+            if last_obs is not None:
+                obs = last_obs
 
     def __repr__(self) -> str:
         return self.config.model_dump_json(indent=2, serialize_as_any=True)

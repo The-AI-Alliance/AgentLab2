@@ -1027,8 +1027,14 @@ def run_xray(
         """Return the current step's thoughts (if any) and action as stacked HTML panels."""
         agent_out = state.get_agent_output()
         panels = []
-        if agent_out and agent_out.thoughts:
-            thoughts = agent_out.thoughts.strip()
+        # AgentOutput shape post-agent-owns-loop: {actions, error}. Older
+        # trajectories carried `thoughts` / `llm_calls` directly on the step;
+        # new trajectories surface that data via LLMCallEvent — XRay will
+        # render it from there once the event-card view ships
+        # (agent-owns-loop-xray follow-up PR). For now, degrade gracefully.
+        thoughts_raw = getattr(agent_out, "thoughts", None) if agent_out else None
+        if thoughts_raw:
+            thoughts = thoughts_raw.strip()
             if len(thoughts) > 500:
                 thoughts = thoughts[:500] + "…"
             panels.append(_render_thoughts_panel(thoughts))
@@ -1118,17 +1124,21 @@ def run_xray(
         llm_calls_json = "No agent step follows this observation"
         llm_tools_json = "No agent step follows this observation"
         if agent_out is not None:
-            if agent_out.llm_calls:
-                calls_data = [call.model_dump() for call in agent_out.llm_calls]
+            # AgentOutput post-agent-owns-loop is {actions, error}. The
+            # `llm_calls` field is gone — LLM data now lives in sibling
+            # LLMCallEvents. Use getattr for back-compat with old steps.
+            llm_calls = getattr(agent_out, "llm_calls", None) or []
+            if llm_calls:
+                calls_data = [call.model_dump() for call in llm_calls]
                 llm_calls_json = json.dumps(calls_data, indent=2, default=str)
-                llm_call = agent_out.llm_calls[0]
+                llm_call = llm_calls[0]
                 if llm_call.prompt.tools:
                     llm_tools_json = json.dumps(llm_call.prompt.tools, indent=2)
                 else:
                     llm_tools_json = "No tools in LLM call"
             else:
-                llm_calls_json = "No LLM calls in agent step"
-                llm_tools_json = "No LLM calls in agent step"
+                llm_calls_json = "No LLM calls in agent step (new event model — see LLMCallEvent stream)"
+                llm_tools_json = "No LLM calls in agent step (new event model — see LLMCallEvent stream)"
         return env_json, llm_calls_json, llm_tools_json
 
     # ------------------------------------------------------------------

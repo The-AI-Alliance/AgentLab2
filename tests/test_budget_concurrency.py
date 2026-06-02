@@ -37,24 +37,44 @@ def test_concurrent_bump_tool_calls_count_correctly() -> None:
     assert budget.tool_calls == n_calls
 
 
-def test_concurrent_bump_turn_and_usage_coherent() -> None:
-    """N concurrent bump_turn_and_usage(...) calls must leave all four
-    counters in lockstep — same N across turns, cost, prompt, completion."""
+def test_concurrent_bump_llm_usage_coherent() -> None:
+    """N concurrent bump_llm_usage(...) calls must leave the three
+    counters in lockstep. Note: bump_llm_usage does NOT bump `turns`
+    — turn-counting is per agent step, not per LLM call (one step
+    may issue N calls)."""
     budget = Budget(max_turns=100_000)
     n_calls = 300
     barrier = threading.Barrier(n_calls)
 
     def worker() -> None:
         barrier.wait()
-        budget.bump_turn_and_usage(cost=0.01, prompt=1, completion=2)
+        budget.bump_llm_usage(cost=0.01, prompt=1, completion=2)
+
+    with ThreadPoolExecutor(max_workers=n_calls) as pool:
+        list(pool.map(lambda _: worker(), range(n_calls)))
+
+    assert budget.turns == 0  # bump_llm_usage does not bump turns
+    assert abs(budget.cost_usd - n_calls * 0.01) < 1e-6
+    assert budget.prompt_tokens == n_calls
+    assert budget.completion_tokens == 2 * n_calls
+
+
+def test_concurrent_bump_turn_count_correctly() -> None:
+    """N concurrent bump_turn() calls leave `turns == N`. Separate from
+    bump_llm_usage so `max_turns` caps agent steps, not LLM API calls."""
+    budget = Budget(max_turns=100_000)
+    n_calls = 300
+    barrier = threading.Barrier(n_calls)
+
+    def worker() -> None:
+        barrier.wait()
+        budget.bump_turn()
 
     with ThreadPoolExecutor(max_workers=n_calls) as pool:
         list(pool.map(lambda _: worker(), range(n_calls)))
 
     assert budget.turns == n_calls
-    assert abs(budget.cost_usd - n_calls * 0.01) < 1e-6
-    assert budget.prompt_tokens == n_calls
-    assert budget.completion_tokens == 2 * n_calls
+    assert budget.cost_usd == 0.0
 
 
 def test_mixed_bumps_exhausted_check_coherent() -> None:
