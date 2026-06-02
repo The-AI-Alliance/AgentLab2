@@ -7,7 +7,7 @@ Behaviour:
     LLM, parses one or more tool calls per assistant turn.
   - Overrides `Agent.run` (Phase D) to dispatch the N actions returned
     from one assistant turn as N concurrent tool calls — fans out via
-    `asyncio.gather(*(task.toolbox.execute_action(a) for a in actions))`
+    `asyncio.gather(*(task.env_tool.execute_action(a) for a in actions))`
     instead of the sequential `task.step(actions)` the default loop uses.
 
 When this wins:
@@ -92,15 +92,15 @@ class GennyParallel(Genny):
     async def run(
         self,
         initial_obs: Observation,
-        toolbox: AbstractAsyncTool,
+        env_tool: AbstractAsyncTool,
         recorder: TurnRecorder,
     ) -> None:
         """Drive the agent loop with `asyncio.gather` parallel dispatch
         of the N actions returned per assistant turn.
 
-        The toolbox is provided by Episode and contains the task's
+        The env_tool is provided by Episode and contains the task's
         monitored tools + the agent's own (non-monitored) tools. The
-        agent calls toolbox.execute_action(action) uniformly — no
+        agent calls env_tool.execute_action(action) uniformly — no
         `task` reference; done/eval semantics are absorbed by the
         MonitoredTool wrappers."""
         # Mirror Agent.run's contract: stash the recorder so the
@@ -123,7 +123,7 @@ class GennyParallel(Genny):
             # ToolCallEvent, enforces budget, and may raise TaskDone /
             # BudgetExceeded that propagates up through asyncio.gather
             # to Episode's outer except.
-            results = await asyncio.gather(*(toolbox.execute_action(action) for action in agent_output.actions))
+            results = await asyncio.gather(*(env_tool.execute_action(action) for action in agent_output.actions))
 
             # Merge the parallel results into a single observation for
             # the next LLM turn. The Observation `+=` operator

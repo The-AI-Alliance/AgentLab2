@@ -88,7 +88,7 @@ class Agent(ABC):
     async def run(
         self,
         initial_obs: Observation,
-        toolbox: "AbstractAsyncTool",
+        env_tool: "AbstractAsyncTool",
         recorder: "TurnRecorder",
     ) -> None:
         """Default gym-style loop on top of `self.step` — the canonical
@@ -99,10 +99,10 @@ class Agent(ABC):
         async LLM dispatch, or streaming observability override this
         method instead.
 
-        The `toolbox` parameter is always `AbstractAsyncTool` — Episode
+        The `env_tool` parameter is always `AbstractAsyncTool` — Episode
         wraps sync tools in a thin `asyncio.to_thread`-based adapter
         at the boundary so the agent's view is uniformly async. One
-        `await toolbox.execute_action(action) -> Observation | StepError`
+        `await env_tool.execute_action(action) -> Observation | StepError`
         call site regardless of the underlying tool's sync/async nature.
 
         Termination:
@@ -116,7 +116,7 @@ class Agent(ABC):
             propagation pattern.
 
         The agent does NOT call `task.reset` / `task.evaluate` / `task.step` —
-        those belong to Episode (lifecycle) or the toolbox (per-call).
+        those belong to Episode (lifecycle) or the env_tool (per-call).
 
         Side-effect: stashes `recorder` on `self._recorder` so subclasses
         that override only `step()` can introspect the live budget for
@@ -130,12 +130,12 @@ class Agent(ABC):
             if not agent_output.actions and agent_output.error is None:
                 # Graceful "done" by the agent itself.
                 return
-            # Dispatch each action through the toolbox one at a time.
+            # Dispatch each action through the env_tool one at a time.
             # Done detection / step-eval / obs_postprocess happen inside
             # MonitoredTool — they may raise TaskDone (propagates to Episode).
             last_obs = obs
             for action in agent_output.actions:
-                result = await toolbox.execute_action(action)
+                result = await env_tool.execute_action(action)
                 if isinstance(result, StepError):
                     # Tool error — agent stops; Episode finalizes.
                     return

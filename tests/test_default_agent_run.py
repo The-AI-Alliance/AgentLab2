@@ -141,7 +141,7 @@ def test_default_run_completes_when_task_signals_done() -> None:
 
     agent = _CounterAgent(_CounterAgentConfig())
     try:
-        asyncio.run(agent.run(initial_obs=Observation(), toolbox=as_async(task.toolbox), recorder=recorder))
+        asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.toolbox), recorder=recorder))
     except TaskDone:
         pass  # expected: task.finished() returned True after 3 counter increments
 
@@ -172,7 +172,7 @@ def test_default_run_terminates_on_empty_actions() -> None:
     budget = Budget(max_turns=10)
     recorder, storage = _setup(task, budget)
     agent = _NoopAgent(_CounterAgentConfig())
-    asyncio.run(agent.run(initial_obs=Observation(), toolbox=as_async(task.toolbox), recorder=recorder))
+    asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.toolbox), recorder=recorder))
     outputs = storage.outputs()
     assert sum(1 for e in outputs if isinstance(e, AgentEvent)) == 1
     assert sum(1 for e in outputs if isinstance(e, ToolCallEvent)) == 0
@@ -213,7 +213,7 @@ def test_default_run_propagates_budget_exceeded() -> None:
     # The second tool call (turn 2) raises.
     raised: list[BaseException] = []
     try:
-        asyncio.run(agent.run(initial_obs=Observation(), toolbox=as_async(task.toolbox), recorder=recorder))
+        asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.toolbox), recorder=recorder))
     except BaseException as e:  # noqa: BLE001
         raised.append(e)
     assert any(isinstance(e, BudgetExceeded) for e in raised)

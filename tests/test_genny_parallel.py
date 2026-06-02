@@ -159,7 +159,7 @@ def test_parallel_dispatch_records_sibling_tool_calls() -> None:
     recorder, storage = _build_recorder_and_storage(budget, task)
 
     agent = _ScriptedParallel(n_actions=4, sleep_ms=20)
-    asyncio.run(agent.run(initial_obs=Observation(), toolbox=as_async(task.tool), recorder=recorder))
+    asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.tool), recorder=recorder))
 
     # One AgentEvent + 4 sibling ToolCallEvents + a graceful-stop
     # AgentEvent (the second step returned empty actions).
@@ -185,7 +185,7 @@ def test_parallel_dispatch_is_faster_than_serial() -> None:
 
     agent = _ScriptedParallel(n_actions=4, sleep_ms=50)
     start = time.time()
-    asyncio.run(agent.run(initial_obs=Observation(), toolbox=as_async(task.tool), recorder=recorder))
+    asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.tool), recorder=recorder))
     elapsed = time.time() - start
     # Serial: 4 × 50ms = 200ms.  Parallel: ~50ms + overhead.
     assert elapsed < 0.13, f"parallel dispatch took {elapsed:.3f}s — slower than expected"
@@ -204,7 +204,7 @@ def test_budget_still_fires_across_parallel_calls() -> None:
     agent = _ScriptedParallel(n_actions=4, sleep_ms=10)
     raised: list[BaseException] = []
     try:
-        asyncio.run(agent.run(initial_obs=Observation(), toolbox=as_async(task.tool), recorder=recorder))
+        asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.tool), recorder=recorder))
     except BaseException as e:  # noqa: BLE001
         raised.append(e)
     assert any(isinstance(e, BudgetExceeded) for e in raised)

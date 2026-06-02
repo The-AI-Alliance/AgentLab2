@@ -195,15 +195,15 @@ class Agent(ABC):
     async def run(
         self,
         initial_obs: Observation,
-        toolbox: AbstractAsyncTool,        # always async; sync tools wrapped at the Episode boundary
+        env_tool: AbstractAsyncTool,       # always async; sync tools wrapped at the Episode boundary
         recorder: TurnRecorder,
     ) -> None:
         """Default impl drives a one-action-per-call loop on top of self.step.
 
         From the agent's POV the only environment surface is
-        `await toolbox.execute_action(action) -> Observation | StepError`.
-        Episode applies `as_async(task.tool)` before invoking this so the
-        toolbox is always `AbstractAsyncTool`-shaped — sync underlying
+        `await env_tool.execute_action(action) -> Observation | StepError`.
+        Episode applies `as_async(task.tool)` before invoking this so
+        `env_tool` is always `AbstractAsyncTool`-shaped — sync underlying
         tools dispatch via `asyncio.to_thread` inside the wrapper. Agent
         code has no sync/async branch.
 
@@ -220,7 +220,7 @@ class Agent(ABC):
             if not agent_output.actions and not agent_output.error:
                 return  # graceful done
             for action in agent_output.actions:
-                result = await toolbox.execute_action(action)
+                result = await env_tool.execute_action(action)
                 if isinstance(result, StepError):
                     return
                 obs = result
@@ -228,13 +228,13 @@ class Agent(ABC):
 
 Sync-only agent authors don't see this — they override `step()` only
 and inherit `Agent.run`, never writing async. The async-uniform
-toolbox is purely for the `run()`-override path.
+`env_tool` is purely for the `run()`-override path.
 
-Agents that want parallel tool calls override `run()` and call the
-toolbox directly:
+Agents that want parallel tool calls override `run()` and call
+`env_tool` directly:
 ```python
 results = await asyncio.gather(*(
-    toolbox.execute_action(a) for a in actions
+    env_tool.execute_action(a) for a in actions
 ))  # each is Observation | StepError; monitoring fires inside each call
 ```
 
@@ -242,15 +242,17 @@ Agents that don't override get the one-at-a-time default for free.
 
 The three parameters:
 - **`initial_obs`** — the observation from `task.reset()`, supplied by `Episode`.
-- **`toolbox`** — the task's tool (a `cube.tool.Toolbox` or single
+- **`env_tool`** — the task's tool (a `cube.tool.Toolbox` or single
   `AbstractTool`), with `MonitoredTool` wrappers installed in place by
-  Episode. The agent calls `toolbox.execute_action(action)`; no `task`
+  Episode. The name signals what it represents — *the tool that drives
+  the monitored environment*, distinct from any agent-private tools.
+  The agent calls `env_tool.execute_action(action)`; no `task`
   reference reaches the agent. Done detection, step-wise evaluation,
   and obs_postprocess are absorbed by MonitoredTool — the agent's
   view of the return value is just `Observation | StepError`. Agents
   that want their own private tools (memory, scratchpad, planner) hold
   them as instance fields and compose locally if they want a unified
-  dispatch: `combined = Toolbox([toolbox, self.memory])`. The framework
+  dispatch: `combined = Toolbox([env_tool, self.memory])`. The framework
   doesn't have a hook for this — agents have full Python.
 - **`recorder`** — what the agent reports out. Telemetry-only. Agents
   emit LLM calls, thoughts, response text, profiling.
@@ -263,7 +265,7 @@ versus today's `step(obs) -> AgentOutput`:
 | Before | After |
 |---|---|
 | Return `AgentOutput` from `step(obs)` | Either keep `step` (sync path) or own the loop in `run` (async path) |
-| Episode called `task.step(actions)` for you | The loop calls `await toolbox.execute_action(a)` — no `task` reference |
+| Episode called `task.step(actions)` for you | The loop calls `await env_tool.execute_action(a)` — no `task` reference |
 | Sync world | `Agent.run` is `async`; sync agents inherit the default and never write `await` |
 | Termination: empty actions or `done` | Termination: graceful return from `run`, or `TaskDone` / `BudgetExceeded` raises |
 
@@ -273,7 +275,7 @@ There are exactly two ergonomics paths. Pick by what the agent actually needs.
 
 The 90% case. Your agent emits one action per turn, runs against an
 LLM, doesn't need parallelism. You write **only** `step()` and never
-see async code or a toolbox:
+see async code or an `env_tool`:
 
 ```python
 class MyAgent(Agent):
@@ -285,7 +287,7 @@ class MyAgent(Agent):
 
 That's it. The base `Agent.run` wraps `step()` in `asyncio.to_thread`,
 records the turn via `TurnRecorder.record()`, and dispatches each
-action through `await toolbox.execute_action(...)`. `ReactAgent` and
+action through `await env_tool.execute_action(...)`. `ReactAgent` and
 `Genny` work this way. Budget self-stop available via
 `self._recorder.budget` if you want to inject a "running low" prompt
 or graceful-stop on cap; otherwise `MonitoredTool` raises
@@ -294,19 +296,18 @@ or graceful-stop on cap; otherwise `MonitoredTool` raises
 #### Async path — override `run()` for parallelism or streaming
 
 When you want parallel tool calls, async LLM dispatch, or
-fine-grained streaming events, override `Agent.run`. The toolbox is
+fine-grained streaming events, override `Agent.run`. `env_tool` is
 **always** `AbstractAsyncTool` — Episode applies `as_async()` to sync
 underlying tools at the boundary so your code has no branch.
 
 ```python
 class ParallelAgent(Agent):
-    async def run(self, initial_obs, toolbox, recorder):
+    async def run(self, initial_obs, env_tool, recorder):
         obs = initial_obs
         while True:
             with recorder.begin_turn() as turn:
                 call = await self.llm.acall(self._prompt(obs))
                 turn.add_llm_call(call)
-                turn.add_response_text(call.output.content or "")
                 actions = self._parse(call.output.content)
                 for a in actions:
                     turn.add_action(a)
@@ -321,7 +322,7 @@ class ParallelAgent(Agent):
             # TaskDone / BudgetExceeded propagate through asyncio.gather
             # to Episode's outer except.
             results = await asyncio.gather(*(
-                toolbox.execute_action(a) for a in actions
+                env_tool.execute_action(a) for a in actions
             ))
             obs = self._merge(results)
 ```
@@ -345,8 +346,8 @@ class AgentWithMemory(Agent):
         self.llm = llm
         self.memory = MemoryTool()  # private; never reaches Episode
 
-    async def run(self, initial_obs, toolbox, recorder):
-        combined = Toolbox([toolbox, as_async(self.memory)])
+    async def run(self, initial_obs, env_tool, recorder):
+        combined = Toolbox([env_tool, as_async(self.memory)])
         # ...same loop as above; `remember` and `bash` dispatch through
         # the same call site. Agent-owned tools don't appear in the
         # trajectory and don't trigger task.finished() polling.

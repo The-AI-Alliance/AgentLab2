@@ -234,19 +234,19 @@ class Episode:
                     summary=summary_proc,
                 )
 
-                # 4. The toolbox the agent will see is the task's
+                # 4. The env-tool the agent will see is the task's
                 # (now-monitored) tool, wrapped via `as_async` so the
                 # agent always gets `AbstractAsyncTool`-shaped surface
-                # (`await toolbox.execute_action(...)`) regardless of
+                # (`await env_tool.execute_action(...)`) regardless of
                 # whether the underlying tool is sync or async. Sync
                 # tools dispatch via `asyncio.to_thread` inside the
                 # wrapper. Agent-private tools (memory, scratchpad, …)
                 # live on the agent itself — the agent composes them
                 # locally if it wants a unified dispatch:
-                #     combined = Toolbox([toolbox, self.memory])
+                #     combined = Toolbox([env_tool, self.memory])
                 # The framework stays out of agent-private tooling.
                 task_tool = getattr(task, "tool", None) or getattr(task, "toolbox", None)
-                toolbox = as_async(task_tool) if task_tool is not None else None
+                env_tool = as_async(task_tool) if task_tool is not None else None
 
                 # 5. Record the initial obs as a synthetic ToolCallEvent
                 # whose parent is the RESET sentinel.
@@ -255,7 +255,7 @@ class Episode:
 
                 # 6. Drive the agent. agent.run is the canonical entry.
                 try:
-                    await agent.run(initial.obs, toolbox, recorder)
+                    await agent.run(initial.obs, env_tool, recorder)
                 except BudgetExceeded as e:
                     logger.info(colored(f"Budget exceeded: {e}", "yellow"))
                     recorder.record_failure(e)

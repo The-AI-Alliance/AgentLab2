@@ -164,18 +164,23 @@ class Agent(ABC):
     async def run(
         self,
         initial_obs: Observation,
-        toolbox: AbstractAsyncTool,                # always async-shaped; see "async-uniform" below
+        env_tool: AbstractAsyncTool,               # always async-shaped; see "async-uniform" below
         recorder: "TurnRecorder",
     ) -> None
 ```
 
-**Async-uniform toolbox.** `Agent.run`'s `toolbox` parameter is
+**Async-uniform env_tool.** `Agent.run`'s `env_tool` parameter is
 narrowed to `AbstractAsyncTool` (NOT `AbstractTool | AbstractAsyncTool`).
 Sync underlying tools are wrapped by `as_async(tool)` at the Episode
 boundary — the adapter dispatches `execute_action` via
 `asyncio.to_thread`. Agent code that overrides `run` therefore has no
 sync/async branch; it always `await`s. Sync-only agent authors don't
 see this — they override `step()` and inherit the base `run`.
+
+The name `env_tool` (vs. the older draft `toolbox`) makes the
+agent/env boundary explicit: this is the tool that drives the
+**monitored environment**, distinct from any agent-private tools
+(memory, scratchpad) the agent holds on `self`.
 
 Default implementation in the base class:
 
@@ -184,7 +189,7 @@ Default implementation in the base class:
    1. `agent_output = await asyncio.to_thread(self.step, obs)`.
    2. `recorder.record(agent_output)`.
    3. If `not agent_output.actions and not agent_output.error`: return.
-   4. For each action: `result = await toolbox.execute_action(action)`.
+   4. For each action: `result = await env_tool.execute_action(action)`.
       May raise `TaskDone` (graceful, includes STOP_ACTION /
       `task.finished()` true) or `BudgetExceeded` — both propagate to
       `Episode`.
@@ -192,7 +197,7 @@ Default implementation in the base class:
    6. `obs = result`.
 
 Agents that want parallel tool calls override `run` and dispatch
-N actions via `asyncio.gather(*(toolbox.execute_action(a) for a in actions))`.
+N actions via `asyncio.gather(*(env_tool.execute_action(a) for a in actions))`.
 The async-uniform shape means parallel-dispatch agents (e.g.
 `GennyParallel`) don't need their own sync-vs-async branch either.
 
