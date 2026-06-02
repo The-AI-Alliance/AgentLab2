@@ -1,4 +1,20 @@
-"""Step decoding: msgpack.zst → readable transcript text files."""
+"""Event decoding: TrajectoryView → readable transcript text files.
+
+Reads the trajectory via `FileStorage.load_episode` so the same code
+path handles both layouts:
+
+  - new (events/): LLMCallEvent / ToolCallEvent / EvaluationEvent /
+    AgentErrorEvent — written by Episode after the agent-owns-loop RFC.
+  - legacy (steps/): TrajectoryStep with AgentOutput | EnvironmentOutput
+    — older episodes pre-dating the event-stream model.
+
+Storage's `_events_to_legacy_steps` + `_step_to_event` shims make both
+layouts surface as the same `TrajectoryEvent` stream from
+`TrajectoryView.__iter__`, so this writer is layout-agnostic.
+
+Writes `transcript.txt` (consolidated) + per-event files at
+`<out_dir>/events/NNN_<kind>.txt`.
+"""
 
 from __future__ import annotations
 
@@ -7,108 +23,157 @@ import logging
 from pathlib import Path
 from typing import Any
 
-import msgpack
-import zstandard
+from cube_harness.core import (
+    AgentErrorEvent,
+    EvaluationEvent,
+    LLMCallEvent,
+    ToolCallEvent,
+    TrajectoryEvent,
+)
+from cube_harness.storage import FileStorage
 
 logger = logging.getLogger(__name__)
 
 
-def _decompress(path: Path) -> dict[str, Any]:
-    """Read and decompress a single step file (.msgpack.zst) into a plain dict."""
-    with open(path, "rb") as f:
-        data = f.read()
-    dctx = zstandard.ZstdDecompressor()
-    return msgpack.unpackb(dctx.decompress(data), raw=False)
+def _format_llm_call(idx: int, te: TrajectoryEvent) -> str:
+    """Render one LLMCallEvent as a readable text block.
 
+    LLM calls carry the prompt + assistant response + token usage. We
+    surface the assistant's content, any thinking/reasoning trace, tool
+    calls embedded in the response, and a one-line usage summary.
+    """
+    out = te.output
+    assert isinstance(out, LLMCallEvent)
+    lines = [f"### Event {idx:03d} LLM_CALL  (tag={(out.call.tag if out.call else '') or '?'})"]
+    if out.error is not None:
+        lines.append(f"ERROR: {out.error.error_type}: {out.error.exception_str}")
+    if out.call is None:
+        lines.append("(no LLMCall payload — legacy V1 episode)")
+        return "\n".join(lines).rstrip() + "\n"
 
-def _format_obs(step_idx: int, raw: dict[str, Any]) -> str:
-    """Render one observation step as a readable text block."""
-    output = raw.get("output", raw)
-    obs = output.get("obs", output) if isinstance(output, dict) else {}
-    contents = obs.get("contents", []) if isinstance(obs, dict) else []
-    reward = obs.get("reward") if isinstance(obs, dict) else None
-    done = obs.get("done") if isinstance(obs, dict) else None
+    msg = out.call.output
+    content = getattr(msg, "content", None)
+    if content:
+        lines.append("RESPONSE:")
+        lines.append(str(content))
 
-    lines = [f"### Step {step_idx:03d} OBS"]
-    if reward is not None:
-        lines.append(f"reward={reward}  done={done}")
-    for c in contents:
-        if not isinstance(c, dict):
-            lines.append(str(c))
-            continue
-        tool_call_id = c.get("tool_call_id")
-        data = c.get("data", "")
-        if isinstance(data, bytes):
-            data = f"<binary {len(data)} bytes>"
-        if tool_call_id:
-            lines.append(f"[tool_call_id={tool_call_id}]")
-        lines.append(str(data))
+    # Reasoning / thinking trace — model-dependent attributes.
+    for attr in ("reasoning_content", "thinking_blocks"):
+        val = getattr(msg, attr, None)
+        if val:
+            lines.append(f"{attr.upper()}:")
+            lines.append(str(val))
+
+    tool_calls = getattr(msg, "tool_calls", None) or []
+    for tc in tool_calls:
+        name = getattr(getattr(tc, "function", None), "name", "?")
+        args = getattr(getattr(tc, "function", None), "arguments", "")
+        lines.append(f"TOOL_CALL {name}:\n{args}")
+
+    usage = out.call.usage
+    if usage is not None:
+        lines.append(f"USAGE: prompt={usage.prompt_tokens} completion={usage.completion_tokens} cost=${usage.cost:.4f}")
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _format_act(step_idx: int, raw: dict[str, Any]) -> str:
-    """Render one action step as a readable text block."""
-    output = raw.get("output", raw)
-    actions = output.get("actions", []) if isinstance(output, dict) else []
-    llm_calls = output.get("llm_calls", []) if isinstance(output, dict) else []
-    error = output.get("error") if isinstance(output, dict) else None
+def _format_tool_call(idx: int, te: TrajectoryEvent) -> str:
+    """Render one ToolCallEvent as a readable text block.
 
-    lines = [f"### Step {step_idx:03d} ACT"]
-    for call in llm_calls:
-        thinking = call.get("thinking") if isinstance(call, dict) else None
-        if thinking:
-            lines.append("THINKING:")
-            lines.append(str(thinking))
-    for action in actions:
-        if not isinstance(action, dict):
-            lines.append(f"ACTION: {action}")
-            continue
-        name = action.get("name", "?")
-        args = action.get("arguments", {})
+    Combines what V1's split `_act` + `_obs` files surfaced: the action
+    that was dispatched (from the new `action` field), the observation
+    that came back, and any error.
+    """
+    out = te.output
+    assert isinstance(out, ToolCallEvent)
+    lines = [f"### Event {idx:03d} TOOL_CALL  (turn_id={out.turn_id[:8]}…)"]
+    if out.action is not None:
+        name = out.action.name
         try:
-            args_repr = json.dumps(args, default=str, indent=2)
+            args = json.dumps(out.action.arguments, default=str, indent=2)
         except Exception:
-            args_repr = str(args)
-        lines.append(f"ACTION {name}:\n{args_repr}")
-    if error:
-        lines.append(f"ERROR: {error}")
+            args = str(out.action.arguments)
+        lines.append(f"ACTION {name}:\n{args}")
+    elif out.action_id:
+        lines.append(f"ACTION (id only): {out.action_id}")
+
+    if out.error is not None:
+        lines.append(f"ERROR: {out.error.error_type}: {out.error.exception_str}")
+
+    contents = list(getattr(out.obs, "contents", []) or [])
+    if contents:
+        lines.append("OBS:")
+        for c in contents:
+            data: Any = getattr(c, "data", c) if not isinstance(c, dict) else c.get("data", "")
+            if isinstance(data, bytes):
+                data = f"<binary {len(data)} bytes>"
+            tool_call_id = getattr(c, "tool_call_id", None) if not isinstance(c, dict) else c.get("tool_call_id")
+            if tool_call_id:
+                lines.append(f"[tool_call_id={tool_call_id}]")
+            lines.append(str(data))
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _format_eval(idx: int, te: TrajectoryEvent) -> str:
+    out = te.output
+    assert isinstance(out, EvaluationEvent)
+    flavor = "TERMINAL" if out.is_terminal else "STEP"
+    lines = [f"### Event {idx:03d} EVAL ({flavor})  reward={out.reward}"]
+    if out.info:
+        try:
+            lines.append(json.dumps(out.info, default=str, indent=2))
+        except Exception:
+            lines.append(str(out.info))
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _format_agent_error(idx: int, te: TrajectoryEvent) -> str:
+    out = te.output
+    assert isinstance(out, AgentErrorEvent)
+    return f"### Event {idx:03d} AGENT_ERROR\n{out.error.error_type}: {out.error.exception_str}\n"
+
+
+def _format_event(idx: int, te: TrajectoryEvent) -> tuple[str, str]:
+    """Dispatch one event to its formatter. Returns (kind, text)."""
+    out = te.output
+    if isinstance(out, LLMCallEvent):
+        return "llm", _format_llm_call(idx, te)
+    if isinstance(out, ToolCallEvent):
+        return "tool_call", _format_tool_call(idx, te)
+    if isinstance(out, EvaluationEvent):
+        return "eval", _format_eval(idx, te)
+    if isinstance(out, AgentErrorEvent):
+        return "agent_error", _format_agent_error(idx, te)
+    return "unknown", f"### Event {idx:03d} UNKNOWN ({type(out).__name__})\n"
 
 
 def extract_transcript(episode_dir: Path, out_dir: Path) -> Path:
-    """Decompress every step file in `<episode_dir>/steps/` into readable .txt files.
+    """Decompress every event in an episode dir into readable .txt files.
 
-    Writes one file per step into `<out_dir>/steps/NNN_(obs|act).txt` plus a
-    consolidated `transcript.txt`. Returns `out_dir`.
+    Layout-agnostic: routes through `FileStorage.load_episode(trajectory_id)`
+    so legacy `steps/`-only episodes and new `events/`-layout episodes
+    both produce the same text output. Writes one file per event into
+    `<out_dir>/events/NNN_<kind>.txt` plus a consolidated `transcript.txt`.
+
+    Returns `out_dir`.
     """
-    steps_dir = episode_dir / "steps"
-    if not steps_dir.exists():
-        raise FileNotFoundError(f"No steps/ directory in {episode_dir}")
+    # Episode-dir layout: `<output_dir>/episodes/<trajectory_id>/...`
+    # FileStorage expects to be rooted at `<output_dir>`.
+    trajectory_id = episode_dir.name
+    output_dir = episode_dir.parent.parent
+    storage = FileStorage(output_dir)
+    view = storage.load_episode(trajectory_id)
 
-    out_steps = out_dir / "steps"
-    out_steps.mkdir(parents=True, exist_ok=True)
+    out_events = out_dir / "events"
+    out_events.mkdir(parents=True, exist_ok=True)
 
     consolidated: list[str] = []
-    for step_file in sorted(steps_dir.iterdir()):
-        if not step_file.name.endswith(".msgpack.zst"):
-            continue
+    for idx, te in enumerate(view):
         try:
-            step_idx = int(step_file.name[:3])
-        except ValueError:
-            continue
-        try:
-            raw = _decompress(step_file)
+            kind, text = _format_event(idx, te)
         except Exception as e:
-            logger.warning("Failed to decompress %s: %s", step_file, e)
+            logger.warning("Failed to format event %d of %s: %s", idx, trajectory_id, e)
             continue
-        if "_obs" in step_file.name:
-            text = _format_obs(step_idx, raw)
-            (out_steps / f"{step_idx:03d}_obs.txt").write_text(text)
-        elif "_act" in step_file.name:
-            text = _format_act(step_idx, raw)
-            (out_steps / f"{step_idx:03d}_act.txt").write_text(text)
-        else:
-            continue
+        (out_events / f"{idx:03d}_{kind}.txt").write_text(text)
         consolidated.append(text)
 
     (out_dir / "transcript.txt").write_text("\n".join(consolidated))

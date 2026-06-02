@@ -165,34 +165,100 @@ def _write_step(steps_dir: Path, name: str, payload: dict) -> None:
     (steps_dir / name).write_bytes(cctx.compress(raw))
 
 
-def test_extract_transcript_decompresses_obs_and_act(tmp_path: Path) -> None:
-    ep = tmp_path / "task_ep0"
-    steps = ep / "steps"
-    steps.mkdir(parents=True)
+def test_extract_transcript_renders_event_stream(tmp_path: Path) -> None:
+    """`extract_transcript` reads via `FileStorage.load_episode` and
+    renders the new event stream (LLMCallEvent, ToolCallEvent,
+    EvaluationEvent) into the consolidated transcript.txt."""
+    from cube.core import Action, Observation
+    from litellm import Message
 
-    _write_step(
-        steps,
-        "000_obs.msgpack.zst",
-        {"output": {"obs": {"contents": [{"data": "Hello task description.", "tool_call_id": None}]}}},
+    from cube_harness.core import (
+        EvaluationEvent,
+        LLMCallEvent,
+        ToolCallEvent,
+        TrajectoryEvent,
+        TrajectoryMetadata,
     )
-    _write_step(
-        steps,
-        "001_act.msgpack.zst",
-        {"output": {"actions": [{"name": "bash", "arguments": {"command": "ls /testbed"}}], "llm_calls": []}},
-    )
+    from cube_harness.llm import LLMCall, LLMConfig, Prompt, Usage
+    from cube_harness.storage import FileStorage
 
+    output_dir = tmp_path
+    storage = FileStorage(output_dir)
+    storage.save_metadata(TrajectoryMetadata(id="task_ep0"))
+
+    # Reset (synthetic ToolCallEvent w/ initial obs)
+    storage.save_event(
+        TrajectoryEvent(
+            output=ToolCallEvent(
+                parent_event_id="reset",
+                action_id="reset",
+                action=Action(id="reset", name="_reset", arguments={}),
+                obs=Observation.from_text("Hello task description."),
+                turn_id="reset",
+            ),
+            start_time=0.0,
+            end_time=0.0,
+        ),
+        "task_ep0",
+    )
+    # LLM call
+    call = LLMCall(
+        tag="act",
+        llm_config=LLMConfig(model_name="openai/gpt-4o-mini"),
+        prompt=Prompt(messages=[{"role": "user", "content": "what should we do?"}]),
+        output=Message(content="I'll run ls /testbed.", role="assistant"),
+        usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15, cost=0.001),
+    )
+    llm_event_id = storage.save_event(
+        TrajectoryEvent(output=LLMCallEvent(call=call), start_time=1.0, end_time=1.5),
+        "task_ep0",
+    )
+    _ = llm_event_id
+    # Tool call dispatched as a consequence
+    storage.save_event(
+        TrajectoryEvent(
+            output=ToolCallEvent(
+                parent_event_id="llm-1",
+                action_id="a-1",
+                action=Action(id="a-1", name="bash", arguments={"command": "ls /testbed"}),
+                obs=Observation.from_text("file1\nfile2"),
+                turn_id="llm-1",
+            ),
+            start_time=2.0,
+            end_time=2.5,
+        ),
+        "task_ep0",
+    )
+    # Terminal evaluation
+    storage.save_event(
+        TrajectoryEvent(
+            output=EvaluationEvent(reward=1.0, info={"success": True}, is_terminal=True),
+            start_time=3.0,
+            end_time=3.0,
+        ),
+        "task_ep0",
+    )
+    # Mark complete so TrajectoryView loads cleanly.
+    storage.finalize_episode(TrajectoryMetadata(id="task_ep0", end_time=3.0))
+
+    ep = output_dir / "episodes" / "task_ep0"
     out = tmp_path / "decoded"
     extract_transcript(ep, out)
 
-    obs_text = (out / "steps" / "000_obs.txt").read_text()
-    act_text = (out / "steps" / "001_act.txt").read_text()
     transcript = (out / "transcript.txt").read_text()
+    assert "Hello task description." in transcript  # reset obs
+    assert "LLM_CALL" in transcript  # LLM event block
+    assert "I'll run ls /testbed." in transcript  # LLM response
+    assert "TOOL_CALL" in transcript  # tool dispatch block
+    assert "ACTION bash" in transcript  # action payload
+    assert "ls /testbed" in transcript  # action args
+    assert "EVAL" in transcript  # terminal eval block
+    assert "reward=1.0" in transcript
 
-    assert "Hello task description." in obs_text
-    assert "ACTION bash" in act_text
-    assert "ls /testbed" in act_text
-    assert "Hello task description." in transcript
-    assert "ls /testbed" in transcript
+    # Per-event files land under events/, not steps/.
+    event_files = sorted((out / "events").iterdir())
+    assert len(event_files) == 4
+    assert event_files[1].name == "001_llm.txt"  # second event = first LLM call
 
 
 # ---------------------------------------------------------------------------
@@ -746,35 +812,70 @@ class _FakeDriver:
 
 
 def _make_episode_dir(tmp_path: Path, trajectory_id: str) -> tuple[Path, Path]:
-    """Create a minimal experiment dir with one episode and a pre-seeded investigation_context.md."""
+    """Create a minimal experiment dir with one episode and a pre-seeded investigation_context.md.
+
+    Writes the episode via FileStorage's new event-stream layout
+    (LLMCallEvent + ToolCallEvent) — the legacy `_act`/`_obs` step
+    files are no longer the primary path; transcript extraction reads
+    through `TrajectoryView` which decodes whichever layout is present.
+    """
+    from cube.core import Action, Observation
+    from litellm import Message
+
+    from cube_harness.core import (
+        LLMCallEvent,
+        ToolCallEvent,
+        TrajectoryEvent,
+        TrajectoryMetadata,
+    )
+    from cube_harness.llm import LLMCall, LLMConfig, Prompt, Usage
+    from cube_harness.storage import FileStorage
+
     exp = tmp_path / "exp"
     ep = exp / "episodes" / trajectory_id
-    (ep / "steps").mkdir(parents=True)
+    ep.mkdir(parents=True)
 
-    _write_step(
-        ep / "steps",
-        "000_obs.msgpack.zst",
-        {
-            "output": {
-                "obs": {
-                    "contents": [{"data": "Fix the bug in foo.py.", "tool_call_id": None}],
-                    "reward": None,
-                    "done": False,
-                }
-            }
-        },
+    storage = FileStorage(exp)
+    storage.save_metadata(TrajectoryMetadata(id=trajectory_id))
+    # Synthetic reset event (initial obs).
+    storage.save_event(
+        TrajectoryEvent(
+            output=ToolCallEvent(
+                parent_event_id="reset",
+                action_id="reset",
+                action=Action(id="reset", name="_reset", arguments={}),
+                obs=Observation.from_text("Fix the bug in foo.py."),
+                turn_id="reset",
+            ),
+        ),
+        trajectory_id,
     )
-    _write_step(
-        ep / "steps",
-        "001_act.msgpack.zst",
-        {
-            "output": {
-                "actions": [{"name": "Bash", "arguments": {"command": "cat foo.py"}}],
-                "llm_calls": [],
-                "error": None,
-            }
-        },
+    # One LLM call producing the action.
+    call = LLMCall(
+        tag="act",
+        llm_config=LLMConfig(model_name="openai/gpt-4o-mini"),
+        prompt=Prompt(messages=[{"role": "user", "content": "Investigate."}]),
+        output=Message(content="I'll cat foo.py.", role="assistant"),
+        usage=Usage(prompt_tokens=10, completion_tokens=5, total_tokens=15, cost=0.001),
     )
+    storage.save_event(
+        TrajectoryEvent(output=LLMCallEvent(id="llm-1", call=call)),
+        trajectory_id,
+    )
+    # The dispatched tool call (carries the action).
+    storage.save_event(
+        TrajectoryEvent(
+            output=ToolCallEvent(
+                parent_event_id="llm-1",
+                action_id="a-1",
+                action=Action(id="a-1", name="Bash", arguments={"command": "cat foo.py"}),
+                obs=Observation.from_text("(file contents)"),
+                turn_id="llm-1",
+            ),
+        ),
+        trajectory_id,
+    )
+    storage.finalize_episode(TrajectoryMetadata(id=trajectory_id, end_time=1.0))
 
     record = EpisodeRecord(
         evaluation_id="eval-1",
@@ -816,8 +917,12 @@ def test_investigate_episode_pipeline(tmp_path: Path) -> None:
 
     # -- Transcript was extracted into the episode dir --
     assert (ep / "_investigation_transcript" / "transcript.txt").exists()
-    assert (ep / "_investigation_transcript" / "steps" / "000_obs.txt").read_text().startswith("### Step 000 OBS")
-    assert "cat foo.py" in (ep / "_investigation_transcript" / "steps" / "001_act.txt").read_text()
+    # Per-event files now land under `events/` (post-agent-owns-loop)
+    # — extract_transcript routes through FileStorage.load_episode so
+    # legacy step layouts decode via _events_to_legacy_steps + then
+    # render through the new LLMCallEvent / ToolCallEvent formatters.
+    transcript = (ep / "_investigation_transcript" / "transcript.txt").read_text()
+    assert "cat foo.py" in transcript
 
     # -- Findings fields round-tripped correctly --
     assert findings_out.outcome == Outcome.failure
