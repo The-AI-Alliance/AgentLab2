@@ -183,6 +183,26 @@ class TaskDone(BaseException):
 # ---------------------------------------------------------------------------
 
 
+def _stream_event(
+    te: TrajectoryEvent,
+    trajectory_id: str,
+    storage: object | None,
+    summary: "SummaryProcessor | None",
+) -> None:
+    """Stream one event to storage + summary. Both sinks are optional
+    and use Protocol-style structural dispatch — `getattr` keeps the
+    helper agnostic to whether `storage` is the full `FileStorage` or
+    one of the test fakes that only implement a subset."""
+    if storage is not None:
+        save_event = getattr(storage, "save_event", None)
+        if save_event is not None:
+            save_event(te, trajectory_id)
+    if summary is not None:
+        on_event = getattr(summary, "on_event", None)
+        if on_event is not None:
+            on_event(te)
+
+
 def _record_tool_call(
     trajectory_id: str,
     budget: Budget,
@@ -202,33 +222,16 @@ def _record_tool_call(
     Events stream to disk via `storage.save_event(event, trajectory_id)`,
     which assigns + returns the event_num internally — no shared
     counter to thread through. There is no in-memory accumulation."""
-    if isinstance(result, StepError):
-        event = ToolCallEvent(
-            parent_event_id=parent_event_id,
-            action_id=action.id,
-            obs=Observation(),
-            error=result,
-            turn_id=parent_event_id,
-        )
-    else:
-        event = ToolCallEvent(
-            parent_event_id=parent_event_id,
-            action_id=action.id,
-            obs=result,
-            turn_id=parent_event_id,
-        )
+    is_error = isinstance(result, StepError)
+    event = ToolCallEvent(
+        parent_event_id=parent_event_id,
+        action_id=action.id,
+        obs=Observation() if is_error else result,
+        error=result if is_error else None,
+        turn_id=parent_event_id,
+    )
     trajectory_event = TrajectoryEvent(output=event, start_time=start, end_time=end)
-
-    if storage is not None:
-        save_event = getattr(storage, "save_event", None)
-        if save_event is not None:
-            save_event(trajectory_event, trajectory_id)
-
-    if summary is not None:
-        on_event = getattr(summary, "on_event", None)
-        if on_event is not None:
-            on_event(trajectory_event)
-
+    _stream_event(trajectory_event, trajectory_id, storage, summary)
     budget.tool_calls += 1
     return event.id
 
@@ -256,14 +259,7 @@ def _record_step_evaluation(
         parent_event_id=parent_event_id,
     )
     trajectory_event = TrajectoryEvent(output=event, start_time=start, end_time=end)
-    if storage is not None:
-        save_event = getattr(storage, "save_event", None)
-        if save_event is not None:
-            save_event(trajectory_event, trajectory_id)
-    if summary is not None:
-        on_event = getattr(summary, "on_event", None)
-        if on_event is not None:
-            on_event(trajectory_event)
+    _stream_event(trajectory_event, trajectory_id, storage, summary)
 
 
 class _MonitorState:

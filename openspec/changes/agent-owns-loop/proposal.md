@@ -257,44 +257,65 @@ The three parameters:
 
 ### User experience: writing an agent
 
-This is the bit reviewers usually want to see concretely. The contract
-above is small but it's an **inversion-of-control change** versus
-today's `step(obs) -> AgentOutput`:
+The contract above is small but it's an **inversion-of-control change**
+versus today's `step(obs) -> AgentOutput`:
 
 | Before | After |
 |---|---|
-| Return `AgentOutput` from `step(obs)` | Own the `while True` loop yourself |
-| Episode called `task.step(actions)` for you | You call `toolbox.execute_action(a)` — no `task` reference |
-| Sync world | `async def run` is the signature contract |
-| Termination: empty actions or `done` | Termination: `return` from `run`, or `BudgetExceeded` raises |
+| Return `AgentOutput` from `step(obs)` | Either keep `step` (sync path) or own the loop in `run` (async path) |
+| Episode called `task.step(actions)` for you | The loop calls `await toolbox.execute_action(a)` — no `task` reference |
+| Sync world | `Agent.run` is `async`; sync agents inherit the default and never write `await` |
+| Termination: empty actions or `done` | Termination: graceful return from `run`, or `TaskDone` / `BudgetExceeded` raises |
 
-#### A. Parallel tool-call agent — the canonical case
+There are exactly two ergonomics paths. Pick by what the agent actually needs.
+
+#### Sync path — override `step()` and inherit `run`
+
+The 90% case. Your agent emits one action per turn, runs against an
+LLM, doesn't need parallelism. You write **only** `step()` and never
+see async code or a toolbox:
+
+```python
+class MyAgent(Agent):
+    def step(self, obs: Observation) -> AgentOutput:
+        call = self.llm.call(self._prompt(obs))
+        actions = self._parse(call.output.content)
+        return AgentOutput(actions=actions, llm_calls=[call])
+```
+
+That's it. The base `Agent.run` wraps `step()` in `asyncio.to_thread`,
+records the turn via `TurnRecorder.record()`, and dispatches each
+action through `await toolbox.execute_action(...)`. `ReactAgent` and
+`Genny` work this way. Budget self-stop available via
+`self._recorder.budget` if you want to inject a "running low" prompt
+or graceful-stop on cap; otherwise `MonitoredTool` raises
+`BudgetExceeded` for you.
+
+#### Async path — override `run()` for parallelism or streaming
+
+When you want parallel tool calls, async LLM dispatch, or
+fine-grained streaming events, override `Agent.run`. The toolbox is
+**always** `AbstractAsyncTool` — Episode applies `as_async()` to sync
+underlying tools at the boundary so your code has no branch.
 
 ```python
 class ParallelAgent(Agent):
-    def __init__(self, config, llm):
-        super().__init__(config)
-        self.llm = llm
-
     async def run(self, initial_obs, toolbox, recorder):
         obs = initial_obs
         while True:
-            # 1. LLM call + record the turn. begin_turn() is the
-            # granular API — accumulate fields, flush as one AgentEvent
-            # on __exit__. Use record(AgentOutput) for the coarse path.
             with recorder.begin_turn() as turn:
                 call = await self.llm.acall(self._prompt(obs))
                 turn.add_llm_call(call)
                 turn.add_response_text(call.output.content or "")
                 actions = self._parse(call.output.content)
-                for action in actions:
-                    turn.add_action(action)
+                for a in actions:
+                    turn.add_action(a)
 
             if not actions:
-                return  # agent stops
+                return  # graceful done
 
-            # 2. Parallel dispatch — N concurrent tool calls. Each lands
-            # as a ToolCallEvent sharing the parent turn's id as turn_id;
+            # Parallel dispatch — N concurrent tool calls. Each lands as
+            # a ToolCallEvent sharing the parent turn's id as turn_id;
             # XRay renders them as horizontal sibling lanes. Budget +
             # storage hooks fire inside each MonitoredTool.execute_action.
             # TaskDone / BudgetExceeded propagate through asyncio.gather
@@ -302,22 +323,20 @@ class ParallelAgent(Agent):
             results = await asyncio.gather(*(
                 toolbox.execute_action(a) for a in actions
             ))
-
-            # 3. Merge tool results into the next obs.
             obs = self._merge(results)
 ```
 
-That's the full agent. ~25 lines. No `task` reference at all — no
-`task.reset`, no `task.evaluate`, no `task.close`, no storage calls.
-Episode owns lifecycle; MonitoredTool absorbs cube-standard's
-`Task.step` semantics (STOP_ACTION, obs_postprocess, validate_per_step,
-finished) transparently.
+`GennyParallel` follows this shape. ~25 lines for the whole loop. No
+`task` reference, no `task.reset` / `task.evaluate` / `task.close` —
+Episode owns lifecycle; MonitoredTool absorbs `Task.step` semantics
+(STOP_ACTION, obs_postprocess, validate_per_step, finished()).
 
-#### A2. Agent with its own private tools
+#### Agent-private tools
 
-The framework doesn't have a hook for agent-private tools — agents
-have full Python. Hold tools as instance fields and use them directly
-or compose locally:
+Both paths work the same. The framework has no hook for "agent-owned
+tools" — agents have full Python. Hold tools as instance fields and
+either call them directly inside `step` / `run`, or wrap them in a
+local `Toolbox` if you want unified dispatch:
 
 ```python
 class AgentWithMemory(Agent):
@@ -327,76 +346,11 @@ class AgentWithMemory(Agent):
         self.memory = MemoryTool()  # private; never reaches Episode
 
     async def run(self, initial_obs, toolbox, recorder):
-        # Option A: compose locally if you want a unified dispatch.
-        # `remember` (the agent's own) and `bash` (the task's) become
+        combined = Toolbox([toolbox, as_async(self.memory)])
+        # ...same loop as above; `remember` and `bash` dispatch through
         # the same call site. Agent-owned tools don't appear in the
         # trajectory and don't trigger task.finished() polling.
-        combined = Toolbox([toolbox, self.memory])
-        obs = initial_obs
-        while True:
-            with recorder.begin_turn() as turn:
-                call = await self.llm.acall(self._prompt(obs))
-                turn.add_llm_call(call)
-                actions = self._parse(call.output.content)
-                for a in actions:
-                    turn.add_action(a)
-            if not actions:
-                return
-            obs = await combined.execute_action(actions[0])
-
-        # Option B: call self.memory.read(...) directly inside step logic
-        # when the agent decides to remember — no toolbox involvement.
 ```
-
-#### B. Sync agent (option 1) — `async def` with no awaits inside
-
-You **cannot** declare `def run` (non-async); the harness `await`s
-the result. But you CAN declare `async def run` and just do sync work
-inside. No awaits required:
-
-```python
-class SyncBodyAgent(Agent):
-    async def run(self, initial_obs, toolbox, recorder):
-        obs = initial_obs
-        while True:
-            call = self.llm.call(self._prompt(obs))                # sync
-            actions = self._parse(call.output.content)
-            recorder.record(AgentOutput(actions=actions, llm_calls=[call]))
-            if not actions:
-                return
-            for action in actions:
-                result = toolbox.execute_action(action)            # sync
-                if isinstance(result, StepError):
-                    return
-                obs = result
-```
-
-Caveat: the event loop is blocked for the whole episode duration.
-Acceptable when the episode is the only thing in the process (Ray
-worker, single-process debug). Problematic when concurrency matters.
-
-#### C. Sync agent (option 2) — own a fully sync loop via `to_thread`
-
-When you want sync semantics without blocking the loop:
-
-```python
-class TrueSyncAgent(Agent):
-    async def run(self, initial_obs, toolbox, recorder):
-        await asyncio.to_thread(self._sync_run, initial_obs, toolbox, recorder)
-
-    def _sync_run(self, initial_obs, toolbox, recorder):
-        # Pure sync world. The event loop is unblocked during this call.
-        ...
-```
-
-#### D. Don't override `run` at all — keep your `step()` and inherit
-
-When all you have is a sync `step()`, override nothing. The base class
-`Agent.run` wraps your `step` in `asyncio.to_thread`, drives the
-one-at-a-time toolbox dispatch for you. This is how `ReactAgent` and
-`Genny` work — they still emit one action per `step()` and the default
-loop dispatches it through the toolbox; MonitoredTool fires TaskDone
-when the task signals done.
 
 ### `TurnRecorder`
 

@@ -106,29 +106,39 @@ class SummaryProcessor:
         with open(self._summary_path, "a") as f:
             f.write(entry.model_dump_json() + "\n")
 
-    def on_step(self, step_num: int, step: TrajectoryStep) -> None:
-        with self._lock:
-            # Capture the first step-level error so EpisodeRecord can report it without
-            # re-walking the (now un-retained) step list.
-            err = getattr(step.output, "error", None)
-            if err is not None and self._error_type is None:
-                self._error_type = err.error_type
+    def _fold_agent_stats(self, actions: list, llm_calls: list, error: object | None) -> None:
+        """Accumulate per-agent-turn stats — shared by `on_step` (legacy
+        `AgentOutput`) and `on_event` (`AgentEvent`). Both expose the
+        same `actions / llm_calls / error` triplet, so the fold is
+        identical. Must be called under `self._lock`."""
+        self._n_agent_steps += 1
+        self._total_actions += len(actions)
+        self._total_llm_calls += len(llm_calls)
+        for llm_call in llm_calls:
+            if llm_call.usage:
+                self._prompt_tokens += llm_call.usage.prompt_tokens
+                self._completion_tokens += llm_call.usage.completion_tokens
+                self._cached_tokens += llm_call.usage.cached_tokens
+                self._cache_creation_tokens += llm_call.usage.cache_creation_tokens
+                self._cost_usd += llm_call.usage.cost
+        if error is not None and self._error_type is None:
+            self._error_type = error.error_type
 
+    def on_step(self, step_num: int, step: TrajectoryStep) -> None:
+        """DEPRECATED: legacy `TrajectoryStep` accumulator. No live caller
+        — replaced by `on_event` (event-stream model). Retained only for
+        the legacy V2 read path that materializes `TrajectoryStep`s from
+        events. Will be removed alongside `_events_to_legacy_steps` in
+        the XRay-rewrite follow-up PR."""
+        with self._lock:
             if isinstance(step.output, AgentOutput):
-                self._n_agent_steps += 1
-                self._total_actions += len(step.output.actions)
-                self._total_llm_calls += len(step.output.llm_calls)
-                for llm_call in step.output.llm_calls:
-                    if llm_call.usage:
-                        self._prompt_tokens += llm_call.usage.prompt_tokens
-                        self._completion_tokens += llm_call.usage.completion_tokens
-                        self._cached_tokens += llm_call.usage.cached_tokens
-                        self._cache_creation_tokens += llm_call.usage.cache_creation_tokens
-                        self._cost_usd += llm_call.usage.cost
+                self._fold_agent_stats(step.output.actions, step.output.llm_calls, step.output.error)
             elif isinstance(step.output, EnvironmentOutput):
                 self._n_env_steps += 1
                 self._reward = step.output.reward
                 self._done = step.output.done
+                if step.output.error is not None and self._error_type is None:
+                    self._error_type = step.output.error.error_type
 
             self._append(self._build_entry(step_num, EpisodeStatus.RUNNING))
 
@@ -155,18 +165,7 @@ class SummaryProcessor:
             turn_n = self._n_agent_steps + self._n_env_steps + self._n_evaluations
             out = event.output
             if isinstance(out, AgentEvent):
-                self._n_agent_steps += 1
-                self._total_actions += len(out.actions)
-                self._total_llm_calls += len(out.llm_calls)
-                for llm_call in out.llm_calls:
-                    if llm_call.usage:
-                        self._prompt_tokens += llm_call.usage.prompt_tokens
-                        self._completion_tokens += llm_call.usage.completion_tokens
-                        self._cached_tokens += llm_call.usage.cached_tokens
-                        self._cache_creation_tokens += llm_call.usage.cache_creation_tokens
-                        self._cost_usd += llm_call.usage.cost
-                if out.error is not None and self._error_type is None:
-                    self._error_type = out.error.error_type
+                self._fold_agent_stats(out.actions, out.llm_calls, out.error)
             elif isinstance(out, ToolCallEvent):
                 # ToolCallEvent now carries only obs + error (reward lives on
                 # the sibling EvaluationEvent; done is a TaskDone signal).

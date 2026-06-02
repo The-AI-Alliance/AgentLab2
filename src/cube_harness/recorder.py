@@ -40,7 +40,7 @@ from cube_harness.core import (
     TrajectoryEvent,
 )
 from cube_harness.llm import LLMCall, Usage
-from cube_harness.tool import BudgetExceeded
+from cube_harness.tool import BudgetExceeded, _stream_event
 
 if TYPE_CHECKING:
     from cube_harness.summary import SummaryProcessor
@@ -63,6 +63,12 @@ class Turn:
 
     Coding contract: never reuse a Turn after `__exit__`. Re-entering
     is a bug — open a new one for the next turn.
+
+    NOTE: forward surface for Phase 2 streaming / opaque-connector
+    agents. No in-tree production caller yet — both shipped agents
+    (`Agent.run` default, `GennyParallel.run`) use the coarse
+    `TurnRecorder.record(agent_output)` API. Exercised by
+    `tests/test_recorder_dual_api.py`.
     """
 
     def __init__(self, recorder: "TurnRecorder") -> None:
@@ -348,14 +354,7 @@ class TurnRecorder:
         counter to thread through. Storage uses its per-trajectory
         `itertools.count` to assign monotonic event_nums, safe under
         concurrent writes from multiple `asyncio.to_thread` workers."""
-        if self.storage is not None:
-            save_event = getattr(self.storage, "save_event", None)
-            if save_event is not None:
-                save_event(te, self.trajectory_id)
-        if self.summary is not None:
-            on_event = getattr(self.summary, "on_event", None)
-            if on_event is not None:
-                on_event(te)
+        _stream_event(te, self.trajectory_id, self.storage, self.summary)
 
 
 def equivalent_agent_events(a: AgentEvent, b: AgentEvent) -> bool:

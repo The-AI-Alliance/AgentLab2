@@ -646,9 +646,13 @@ is used.
   Observation tab (screenshots are obs content, not a separate concern).
 - "UI step" pairing logic (env+agent paired into a single navigation unit) is
   removed — navigation is per-event.
-- `_events_to_legacy_steps` materialization shim — no consumer remains.
 - Any code path that expected `trajectory.steps[i]` — replaced by
   `view[i]` (different element type: `TrajectoryEvent`).
+
+`_events_to_legacy_steps` is **kept** as an on-read materialization shim
+until XRay + the investigator finish migrating to `TrajectoryView.events`
+directly (planned follow-up `agent-owns-loop-xray`). Marked deprecated
+in code; removal moves to that PR.
 
 ### Gotchas
 
@@ -691,8 +695,8 @@ The following are **deleted outright** (no deprecation alias):
 - `Trajectory.last_env_step`, `last_env_output`, `n_agent_steps`,
   `n_env_steps`, `events_of_turn` (methods) — moved to `TrajectoryView`
   where they belong. Their old form on `Trajectory` is gone.
-- `_events_to_legacy_steps` (storage materialization shim) — no
-  consumer remains after the XRay rewrite.
+- `_events_to_legacy_steps` is retained as a deprecated shim until the
+  XRay rewrite lands; see deferred-removal note above.
 - `Storage.save_trajectory` / `load_trajectory` / `finalize(trajectory)`
   — replaced by `save_metadata` / `load_episode` / `finalize_episode(meta)`.
 - `EpisodeRecord.from_trajectory(traj)` — replaced by
@@ -736,14 +740,16 @@ The following are **deleted outright** (no deprecation alias):
 
 ## Open questions
 
-1. **Budget granularity.** Phase 1 ships `max_turns` and a deprecated alias
-   for `max_steps`. Do we ship `max_tool_calls`, `max_cost_usd`,
-   `max_wallclock_s` now or later? Recommendation: ship the field names but
-   only enforce `max_turns` in `MonitoredTool.__call__` until we wire up cost
-   accounting end-to-end.
-2. **`Agent.step` deprecation timeline.** Keep one release? Two?
-   Recommendation: one release, then `step` becomes optional (only required
-   if `run` is not overridden).
+1. ~~**Budget granularity.**~~ **Resolved.** All caps (`max_turns`,
+   `max_tool_calls`, `max_cost_usd`, `max_prompt_tokens`,
+   `max_completion_tokens`, `max_wallclock_s`) ship enforced. `Budget.exhausted`
+   checks every cap; `TurnRecorder._flush_agent_event` bumps cost + tokens from
+   each `LLMCall.usage`; `MonitoredTool` raises `BudgetExceeded` on tool-call
+   ticks. `max_steps` was never an alias — `max_turns` is the only name.
+2. **`Agent.step` deprecation timeline.** Decided: keep one release —
+   `step` stays required as the canonical sync entry point. Agents
+   that override `run` get to omit it; the abstract requirement softens
+   in the follow-up release.
 3. **Async `step` (`astep`)** as a first-class method on sync agents wanting
    coroutine semantics without overriding `run` — worth adding or YAGNI?
    Recommendation: YAGNI for Phase 1.

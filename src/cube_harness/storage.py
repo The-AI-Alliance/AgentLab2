@@ -134,7 +134,9 @@ def _deserialize_event(raw: bytes) -> dict:
 
 
 def _events_to_legacy_steps(events: list[TrajectoryEvent]) -> list[TrajectoryStep]:
-    """Materialize a legacy `steps` view from an event stream.
+    """DEPRECATED — on-read materialization shim; removal target: `agent-owns-loop-xray`.
+
+    Materialize a legacy `steps` view from an event stream.
 
     Used by FileStorage.load_trajectory to keep XRay and other
     `trajectory.steps`-walking consumers working transparently while

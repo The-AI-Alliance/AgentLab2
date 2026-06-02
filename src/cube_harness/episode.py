@@ -12,7 +12,7 @@ from opentelemetry.trace import StatusCode
 from termcolor import colored
 
 from cube_harness.agent import AgentConfig
-from cube_harness.core import AgentOutput, TrajectoryMetadata
+from cube_harness.core import TrajectoryMetadata
 from cube_harness.episode_logs import trajectory_log_id
 from cube_harness.episode_status import TERMINAL_STATUSES, EpisodeStatus, next_retry_count
 from cube_harness.eval_log import EpisodeRecord
@@ -367,17 +367,3 @@ class Episode:
                 logger.exception("Failed to close task")
             tracer.shutdown()
         return self.storage.load_episode(trajectory_id)
-
-    def log_agent_output(self, turns: int, agent_output: AgentOutput) -> None:
-        """Legacy logger helper retained for any out-of-tree caller; the
-        new flow logs via TurnRecorder + colored episode messages."""
-        for llm_call in agent_output.llm_calls:
-            if llm_call.output.content:
-                logger.info(colored(f"Turn {turns} LLM Response: {llm_call.output.content}", "green"))
-            if hasattr(llm_call.output, "reasoning_content") and llm_call.output.reasoning_content:
-                logger.info(colored(f"Turn {turns} LLM Reasoning: {llm_call.output.reasoning_content}", "cyan"))
-            if hasattr(llm_call.output, "thinking_blocks") and llm_call.output.thinking_blocks:
-                for block in llm_call.output.thinking_blocks:
-                    logger.info(colored(f"Turn {turns} LLM Thinking Block: {block}", "cyan"))
-        actions_summary = [a.name for a in agent_output.actions] if agent_output.actions else []
-        logger.info(colored(f"Turn {turns} Agent output: actions={actions_summary}", "magenta"))

@@ -29,6 +29,11 @@ class AgentOutput(TypedBaseModel):
 
 
 class TrajectoryStep(TypedBaseModel):
+    """DEPRECATED — legacy `EnvironmentOutput | AgentOutput` step; removal
+    target: `agent-owns-loop-xray`. New code uses `TrajectoryEvent` and
+    `TrajectoryView`; this class is materialized on read by
+    `_events_to_legacy_steps` for XRay / investigator until they migrate."""
+
     output: EnvironmentOutput | AgentOutput
     start_time: float | None = None
     end_time: float | None = None
@@ -137,7 +142,9 @@ class TrajectoryEvent(TypedBaseModel):
 
 
 class Trajectory(TypedBaseModel):
-    """Legacy trajectory shape — what `Storage.load_trajectory(id)` returns.
+    """DEPRECATED — legacy trajectory shape; removal target: `agent-owns-loop-xray`.
+
+    Legacy trajectory shape — what `Storage.load_trajectory(id)` returns.
 
     Consumed by XRay, the investigator, and `inspect_results` until they
     migrate to `TrajectoryView` directly (planned follow-up PR
