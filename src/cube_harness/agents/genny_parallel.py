@@ -37,7 +37,8 @@ Compatibility:
 import asyncio
 import logging
 
-from cube.core import Observation, StepError
+from cube.core import ActionSchema, Observation, StepError
+from cube.tool import AbstractAsyncTool
 
 from cube_harness.agents.genny import Genny, GennyConfig
 from cube_harness.recorder import TurnRecorder
@@ -62,7 +63,12 @@ class GennyParallelConfig(GennyConfig):
     remembering to set it.
     """
 
-    def make(self, action_set=None, task_id: str | None = None, **kwargs) -> "GennyParallel":
+    def make(
+        self,
+        action_set: list[ActionSchema] | None = None,
+        task_id: str | None = None,
+        **kwargs: object,
+    ) -> "GennyParallel":
         """Instantiate GennyParallel; flip llm_config.parallel_tool_calls
         to True if the caller left it at the default False."""
         if not self.llm_config.parallel_tool_calls:
@@ -83,7 +89,12 @@ class GennyParallel(Genny):
     so XRay (Phase I) renders them as siblings of one turn.
     """
 
-    async def run(self, initial_obs: Observation, toolbox, recorder: TurnRecorder) -> None:
+    async def run(
+        self,
+        initial_obs: Observation,
+        toolbox: AbstractAsyncTool,
+        recorder: TurnRecorder,
+    ) -> None:
         """Drive the agent loop with `asyncio.gather` parallel dispatch
         of the N actions returned per assistant turn.
 
@@ -100,13 +111,12 @@ class GennyParallel(Genny):
                 return  # agent says "done"
 
             # Parallel fan-out. Each call goes through MonitoredTool's
-            # execute_action (installed by Episode), which records its
-            # own ToolCallEvent, enforces budget, and may raise
-            # TaskDone / BudgetExceeded that propagates up through
-            # asyncio.gather to Episode's outer except.
-            results = await asyncio.gather(
-                *(asyncio.to_thread(toolbox.execute_action, action) for action in agent_output.actions)
-            )
+            # execute_action (installed by Episode + wrapped in the
+            # async adapter at the boundary), which records its own
+            # ToolCallEvent, enforces budget, and may raise TaskDone /
+            # BudgetExceeded that propagates up through asyncio.gather
+            # to Episode's outer except.
+            results = await asyncio.gather(*(toolbox.execute_action(action) for action in agent_output.actions))
 
             # Merge the parallel results into a single observation for
             # the next LLM turn. The Observation `+=` operator

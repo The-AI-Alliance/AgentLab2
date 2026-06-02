@@ -149,8 +149,6 @@ def _events_to_legacy_steps(events: list[TrajectoryEvent]) -> list[TrajectorySte
       - EvaluationEvent → omitted; the terminal reward lives in
                          Trajectory.reward_info already.
     """
-    from cube_harness.core import AgentEvent, AgentOutput, EvaluationEvent, ToolCallEvent
-
     out: list[TrajectoryStep] = []
     for ev in events:
         body = ev.output
@@ -402,9 +400,16 @@ class TrajectoryView:
             parent_id = (
                 _legacy_agent_id(entry.legacy_parent_num) if entry.legacy_parent_num is not None else "__reset__"
             )
+            # ToolCallEvent's fields are (id, parent_event_id, action_id,
+            # obs, error, turn_id) — extract obs + error from the legacy
+            # EnvironmentOutput. The old `output=step.output` form was
+            # dropped silently by pydantic's extra="ignore" (default on
+            # TypedBaseModel), zeroing every legacy ToolCallEvent's
+            # observation on read.
             tool_event = ToolCallEvent(
                 parent_event_id=parent_id,
-                output=step.output,
+                obs=step.output.obs,
+                error=step.output.error,
                 turn_id=parent_id,
             )
             return TrajectoryEvent(output=tool_event, start_time=step.start_time, end_time=step.end_time)

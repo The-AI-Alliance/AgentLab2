@@ -6,7 +6,7 @@ import pytest
 from cube.core import Observation
 
 from cube_harness.agent import Agent, AgentConfig
-from cube_harness.core import AgentOutput
+from cube_harness.core import AgentEvent, AgentOutput, EvaluationEvent
 from cube_harness.episode import Episode
 from cube_harness.storage import FileStorage
 
@@ -64,8 +64,6 @@ class TestCubeEpisode:
                                      evaluate() runs, reward=1.0, done=True
           events[3]  EvaluationEvent — terminal recorder.record_evaluation
         """
-        from cube_harness.core import AgentEvent, EvaluationEvent
-
         episode = Episode(
             id=0,
             output_dir=tmp_dir,

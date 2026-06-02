@@ -40,6 +40,7 @@ from cube_harness.core import (
     TrajectoryEvent,
 )
 from cube_harness.llm import LLMCall, Usage
+from cube_harness.tool import BudgetExceeded
 
 if TYPE_CHECKING:
     from cube_harness.summary import SummaryProcessor
@@ -337,8 +338,6 @@ class TurnRecorder:
         # (e.g. tests with hand-rolled task.step that doesn't dispatch
         # to tool.execute_action).
         if self.budget is not None and self.budget.exhausted:
-            from cube_harness.tool import BudgetExceeded  # local import: avoid recorder<->tool cycle
-
             raise BudgetExceeded()
 
     def _append_event(self, te: TrajectoryEvent) -> None:

@@ -1,3 +1,4 @@
+import threading
 import time
 from enum import StrEnum
 from pathlib import Path
@@ -76,6 +77,13 @@ class SummaryProcessor:
         self._reward = 0.0
         self._done = False
         self._error_type: str | None = None
+        # Parallel tool dispatch (GennyParallel + asyncio.to_thread)
+        # fires `on_event` from multiple worker threads concurrently
+        # for the same SummaryProcessor instance. Without this lock the
+        # read-modify-write of counters races (undercounted steps,
+        # dropped error_type, garbled / duplicate rows in the
+        # episode_summary.jsonl stream).
+        self._lock = threading.Lock()
 
     def _build_entry(self, turn: int, status: EpisodeStatus) -> StepSummary:
         return StepSummary(
@@ -99,29 +107,30 @@ class SummaryProcessor:
             f.write(entry.model_dump_json() + "\n")
 
     def on_step(self, step_num: int, step: TrajectoryStep) -> None:
-        # Capture the first step-level error so EpisodeRecord can report it without
-        # re-walking the (now un-retained) step list.
-        err = getattr(step.output, "error", None)
-        if err is not None and self._error_type is None:
-            self._error_type = err.error_type
+        with self._lock:
+            # Capture the first step-level error so EpisodeRecord can report it without
+            # re-walking the (now un-retained) step list.
+            err = getattr(step.output, "error", None)
+            if err is not None and self._error_type is None:
+                self._error_type = err.error_type
 
-        if isinstance(step.output, AgentOutput):
-            self._n_agent_steps += 1
-            self._total_actions += len(step.output.actions)
-            self._total_llm_calls += len(step.output.llm_calls)
-            for llm_call in step.output.llm_calls:
-                if llm_call.usage:
-                    self._prompt_tokens += llm_call.usage.prompt_tokens
-                    self._completion_tokens += llm_call.usage.completion_tokens
-                    self._cached_tokens += llm_call.usage.cached_tokens
-                    self._cache_creation_tokens += llm_call.usage.cache_creation_tokens
-                    self._cost_usd += llm_call.usage.cost
-        elif isinstance(step.output, EnvironmentOutput):
-            self._n_env_steps += 1
-            self._reward = step.output.reward
-            self._done = step.output.done
+            if isinstance(step.output, AgentOutput):
+                self._n_agent_steps += 1
+                self._total_actions += len(step.output.actions)
+                self._total_llm_calls += len(step.output.llm_calls)
+                for llm_call in step.output.llm_calls:
+                    if llm_call.usage:
+                        self._prompt_tokens += llm_call.usage.prompt_tokens
+                        self._completion_tokens += llm_call.usage.completion_tokens
+                        self._cached_tokens += llm_call.usage.cached_tokens
+                        self._cache_creation_tokens += llm_call.usage.cache_creation_tokens
+                        self._cost_usd += llm_call.usage.cost
+            elif isinstance(step.output, EnvironmentOutput):
+                self._n_env_steps += 1
+                self._reward = step.output.reward
+                self._done = step.output.done
 
-        self._append(self._build_entry(step_num, EpisodeStatus.RUNNING))
+            self._append(self._build_entry(step_num, EpisodeStatus.RUNNING))
 
     def on_event(self, event: TrajectoryEvent) -> None:
         """Accumulate per-event stats for the agent-owns-loop event model.
@@ -134,38 +143,45 @@ class SummaryProcessor:
 
         Errors on AgentEvent / ToolCallEvent are captured the same way
         as in `on_step`.
+
+        Thread-safe: the lock guards the read-modify-write on the
+        counters AND the append-to-jsonl. GennyParallel dispatches N
+        tool calls via asyncio.to_thread → each worker thread calls
+        on_event concurrently. Without the lock, counter increments
+        race and the jsonl gets garbled rows.
         """
-        # The summary-jsonl `turn` counter walks through events 1:1.
-        turn_n = self._n_agent_steps + self._n_env_steps + self._n_evaluations
-        out = event.output
-        if isinstance(out, AgentEvent):
-            self._n_agent_steps += 1
-            self._total_actions += len(out.actions)
-            self._total_llm_calls += len(out.llm_calls)
-            for llm_call in out.llm_calls:
-                if llm_call.usage:
-                    self._prompt_tokens += llm_call.usage.prompt_tokens
-                    self._completion_tokens += llm_call.usage.completion_tokens
-                    self._cached_tokens += llm_call.usage.cached_tokens
-                    self._cache_creation_tokens += llm_call.usage.cache_creation_tokens
-                    self._cost_usd += llm_call.usage.cost
-            if out.error is not None and self._error_type is None:
-                self._error_type = out.error.error_type
-        elif isinstance(out, ToolCallEvent):
-            # ToolCallEvent now carries only obs + error (reward lives on
-            # the sibling EvaluationEvent; done is a TaskDone signal).
-            self._n_env_steps += 1
-            if out.error is not None and self._error_type is None:
-                self._error_type = out.error.error_type
-        elif isinstance(out, EvaluationEvent):
-            self._n_evaluations += 1
-            # Terminal evaluation: overrides reward, marks done.
-            # Step-wise evaluation: also surfaces the reward so the
-            # summary tracks the latest validate_per_step result.
-            self._reward = out.reward
-            if out.is_terminal:
-                self._done = True
-        self._append(self._build_entry(turn_n, EpisodeStatus.RUNNING))
+        with self._lock:
+            # The summary-jsonl `turn` counter walks through events 1:1.
+            turn_n = self._n_agent_steps + self._n_env_steps + self._n_evaluations
+            out = event.output
+            if isinstance(out, AgentEvent):
+                self._n_agent_steps += 1
+                self._total_actions += len(out.actions)
+                self._total_llm_calls += len(out.llm_calls)
+                for llm_call in out.llm_calls:
+                    if llm_call.usage:
+                        self._prompt_tokens += llm_call.usage.prompt_tokens
+                        self._completion_tokens += llm_call.usage.completion_tokens
+                        self._cached_tokens += llm_call.usage.cached_tokens
+                        self._cache_creation_tokens += llm_call.usage.cache_creation_tokens
+                        self._cost_usd += llm_call.usage.cost
+                if out.error is not None and self._error_type is None:
+                    self._error_type = out.error.error_type
+            elif isinstance(out, ToolCallEvent):
+                # ToolCallEvent now carries only obs + error (reward lives on
+                # the sibling EvaluationEvent; done is a TaskDone signal).
+                self._n_env_steps += 1
+                if out.error is not None and self._error_type is None:
+                    self._error_type = out.error.error_type
+            elif isinstance(out, EvaluationEvent):
+                self._n_evaluations += 1
+                # Terminal evaluation: overrides reward, marks done.
+                # Step-wise evaluation: also surfaces the reward so the
+                # summary tracks the latest validate_per_step result.
+                self._reward = out.reward
+                if out.is_terminal:
+                    self._done = True
+            self._append(self._build_entry(turn_n, EpisodeStatus.RUNNING))
 
     @property
     def has_error(self) -> bool:

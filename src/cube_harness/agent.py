@@ -6,13 +6,12 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from cube.core import ActionSchema, Observation, StepError, ValidatedConfig
-from cube.tool import AbstractAsyncTool
 from pydantic import Field
 
 from cube_harness.core import AgentOutput
 
 if TYPE_CHECKING:
-    from cube.tool import AbstractTool
+    from cube.tool import AbstractAsyncTool
 
     from cube_harness.recorder import TurnRecorder
 
@@ -89,21 +88,22 @@ class Agent(ABC):
     async def run(
         self,
         initial_obs: Observation,
-        toolbox: "AbstractTool | AbstractAsyncTool",
+        toolbox: "AbstractAsyncTool",
         recorder: "TurnRecorder",
     ) -> None:
         """Default gym-style loop on top of `self.step` — the canonical
         entry point invoked by `Episode` (RFC `agent-owns-loop`).
 
-        Sync `step()` agents get this for free. Agents that want
-        parallel tool calls, async LLM dispatch, or streaming
-        observability override this method instead.
+        Sync `step()` agents get this for free — they never write a
+        line of async code. Agents that want parallel tool calls,
+        async LLM dispatch, or streaming observability override this
+        method instead.
 
-        From the agent's point of view, the only environment surface
-        is `toolbox.execute_action(action) -> Observation | StepError`.
-        The toolbox is the composed view: the task's monitored tools +
-        the agent's own (non-monitored) tools. Dispatch by action name
-        routes each call automatically.
+        The `toolbox` parameter is always `AbstractAsyncTool` — Episode
+        wraps sync tools in a thin `asyncio.to_thread`-based adapter
+        at the boundary so the agent's view is uniformly async. One
+        `await toolbox.execute_action(action) -> Observation | StepError`
+        call site regardless of the underlying tool's sync/async nature.
 
         Termination:
 
@@ -117,15 +117,12 @@ class Agent(ABC):
 
         The agent does NOT call `task.reset` / `task.evaluate` / `task.step` —
         those belong to Episode (lifecycle) or the toolbox (per-call).
-        `toolbox.execute_action` is wrapped in `asyncio.to_thread` for
-        sync Toolbox; awaited directly for AsyncToolbox.
 
         Side-effect: stashes `recorder` on `self._recorder` so subclasses
         that override only `step()` can introspect the live budget for
         graceful self-stop or prompt injection — `self._recorder.budget`.
         """
         self._recorder = recorder
-        execute = _make_execute_callable(toolbox)
         obs = initial_obs
         while True:
             agent_output = await asyncio.to_thread(self.step, obs)
@@ -138,7 +135,7 @@ class Agent(ABC):
             # MonitoredTool — they may raise TaskDone (propagates to Episode).
             last_obs = obs
             for action in agent_output.actions:
-                result = await execute(action)
+                result = await toolbox.execute_action(action)
                 if isinstance(result, StepError):
                     # Tool error — agent stops; Episode finalizes.
                     return
@@ -147,24 +144,3 @@ class Agent(ABC):
 
     def __repr__(self) -> str:
         return self.config.model_dump_json(indent=2, serialize_as_any=True)
-
-
-def _make_execute_callable(toolbox):
-    """Adapt a sync `AbstractTool`/`Toolbox` or async `AbstractAsyncTool`/`AsyncToolbox`
-    into a uniform `async (action) -> Observation | StepError` callable.
-
-    The default `Agent.run` uses this so it doesn't need to branch on
-    sync-vs-async inside the loop. Modern overriding agents call
-    `toolbox.execute_action` directly with `await` or `asyncio.to_thread`
-    as they prefer.
-    """
-    if isinstance(toolbox, AbstractAsyncTool):
-
-        async def execute(action):
-            return await toolbox.execute_action(action)
-    else:
-
-        async def execute(action):
-            return await asyncio.to_thread(toolbox.execute_action, action)
-
-    return execute

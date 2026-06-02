@@ -26,10 +26,12 @@ fail the sync-Toolbox isinstance check. Solution: provide both wrappers,
 with shared recording logic, and let `install_monitoring` pick.
 """
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, Any, Callable
 
 from cube.core import Action, Observation, StepError, TypedBaseModel
+from cube.task import STOP_ACTION
 from cube.tool import (
     AbstractAsyncTool,
     AbstractTool,
@@ -319,10 +321,6 @@ def _maybe_stop_action(state: "_MonitorState", action: Action) -> bool:
     and the task accepts it. Caller should raise TaskDone."""
     task = state.task
     if task is None:
-        return False
-    try:
-        from cube.task import STOP_ACTION
-    except ImportError:
         return False
     return getattr(task, "accept_agent_stop", False) and action.name == STOP_ACTION.name
 
@@ -684,3 +682,71 @@ def _wrap_toolbox_in_place(
     toolbox.tools = new_tools
     # Rebuild action-name → tool index so dispatch resolves to the wrappers.
     toolbox._action_name_to_tool = {action.name: tool for tool in toolbox.tools for action in tool.action_set}
+
+
+# ---------------------------------------------------------------------------
+# Sync → async adapter (Episode boundary)
+# ---------------------------------------------------------------------------
+
+
+class _SyncToolAsAsync(AbstractAsyncTool):
+    """Wraps a sync `AbstractTool` so it exposes the `AbstractAsyncTool`
+    surface — `await execute_action(action)` works regardless of the
+    underlying tool's sync/async nature.
+
+    Episode applies this at the boundary right before handing the
+    toolbox to `agent.run`. Agent authors who override `run()` write
+    fully-async code (`await toolbox.execute_action(a)`, parallel
+    `asyncio.gather`) without branching on tool type. Sync inner
+    `execute_action` is dispatched via `asyncio.to_thread` so the
+    event loop stays responsive.
+
+    Sync-tool authors don't see this — they override `step()` and
+    inherit `Agent.run`, never touching async.
+    """
+
+    def __init__(self, inner: AbstractTool) -> None:
+        self._inner = inner
+
+    @property
+    def action_set(self) -> list[ActionSchema]:
+        return self._inner.action_set
+
+    async def execute_action(self, action: Action) -> Observation | StepError:
+        return await asyncio.to_thread(self._inner.execute_action, action)
+
+    async def reset(self) -> None:
+        reset = getattr(self._inner, "reset", None)
+        if reset is None:
+            return
+        if asyncio.iscoroutinefunction(reset):
+            await reset()
+        else:
+            await asyncio.to_thread(reset)
+
+    async def close(self) -> None:
+        close = getattr(self._inner, "close", None)
+        if close is None:
+            return
+        if asyncio.iscoroutinefunction(close):
+            await close()
+        else:
+            await asyncio.to_thread(close)
+
+    def __getattr__(self, name: str) -> object:
+        # Forward direct attribute / method access to the wrapped tool
+        # (same pattern as MonitoredTool — cube-standard tasks call
+        # @tool_action methods directly for setup / verification paths).
+        if name.startswith("_") or name == "_inner":
+            raise AttributeError(name)
+        return getattr(self._inner, name)
+
+
+def as_async(tool: AbstractTool | AbstractAsyncTool) -> AbstractAsyncTool:
+    """Return `tool` as an `AbstractAsyncTool`. No-op when already async;
+    wraps in `_SyncToolAsAsync` when sync."""
+    if isinstance(tool, AbstractAsyncTool):
+        return tool
+    if isinstance(tool, AbstractTool):
+        return _SyncToolAsAsync(tool)
+    raise TypeError(f"as_async expects AbstractTool / AbstractAsyncTool; got {type(tool).__name__}")

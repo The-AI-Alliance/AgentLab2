@@ -14,10 +14,11 @@ import time
 from cube.core import Action, ActionSchema, Observation
 from cube.tool import AbstractTool
 
-from cube_harness.agents.genny_parallel import GennyParallel
+from cube_harness.agents.genny_parallel import GennyParallel, GennyParallelConfig
 from cube_harness.core import AgentEvent, AgentOutput, ToolCallEvent, TrajectoryEvent
+from cube_harness.llm import LLMConfig
 from cube_harness.recorder import TurnRecorder
-from cube_harness.tool import Budget, install_monitoring
+from cube_harness.tool import Budget, BudgetExceeded, as_async, install_monitoring
 
 
 class _FakeStorage:
@@ -126,8 +127,6 @@ def test_genny_parallel_config_forces_parallel_tool_calls() -> None:
     which reached parity on accuracy but never actually exercised
     parallel dispatch. Asserting on the agent class enforces the
     invariant at construction time rather than trusting the caller."""
-    from cube_harness.agents.genny_parallel import GennyParallelConfig
-    from cube_harness.llm import LLMConfig
 
     # Caller leaves parallel_tool_calls at its default (False).
     cfg = GennyParallelConfig(llm_config=LLMConfig(model_name="openai/gpt-4o-mini"))
@@ -145,8 +144,6 @@ def test_genny_parallel_config_forces_parallel_tool_calls() -> None:
 def test_genny_parallel_config_respects_explicit_true() -> None:
     """If the caller already set parallel_tool_calls=True, the make()
     path should not re-set it (avoids spurious log line)."""
-    from cube_harness.agents.genny_parallel import GennyParallelConfig
-    from cube_harness.llm import LLMConfig
 
     cfg = GennyParallelConfig(llm_config=LLMConfig(model_name="openai/gpt-4o-mini", parallel_tool_calls=True))
     cfg.make(action_set=[])
@@ -162,7 +159,7 @@ def test_parallel_dispatch_records_sibling_tool_calls() -> None:
     recorder, storage = _build_recorder_and_storage(budget, task)
 
     agent = _ScriptedParallel(n_actions=4, sleep_ms=20)
-    asyncio.run(agent.run(initial_obs=Observation(), toolbox=task.tool, recorder=recorder))
+    asyncio.run(agent.run(initial_obs=Observation(), toolbox=as_async(task.tool), recorder=recorder))
 
     # One AgentEvent + 4 sibling ToolCallEvents + a graceful-stop
     # AgentEvent (the second step returned empty actions).
@@ -188,7 +185,7 @@ def test_parallel_dispatch_is_faster_than_serial() -> None:
 
     agent = _ScriptedParallel(n_actions=4, sleep_ms=50)
     start = time.time()
-    asyncio.run(agent.run(initial_obs=Observation(), toolbox=task.tool, recorder=recorder))
+    asyncio.run(agent.run(initial_obs=Observation(), toolbox=as_async(task.tool), recorder=recorder))
     elapsed = time.time() - start
     # Serial: 4 × 50ms = 200ms.  Parallel: ~50ms + overhead.
     assert elapsed < 0.13, f"parallel dispatch took {elapsed:.3f}s — slower than expected"
@@ -197,7 +194,6 @@ def test_parallel_dispatch_is_faster_than_serial() -> None:
 def test_budget_still_fires_across_parallel_calls() -> None:
     """Budget.max_tool_calls counts across parallel dispatch too —
     each MonitoredTool.execute_action bumps the counter."""
-    from cube_harness.tool import BudgetExceeded
 
     task = _FakeTask()
     # max_tool_calls=2 — the agent fires 4 in one turn; the 3rd should
@@ -208,7 +204,7 @@ def test_budget_still_fires_across_parallel_calls() -> None:
     agent = _ScriptedParallel(n_actions=4, sleep_ms=10)
     raised: list[BaseException] = []
     try:
-        asyncio.run(agent.run(initial_obs=Observation(), toolbox=task.tool, recorder=recorder))
+        asyncio.run(agent.run(initial_obs=Observation(), toolbox=as_async(task.tool), recorder=recorder))
     except BaseException as e:  # noqa: BLE001
         raised.append(e)
     assert any(isinstance(e, BudgetExceeded) for e in raised)

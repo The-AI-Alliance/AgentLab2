@@ -225,6 +225,38 @@ class TestTrajectoryViewCrashedMidRun:
         assert view.end_time is None
 
 
+class TestTrajectoryViewLegacyDecodePreservesObs:
+    """Regression: `_step_to_event` used to construct ToolCallEvent
+    with `output=step.output`, which TypedBaseModel's default
+    `extra="ignore"` silently dropped — every legacy tool-call event
+    came back with an empty Observation() and error=None. Fixed in
+    PR #386 review pass; this test guards it."""
+
+    def test_legacy_obs_preserved_through_decode(self, tmp_path) -> None:
+        from cube_harness.storage import _serialize_step
+
+        storage = FileStorage(tmp_path)
+        meta = TrajectoryMetadata(id="legacy_v2")
+        storage.save_metadata(meta)
+
+        ep_dir = storage._episode_dir("legacy_v2")
+        steps_dir = ep_dir / "steps"
+        steps_dir.mkdir()
+        # Legacy obs step with a distinctive payload — empty Observation
+        # would not contain this text.
+        obs_step = TrajectoryStep(
+            output=EnvironmentOutput(obs=Observation.from_text("distinctive-legacy-payload"), reward=0.5),
+        )
+        (steps_dir / "000_obs.msgpack.zst").write_bytes(_serialize_step(obs_step))
+
+        view = storage.load_episode("legacy_v2")
+        ev = view[0]
+        assert isinstance(ev.output, ToolCallEvent)
+        # The actual data has to round-trip — not blank.
+        assert ev.output.obs.contents
+        assert ev.output.obs.contents[0].data == "distinctive-legacy-payload"
+
+
 class TestTrajectoryViewLegacyStepsLayout:
     def test_v2_steps_only_layout_synthesizes_events(self, tmp_path) -> None:
         """Old V2 episodes that only have `steps/` (no `events/`) load
