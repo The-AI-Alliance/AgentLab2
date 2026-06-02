@@ -53,21 +53,41 @@ EXPERIMENT_RECORD_FILENAME = "experiment_record.json"
 # walk in _imported_distributions() misses them. The walker is the primary
 # capture mechanism — this list is a small backstop for the harness invariants
 # every run must surface.
-_ALWAYS_INCLUDE_DEPENDENCIES: frozenset[str] = frozenset({"cube-harness", "cube"})
+# The installed distribution name for cube-standard is "cube-standard", NOT
+# "cube" (the import is `import cube` but `importlib.metadata.version("cube")`
+# raises PackageNotFoundError). Using the wrong name silently dropped
+# cube-standard from every recorded `dependency_versions` — direct PS-001
+# violation, since cube-standard's contracts are the most consequential
+# dependency in the whole system.
+_ALWAYS_INCLUDE_DEPENDENCIES: frozenset[str] = frozenset({"cube-harness", "cube-standard"})
 
 # Distributions whose version drift is most likely to swing scores — surfaced
 # prominently by downstream UIs (journal, EEE) instead of being buried in the
 # full list. Subset of what gets recorded; never used for filtering.
 _PRIMARY_DEPENDENCIES: frozenset[str] = frozenset(
     {
+        # Core (note: distribution is "cube-standard", not "cube" — see
+        # _ALWAYS_INCLUDE_DEPENDENCIES above).
         "cube-harness",
-        "cube",
+        "cube-standard",
+        "pydantic",
+        # LLM gateway + provider SDKs — silent retry/streaming changes here
+        # swing benchmark scores even at fixed prompts.
         "litellm",
         "openai",
         "anthropic",
+        # HTTP stack — version drift in retry/timeout/connection-pool behavior
+        # changes LLM-call success rates under flaky upstreams (well-documented
+        # in cube-harness's own session notes, e.g. tbench2-daytona-r0).
+        "httpx",
+        "urllib3",
+        "tenacity",
+        # Tokenization (affects context-window decisions, sometimes scoring).
         "tiktoken",
         "tokenizers",
-        "pydantic",
+        # Env runtimes — these only land in primary for the cubes that
+        # actually import them (set intersection with the recorded versions),
+        # so no false positives for non-browser/non-gym runs.
         "playwright",
         "browsergym-core",
         "gymnasium",
@@ -336,7 +356,7 @@ class AgentInfo(TypedBaseModel):
         description=(
             "Git SHA-1 of the installed cube-standard (`cube`) package's repo HEAD. Populated only "
             "when cube-standard is an editable/source checkout (the common case while it tracks an "
-            "unreleased branch); None for a released wheel — use dependency_versions['cube'] then."
+            "unreleased branch); None for a released wheel — use dependency_versions['cube-standard'] then."
         ),
     )
     cube_standard_git_is_dirty: bool | None = Field(

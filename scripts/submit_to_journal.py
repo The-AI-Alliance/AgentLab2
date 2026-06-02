@@ -8,9 +8,11 @@ Usage:
 
 Without ``--auto-pr`` the script writes the JSON to
 ``./journal-out/results/<cube>/<file>.json`` and prints the ``gh`` command you
-can run to open the PR by hand. With ``--auto-pr``, it clones cube-registry to
-``/tmp``, creates a branch, copies the file in, commits, pushes, and opens the
-PR via ``gh``.
+can run to open the PR by hand. With ``--auto-pr``, it forks cube-registry
+(via ``gh repo fork``, idempotent — gh reuses an existing fork), clones the
+fork to ``/tmp``, creates a branch, copies the file in, commits, pushes to
+the fork, and opens the PR against the upstream repo. Works for any GitHub
+user, not just members of The-AI-Alliance org.
 """
 
 from __future__ import annotations
@@ -109,15 +111,38 @@ def _write_record(record: dict, out_root: Path) -> Path:
 
 
 def _open_pr(record_path: Path, record: dict, branch: str) -> str:
-    """Clone cube-registry to a temp dir, copy *record_path* in, push, gh pr create."""
+    """Fork cube-registry, copy *record_path* into the fork, push, gh pr create.
+
+    Uses ``gh repo fork --clone`` so this works for any GitHub user, not just
+    members of The-AI-Alliance org. The fork is idempotent — gh detects an
+    existing user fork and reuses it. After the clone, ``origin`` points at
+    the user's fork and ``upstream`` at the canonical repo; we push to
+    ``origin`` and open the PR against ``upstream``.
+    """
     with tempfile.TemporaryDirectory(prefix="cube-registry-submit-") as tmp:
         clone_dir = Path(tmp) / "cube-registry"
+        # `gh repo fork --clone --remote` forks (if needed) and clones into
+        # the cwd's subdirectory. We feed it the parent and let gh pick the
+        # directory name. Quiet output keeps the user-visible echo clean.
         subprocess.run(
-            ["git", "clone", "--depth", "1", CUBE_REGISTRY_URL, str(clone_dir)],
+            [
+                "gh",
+                "repo",
+                "fork",
+                CUBE_REGISTRY_REPO,
+                "--clone",
+                "--remote",
+                "--clone-flags=--depth=1",
+            ],
+            cwd=tmp,
             check=True,
         )
+        # gh names the directory after the repo basename ("cube-registry").
+        # The created remotes are `origin` (the fork) and `upstream` (canonical).
+        if not clone_dir.exists():
+            raise FileNotFoundError(f"expected `gh repo fork` to create {clone_dir}; got {list(Path(tmp).iterdir())}")
+
         subprocess.run(["git", "-C", str(clone_dir), "checkout", "-b", branch], check=True)
-        # Copy the record into the clone at the expected path.
         cube_id = record["benchmark_name"]
         dst_dir = clone_dir / "results" / cube_id
         dst_dir.mkdir(parents=True, exist_ok=True)
@@ -139,7 +164,9 @@ def _open_pr(record_path: Path, record: dict, branch: str) -> str:
             ],
             check=True,
         )
+        # Push to the *fork* (origin). The canonical repo is `upstream`.
         subprocess.run(["git", "-C", str(clone_dir), "push", "-u", "origin", branch], check=True)
+
         title = f"results: {record['benchmark_name']} — {record['agent']['llm_model']}"
         body = (
             f"Adds one community evaluation result for `{record['benchmark_name']}`.\n\n"
@@ -151,6 +178,9 @@ def _open_pr(record_path: Path, record: dict, branch: str) -> str:
             f"- outcomes: {record['results']['outcomes']}\n\n"
             f"_Submitted via cube-harness `scripts/submit_to_journal.py`._"
         )
+        # `gh pr create` from inside the fork clone defaults to opening the PR
+        # against the parent (upstream) repo. We pass --repo explicitly to
+        # make the target unambiguous.
         pr = subprocess.check_output(
             [
                 "gh",

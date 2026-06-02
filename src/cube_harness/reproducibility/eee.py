@@ -32,15 +32,49 @@ def _to_string_kvs(d: dict[str, Any]) -> dict[str, str]:
     return {k: str(v) for k, v in d.items() if v is not None}
 
 
+# Curated provider-prefix → display-name mapping. `str.title()` mangles
+# common prefixes (`openai` → `Openai`, `vertex_ai` → `Vertex_Ai`,
+# `huggingface` → `Huggingface`) and doesn't model multi-segment prefixes
+# where the model's actual developer is one level deeper (e.g.
+# `openrouter/anthropic/claude-*` is an Anthropic model served via
+# OpenRouter). Keep the map small + explicit; fall back to the prefix
+# verbatim when an unknown provider appears.
+_PROVIDER_DISPLAY_NAME: dict[str, str] = {
+    "openai": "OpenAI",
+    "azure": "Azure",
+    "anthropic": "Anthropic",
+    "google": "Google",
+    "vertex_ai": "Google Vertex AI",
+    "gemini": "Google",
+    "mistral": "Mistral",
+    "cohere": "Cohere",
+    "huggingface": "HuggingFace",
+    "bedrock": "AWS Bedrock",
+    "together_ai": "Together AI",
+    "fireworks_ai": "Fireworks AI",
+    "groq": "Groq",
+    "replicate": "Replicate",
+    "ollama": "Ollama",
+}
+
+
 def _llm_developer(llm_model: str | None) -> str:
     """Best-effort extraction of the model developer from a LiteLLM-style id.
 
-    ``azure/gpt-5.4-mini`` → ``Azure``;  ``anthropic/claude-opus-4-7`` →
-    ``Anthropic``.  Falls back to ``""`` when the prefix is missing.
+    Handles the common single-prefix case (``openai/gpt-4o`` → ``OpenAI``)
+    and the routed-provider case (``openrouter/anthropic/claude-3-5`` →
+    ``Anthropic``). Falls back to the verbatim prefix when neither segment
+    matches a known provider, and to ``""`` when no prefix is present.
     """
     if not llm_model or "/" not in llm_model:
         return ""
-    return llm_model.split("/", 1)[0].title()
+    segments = llm_model.split("/")
+    # Routed prefixes (openrouter, bedrock proxy, etc.) put the actual
+    # developer in segment 1; check that first, then fall back to segment 0.
+    if len(segments) >= 3 and segments[1].lower() in _PROVIDER_DISPLAY_NAME:
+        return _PROVIDER_DISPLAY_NAME[segments[1].lower()]
+    first = segments[0].lower()
+    return _PROVIDER_DISPLAY_NAME.get(first, segments[0])
 
 
 def build_eee_record(
@@ -107,9 +141,15 @@ def build_eee_record(
     if developer:
         model_info["developer"] = developer
 
+    # `exp.agent.llm_model` can be None when the harness couldn't infer the
+    # model name from the agent config. Stringify defensively so the EEE id
+    # doesn't end up as "miniwob/None/…" (W3) — "unknown" is a clearer signal
+    # to a reader and collides less catastrophically than the literal "None".
+    llm_model_segment = exp.agent.llm_model or "unknown"
+
     record: dict[str, Any] = {
         "schema_version": EEE_SCHEMA_VERSION,
-        "evaluation_id": f"{cube_id}/{exp.agent.llm_model}/{exp.evaluation_id}",
+        "evaluation_id": f"{cube_id}/{llm_model_segment}/{exp.evaluation_id}",
         "retrieved_timestamp": str(int(exp.evaluation_timestamp)),
         "evaluation_timestamp": str(int(exp.evaluation_timestamp)),
         "source_metadata": source_metadata,

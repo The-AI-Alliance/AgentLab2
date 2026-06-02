@@ -246,6 +246,22 @@ def test_agent_info_includes_cube_harness_in_deps(mock_agent_config) -> None:
     assert "cube-harness" in info.dependency_versions
 
 
+def test_agent_info_records_cube_standard_distribution(mock_agent_config) -> None:
+    """The installed cube-standard distribution must be recorded (PS-001).
+
+    Regression test for a code-review finding: the original _ALWAYS_INCLUDE
+    listed 'cube' (the import name) instead of 'cube-standard' (the
+    distribution name), silently dropping cube-standard's version from
+    every recorded run. PR-#476 review W1.
+    """
+    info = AgentInfo.from_agent_config(mock_agent_config)
+    assert "cube-standard" in info.dependency_versions, (
+        f"cube-standard missing from recorded dependency_versions; "
+        f"recorded distributions: {sorted(info.dependency_versions)}"
+    )
+    assert "cube-standard" in info.primary_dependencies
+
+
 def test_collect_dependency_versions_excludes_drop_list() -> None:
     """The drop-list filters behaviorally-inert plumbing out of the recorded deps."""
     from cube_harness.eval_log import _AUTO_DROP_DEPENDENCIES, _collect_dependency_versions

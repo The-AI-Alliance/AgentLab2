@@ -134,17 +134,15 @@ def build_journal_record(
     derived_cube_id = cube_id or bench_name.split("[", 1)[0]
 
     # ── outcome breakdown from per-episode status.json files ───────────────
+    # `iter_episode_statuses` already dedups by (task_id, episode_id), so
+    # the per-status sum equals the number of attempted tasks. Tasks in the
+    # subset that produced no status file at all roll into n_missing.
     outcomes = Outcomes()
-    exp_result = ExperimentResult(experiment_dir)
-    seen_task_ids: set[str] = set()
-    for status in exp_result.iter_episode_statuses():
+    for status in ExperimentResult(experiment_dir).iter_episode_statuses():
         bucket = classify(status)
         setattr(outcomes, bucket, getattr(outcomes, bucket) + 1)
-        seen_task_ids.add(status.task_id)
-    # Tasks in the subset that produced no status file at all → missing.
     n_total = exp.benchmark_subset.n_tasks
-    n_missing_no_file = max(0, n_total - outcomes.total())
-    outcomes.n_missing += n_missing_no_file
+    outcomes.n_missing += max(0, n_total - outcomes.total())
 
     # ── aggregate score + uncertainty from per-episode records ─────────────
     scores = [ep.score for ep in episodes]

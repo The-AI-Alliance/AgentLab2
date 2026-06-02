@@ -234,6 +234,50 @@ class TestBuildEEERecord:
         record = build_eee_record(populated_exp_dir)
         assert record["model_info"]["developer"] == "Azure"
 
+
+class TestProviderPrefixMapping:
+    """Coverage for the explicit prefix → display-name table (W4)."""
+
+    @pytest.mark.parametrize(
+        "llm_model,expected",
+        [
+            ("openai/gpt-4o", "OpenAI"),  # was "Openai"
+            ("azure/gpt-5.4-mini", "Azure"),
+            ("anthropic/claude-opus-4-7", "Anthropic"),
+            ("vertex_ai/gemini-2.0", "Google Vertex AI"),  # was "Vertex_Ai"
+            ("huggingface/llama", "HuggingFace"),  # was "Huggingface"
+            ("bedrock/anthropic.claude-3-5", "AWS Bedrock"),  # was "Bedrock"
+            ("openrouter/anthropic/claude-3-5-sonnet", "Anthropic"),  # 2-deep routing
+            ("together_ai/llama", "Together AI"),
+            ("groq/llama-3-70b", "Groq"),
+            ("nonexistent_provider/model", "nonexistent_provider"),  # fallback
+            ("", ""),
+            ("no-slash-model", ""),
+        ],
+    )
+    def test_llm_developer_mapping(self, llm_model: str, expected: str) -> None:
+        from cube_harness.reproducibility.eee import _llm_developer
+
+        assert _llm_developer(llm_model) == expected
+
+
+class TestEEEEvaluationIdNoneSafety:
+    """Regression for W3: f"{None}" formatting in evaluation_id."""
+
+    def test_none_llm_model_does_not_appear_as_literal_None(self, populated_exp_dir: Path) -> None:
+        # Reload + null out llm_model on disk to simulate the bad path.
+        import json as _json
+
+        rec_path = populated_exp_dir / "experiment_record.json"
+        data = _json.loads(rec_path.read_text())
+        data["agent"]["llm_model"] = None
+        rec_path.write_text(_json.dumps(data))
+
+        record = build_eee_record(populated_exp_dir)
+        eid = record["evaluation_id"]
+        assert "/None/" not in eid, f"literal 'None' leaked into EEE id: {eid!r}"
+        assert "/unknown/" in eid, f"expected 'unknown' fallback, got: {eid!r}"
+
     def test_evaluation_results_has_one_entry_with_score_and_uncertainty(self, populated_exp_dir: Path) -> None:
         record = build_eee_record(populated_exp_dir)
         results = record["evaluation_results"]
