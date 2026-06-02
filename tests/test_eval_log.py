@@ -234,6 +234,37 @@ def test_agent_info_from_agent_config_basic(mock_agent_config) -> None:
     assert isinstance(info.framework_version, str)
 
 
+def test_agent_info_primary_dependencies_subset_of_versions(mock_agent_config) -> None:
+    """primary_dependencies must always be a subset of the recorded versions dict."""
+    info = AgentInfo.from_agent_config(mock_agent_config)
+    assert set(info.primary_dependencies).issubset(info.dependency_versions)
+
+
+def test_agent_info_includes_cube_harness_in_deps(mock_agent_config) -> None:
+    """cube-harness is in _ALWAYS_INCLUDE — must appear even if sys.modules walk fails."""
+    info = AgentInfo.from_agent_config(mock_agent_config)
+    assert "cube-harness" in info.dependency_versions
+
+
+def test_collect_dependency_versions_excludes_drop_list() -> None:
+    """The drop-list filters behaviorally-inert plumbing out of the recorded deps."""
+    from cube_harness.eval_log import _AUTO_DROP_DEPENDENCIES, _collect_dependency_versions
+
+    versions, _ = _collect_dependency_versions()
+    assert set(versions).isdisjoint(_AUTO_DROP_DEPENDENCIES), (
+        f"drop-list leak: {set(versions) & _AUTO_DROP_DEPENDENCIES}"
+    )
+
+
+def test_collect_dependency_versions_primary_is_marked() -> None:
+    """primary_names only contains distributions present in _PRIMARY_DEPENDENCIES AND installed."""
+    from cube_harness.eval_log import _PRIMARY_DEPENDENCIES, _collect_dependency_versions
+
+    versions, primary = _collect_dependency_versions()
+    assert set(primary).issubset(_PRIMARY_DEPENDENCIES)
+    assert set(primary).issubset(versions)
+
+
 def test_agent_info_captures_cube_standard_git(mock_agent_config) -> None:
     info = AgentInfo.from_agent_config(mock_agent_config)
     # Populated only for an editable/source cube-standard checkout; None for a

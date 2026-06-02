@@ -172,6 +172,8 @@ def build_journal_record(
     # sending null sentinels we don't actually have.
     if exp.agent.dependency_versions:
         agent_dict["dependency_versions"] = exp.agent.dependency_versions
+    if exp.agent.primary_dependencies:
+        agent_dict["primary_dependencies"] = exp.agent.primary_dependencies
     if exp.agent.git_remote_url:
         agent_dict["git_remote_url"] = exp.agent.git_remote_url
     if exp.agent.git_is_dirty is not None:
