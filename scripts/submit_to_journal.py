@@ -19,6 +19,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Annotated
@@ -33,6 +34,56 @@ from cube_harness.reproducibility import (
 
 CUBE_REGISTRY_REPO = "The-AI-Alliance/cube-registry"
 CUBE_REGISTRY_URL = f"https://github.com/{CUBE_REGISTRY_REPO}.git"
+
+# The framing wall — every code path that produces a journal record sees this
+# before any actual work happens. Mirrors the amber callout rendered on each
+# cube's registry page. Edit both at the same time if you change the wording.
+_LEADERBOARD_DISCLAIMER = """\
+╔══════════════════════════════════════════════════════════════════════════╗
+║  REPRODUCIBILITY JOURNAL  —  NOT A LEADERBOARD                            ║
+╠══════════════════════════════════════════════════════════════════════════╣
+║                                                                          ║
+║  You're about to submit an evaluation result to the cube-registry        ║
+║  community journal.                                                      ║
+║                                                                          ║
+║  This is for publishing REFERENCE values — to let others detect drift    ║
+║  across infrastructures, cube versions, and package versions.            ║
+║                                                                          ║
+║  This is NOT a place to publish a new agent or fine-tune to "win" the    ║
+║  benchmark. There is no ranking. Submissions are self-reported and       ║
+║  not independently verified.                                             ║
+║                                                                          ║
+║  Want to showcase a new agent or model? Use ATLAS / EEE / your own       ║
+║  benchmark page instead.                                                 ║
+║                                                                          ║
+╚══════════════════════════════════════════════════════════════════════════╝
+"""
+
+
+def _confirm_not_a_leaderboard(*, acknowledged: bool) -> None:
+    """Show the framing wall and require explicit confirmation.
+
+    The framing matters more than the data — the registry journal's value
+    depends on submitters understanding it's not a competition. *acknowledged*
+    is true when the caller passed ``--i-understand-this-is-not-a-leaderboard``
+    (skips the prompt; the flag name is itself the friction). On a non-TTY
+    stdin (CI / pipes / nohup), refuse without that flag rather than auto-
+    answering yes — accidental scripted submissions would defeat the point.
+    """
+    typer.echo(_LEADERBOARD_DISCLAIMER)
+    if acknowledged:
+        typer.echo("Acknowledgement flag set — proceeding.")
+        return
+    if not sys.stdin.isatty():
+        typer.echo(
+            "Non-interactive stdin and no --i-understand-this-is-not-a-leaderboard flag — refusing.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+    answer = typer.prompt("Continue with submission? [y/N]", default="N", show_default=False)
+    if answer.strip().lower() not in {"y", "yes"}:
+        typer.echo("Aborted — no record written.")
+        raise typer.Exit(code=1)
 
 
 def _git_user_handle() -> str:
@@ -149,8 +200,17 @@ def main(
             help="Clone cube-registry, commit the record on a fresh branch, push, and open the PR via gh.",
         ),
     ] = False,
+    i_understand_this_is_not_a_leaderboard: Annotated[
+        bool,
+        typer.Option(
+            "--i-understand-this-is-not-a-leaderboard",
+            help="Acknowledge the framing wall and skip the interactive prompt. "
+            "The flag name is deliberately verbose — reading it IS the friction.",
+        ),
+    ] = False,
 ) -> None:
     """Build a cube-registry community-journal record and (optionally) open a PR."""
+    _confirm_not_a_leaderboard(acknowledged=i_understand_this_is_not_a_leaderboard)
     submitter = submitter or _git_user_handle()
     typer.echo(f"submitter: {submitter}")
     typer.echo(f"experiment_dir: {experiment_dir}")
