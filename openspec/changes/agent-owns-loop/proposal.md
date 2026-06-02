@@ -195,16 +195,17 @@ class Agent(ABC):
     async def run(
         self,
         initial_obs: Observation,
-        toolbox: Toolbox,                  # composed: task's monitored tools + agent-own tools
+        toolbox: AbstractAsyncTool,        # always async; sync tools wrapped at the Episode boundary
         recorder: TurnRecorder,
     ) -> None:
         """Default impl drives a one-action-per-call loop on top of self.step.
 
         From the agent's POV the only environment surface is
-        `toolbox.execute_action(action) -> Observation | StepError`.
-        The toolbox is opaque: tasks' actions and the agent's own
-        tools (memory, scratchpad) live side-by-side. Dispatch by
-        action name routes each call automatically.
+        `await toolbox.execute_action(action) -> Observation | StepError`.
+        Episode applies `as_async(task.tool)` before invoking this so the
+        toolbox is always `AbstractAsyncTool`-shaped — sync underlying
+        tools dispatch via `asyncio.to_thread` inside the wrapper. Agent
+        code has no sync/async branch.
 
         Termination:
           - `self.step` returns empty actions (graceful done).
@@ -224,6 +225,10 @@ class Agent(ABC):
                     return
                 obs = result
 ```
+
+Sync-only agent authors don't see this — they override `step()` only
+and inherit `Agent.run`, never writing async. The async-uniform
+toolbox is purely for the `run()`-override path.
 
 Agents that want parallel tool calls override `run()` and call the
 toolbox directly:

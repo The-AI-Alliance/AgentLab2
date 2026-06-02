@@ -706,6 +706,9 @@ class FileStorage:
         self.save_metadata(meta)
 
     def save_step(self, step: TrajectoryStep, trajectory_id: str, step_num: int) -> None:
+        """Legacy V2 step writer. Pair to `save_trajectory`. New code
+        streams via `save_event(event, trajectory_id)` instead — same
+        removal target as `save_trajectory`."""
         ep_dir = self._episode_dir(trajectory_id)
         if not ep_dir.exists():
             raise ValueError(f"Episode directory does not exist: {ep_dir}. Call save_trajectory first.")
