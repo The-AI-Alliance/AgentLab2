@@ -96,11 +96,16 @@ trajectories into typed event streams.
 
 ### In
 
-- New `Agent.run(initial_obs, task, recorder) async` with a default
+- New `Agent.run(initial_obs, env_tool) async` with a default
   implementation that drives the existing `step()`-based loop. Sync agents
-  keep working. The agent receives the live `task` (well-defined
-  cube-standard interface) and a telemetry sink; `task.toolbox` is already
-  wired with monitored wrappers by `Episode`.
+  keep working. The agent receives the env-facing tool (`task.tool` /
+  `task.toolbox`, wrapped by `MonitoredTool` and `as_async()` at the
+  Episode boundary). The recorder is **not** a parameter — Episode
+  calls `agent.attach_recorder(recorder)` before `run()`. Recording
+  happens automatically: LLM calls auto-emit `LLMCallEvent`
+  (`LLM.attach_recorder` + `LLM.call(prompt, tag)`), tool dispatches
+  auto-emit `ToolCallEvent` (MonitoredTool). The agent never touches
+  the recorder; `self._recorder.budget` is available for introspection.
 - New `MonitoredTool` / `MonitoredToolbox` wrappers in cube-harness that
   **subclass `cube.tool.Tool` / `AsyncTool` with the same `execute_action`
   signature** — drop-in replacements, mixable in a `Toolbox` alongside
@@ -111,15 +116,19 @@ trajectories into typed event streams.
   together with the `openspec/specs/tool/` spec layer; this RFC re-creates
   the layer around `MonitoredTool`. Budget enforcement lives in
   `MonitoredTool` (raises `BudgetExceeded`).
-- New trajectory event model: `AgentEvent`, `ToolCallEvent`, `EvaluationEvent`,
-  replacing the binary `EnvironmentOutput | AgentOutput` union. Alternation
-  invariant removed.
-- `TurnRecorder` is the agent's outbound telemetry sink. The agent calls
-  methods on it (LLM calls, thoughts, response text, profiling, agent
-  errors) — the toolbox can't observe these. `TurnRecorder` exposes both a
-  coarse API (`record(agent_output)`, one call per turn) and a granular API
-  (`begin_turn() / add_*`) for streaming agents. Replaces the original
-  `LoopContext`.
+- New trajectory event model: `LLMCallEvent` (one event per LLM API call),
+  `ToolCallEvent` (one per tool dispatch, carries the full `Action`),
+  `EvaluationEvent` (step-wise or terminal), `AgentErrorEvent`
+  (Episode-level failure). Replaces the binary `EnvironmentOutput | AgentOutput`
+  union AND the prior batched `AgentEvent`. Alternation invariant removed.
+- `TurnRecorder` is the trajectory's event sink — no longer an
+  agent-facing API. Built by Episode; producers (LLM, MonitoredTool)
+  emit through their `attach_recorder` hooks. The recorder forwards
+  to storage + summary; future sinks (OTel, RL HTTP) plug in via
+  `RecorderConfig` on `EpisodeConfig`. The legacy
+  `record(agent_output)` / `begin_turn()` / `Turn` / `add_*` surface
+  was dropped in favor of producer auto-emit (cleaner UX, streaming-
+  friendly, no batched flush boundaries).
 - Defensive episode finalization: `Episode` wraps `agent.run` in a
   `try/except BaseException`, then runs `task.evaluate()`, persists final
   trajectory, and updates the experiment summary — regardless of how the agent
@@ -192,11 +201,18 @@ trajectories into typed event streams.
 ```python
 class Agent(ABC):
     def step(self, obs: Observation) -> AgentOutput: ...   # unchanged
+
+    def attach_recorder(self, recorder: TurnRecorder) -> None:
+        """Stash on self; subclasses override to propagate to held LLMs.
+        Episode calls this before `run()`, so `self._recorder` is set
+        for the duration of the loop (used by Genny.step to read
+        `self._recorder.budget` for graceful self-stop / prompt injection)."""
+        self._recorder = recorder
+
     async def run(
         self,
         initial_obs: Observation,
         env_tool: AbstractAsyncTool,       # always async; sync tools wrapped at the Episode boundary
-        recorder: TurnRecorder,
     ) -> None:
         """Default impl drives a one-action-per-call loop on top of self.step.
 
@@ -207,16 +223,23 @@ class Agent(ABC):
         tools dispatch via `asyncio.to_thread` inside the wrapper. Agent
         code has no sync/async branch.
 
+        The recorder is NOT a parameter. Episode calls
+        `agent.attach_recorder(recorder)` BEFORE `run()`. Recording
+        happens automatically: LLM calls auto-emit `LLMCallEvent`
+        (via `LLM.attach_recorder`), tool dispatches auto-emit
+        `ToolCallEvent` (via `MonitoredTool`). The agent never touches
+        the recorder directly.
+
         Termination:
           - `self.step` returns empty actions (graceful done).
           - `TaskDone` (BaseException) raised by MonitoredTool — task
             finished or agent emitted STOP_ACTION. Propagates to Episode.
-          - `BudgetExceeded` (BaseException) raised by MonitoredTool.
+          - `BudgetExceeded` (BaseException) raised by MonitoredTool or
+            by `recorder.on_llm_call` after the cap is crossed.
         """
         obs = initial_obs
         while True:
             agent_output = await asyncio.to_thread(self.step, obs)
-            recorder.record(agent_output)
             if not agent_output.actions and not agent_output.error:
                 return  # graceful done
             for action in agent_output.actions:
@@ -235,12 +258,12 @@ Agents that want parallel tool calls override `run()` and call
 ```python
 results = await asyncio.gather(*(
     env_tool.execute_action(a) for a in actions
-))  # each is Observation | StepError; monitoring fires inside each call
+))  # each is Observation | StepError; ToolCallEvent + budget bump fire inside each call
 ```
 
 Agents that don't override get the one-at-a-time default for free.
 
-The three parameters:
+The two parameters:
 - **`initial_obs`** — the observation from `task.reset()`, supplied by `Episode`.
 - **`env_tool`** — the task's tool (a `cube.tool.Toolbox` or single
   `AbstractTool`), with `MonitoredTool` wrappers installed in place by
@@ -254,8 +277,12 @@ The three parameters:
   them as instance fields and compose locally if they want a unified
   dispatch: `combined = Toolbox([env_tool, self.memory])`. The framework
   doesn't have a hook for this — agents have full Python.
-- **`recorder`** — what the agent reports out. Telemetry-only. Agents
-  emit LLM calls, thoughts, response text, profiling.
+
+The recorder is attached separately via `agent.attach_recorder(recorder)`
+before `run()`. Subclasses override `attach_recorder` to propagate
+the recorder down to held LLMs (so `LLM.call(prompt, tag)` auto-emits
+`LLMCallEvent`). The base implementation just stashes it on
+`self._recorder` for budget introspection.
 
 ### User experience: writing an agent
 
@@ -302,23 +329,22 @@ underlying tools at the boundary so your code has no branch.
 
 ```python
 class ParallelAgent(Agent):
-    async def run(self, initial_obs, env_tool, recorder):
+    def attach_recorder(self, recorder):
+        super().attach_recorder(recorder)
+        self.llm.attach_recorder(recorder)   # so every `self.llm.call()` auto-emits
+
+    async def run(self, initial_obs, env_tool):
         obs = initial_obs
         while True:
-            with recorder.begin_turn() as turn:
-                call = await self.llm.acall(self._prompt(obs))
-                turn.add_llm_call(call)
-                actions = self._parse(call.output.content)
-                for a in actions:
-                    turn.add_action(a)
-
+            call = await self.llm.acall(self._prompt(obs))   # auto-emits LLMCallEvent
+            actions = self._parse(call.output.content)
             if not actions:
                 return  # graceful done
 
             # Parallel dispatch — N concurrent tool calls. Each lands as
-            # a ToolCallEvent sharing the parent turn's id as turn_id;
-            # XRay renders them as horizontal sibling lanes. Budget +
-            # storage hooks fire inside each MonitoredTool.execute_action.
+            # a ToolCallEvent sharing the parent LLMCallEvent's id as
+            # turn_id; XRay renders them as horizontal sibling lanes.
+            # Budget + storage hooks fire inside each MonitoredTool.
             # TaskDone / BudgetExceeded propagate through asyncio.gather
             # to Episode's outer except.
             results = await asyncio.gather(*(
@@ -327,10 +353,11 @@ class ParallelAgent(Agent):
             obs = self._merge(results)
 ```
 
-`GennyParallel` follows this shape. ~25 lines for the whole loop. No
-`task` reference, no `task.reset` / `task.evaluate` / `task.close` —
-Episode owns lifecycle; MonitoredTool absorbs `Task.step` semantics
-(STOP_ACTION, obs_postprocess, validate_per_step, finished()).
+`GennyParallel` follows this shape. ~10 lines for the whole loop. No
+`task` reference, no `task.reset` / `task.evaluate` / `task.close`,
+no `recorder` reference inside the loop — Episode owns lifecycle;
+MonitoredTool absorbs `Task.step` semantics (STOP_ACTION,
+obs_postprocess, validate_per_step, finished()); LLM auto-emits.
 
 #### Agent-private tools
 
@@ -346,55 +373,75 @@ class AgentWithMemory(Agent):
         self.llm = llm
         self.memory = MemoryTool()  # private; never reaches Episode
 
-    async def run(self, initial_obs, env_tool, recorder):
+    def attach_recorder(self, recorder):
+        super().attach_recorder(recorder)
+        self.llm.attach_recorder(recorder)
+        # self.memory is intentionally NOT attached — agent-private
+        # tools don't appear in the trajectory.
+
+    async def run(self, initial_obs, env_tool):
         combined = Toolbox([env_tool, as_async(self.memory)])
         # ...same loop as above; `remember` and `bash` dispatch through
-        # the same call site. Agent-owned tools don't appear in the
-        # trajectory and don't trigger task.finished() polling.
+        # the same call site. Only env_tool's dispatches emit
+        # ToolCallEvents; memory calls don't.
 ```
 
 ### `TurnRecorder`
 
+The recorder is no longer an agent-facing API. It is a sink:
+event producers (LLM, MonitoredTool) emit through it; the recorder
+forwards to storage + summary (and, in Phase 2, to OTel / RL HTTP
+sinks via `RecorderConfig`).
+
 ```python
 class TurnRecorder:
-    """Agent's outbound telemetry sink. Constructed by Episode, scoped
-    to one episode. Two complementary APIs."""
+    """The trajectory's event sink. Built by Episode; attached to event
+    producers via their `attach_recorder` methods."""
 
-    # --- Coarse API: one call per LLM cycle, all-at-once. ---
-    def record(self, output: AgentOutput) -> None:
-        """Emit one AgentEvent built from a complete AgentOutput.
-        The default Agent.run uses this — matches today's step-style."""
+    def __init__(
+        self,
+        trajectory_id: str,
+        storage: Storage | None,
+        summary: SummaryProcessor | None,
+        budget: Budget | None,
+    ): ...
 
-    # --- Granular API: emit data as it arrives (streaming agents). ---
-    def begin_turn(self) -> "Turn":
-        """Returns a context manager. Use when you want to add events
-        incrementally during a turn (partial LLM responses, mid-turn
-        profiling, etc.)."""
+    # --- Producer-facing hook (called by LLM.call() auto-emit). ---
+    def on_llm_call(
+        self,
+        call: LLMCall,
+        profiling: dict[str, tuple[float, float]] | None = None,
+        error: StepError | None = None,
+    ) -> str:
+        """Emit one LLMCallEvent, bump Budget (turn + LLM usage),
+        enforce caps. Returns the event id (stashed as the active
+        turn id so subsequent ToolCallEvents inherit it via
+        `parent_event_id_getter`)."""
 
-class Turn:  # __enter__ / __exit__
-    def add_llm_call(self, call: LLMCall) -> None: ...
-    def add_thought(self, text: str) -> None: ...
-    def add_response_text(self, text: str) -> None: ...
-    def add_profile(self, label: str, start: float, end: float) -> None: ...
-    def add_error(self, err: StepError) -> None: ...
-    # __exit__ flushes the accumulated fields as one AgentEvent.
+    # --- Episode-only boundary helpers (not called by agents). ---
+    def record_reset(self, initial: EnvironmentOutput) -> None: ...
+    def record_failure(self, exc: BaseException) -> None: ...     # → AgentErrorEvent
+    def record_evaluation(self, reward: float, info: dict | None = None, *,
+                          is_terminal: bool = True) -> None: ...
+    def current_turn_id(self) -> str: ...                          # for MonitoredTool
+
+    @property
+    def budget(self) -> Budget: ...                                # for agent introspection
 ```
 
-Why two surfaces:
+The legacy `record(AgentOutput)` / `begin_turn() / Turn / add_*`
+surface was dropped in favor of producer auto-emit. Less ceremony,
+streaming-friendly (no batched turn boundaries to flush), and the
+RL HTTP sink can subscribe to a clean stream of events.
 
-- **Coarse `record(output)`** is what today's `Agent.step`-style code wants.
-  Structurally enforces "every turn emits a complete `AgentEvent`" — hard to
-  forget fields. The simple agent path stays simple.
-- **Granular `begin_turn() / add_*`** is what streaming agents (Pi-style,
-  Claude Code, Codex) need. LLM responses arrive in chunks; profiling spans
-  open and close at different points; the agent emits as data lands.
+`RecorderConfig` is a forward seam on `EpisodeConfig` for sink
+configuration (OTel, RL HTTP, custom). Phase 1 ships an empty
+`RecorderConfig` with FileStorage + SummaryProcessor always-on; Phase
+2 adds fields like `enable_otel: bool` and `rl_http_endpoint: str | None`.
 
-Internally, `record(output)` is a thin wrapper around `begin_turn()` — one
-implementation, two surfaces. No double-maintenance.
-
-Cross-turn state (trajectory, storage, summary) lives on `Episode`
-and is bound into the `TurnRecorder` at construction. Agents never read or
-write that state directly.
+Cross-turn state (trajectory_id, storage, summary, budget) lives on
+`Episode` and is bound into the `TurnRecorder` at construction.
+Agents never read or write that state directly.
 
 ### `TaskDone` — end-of-episode signal
 
@@ -599,11 +646,21 @@ async def run(self) -> TrajectoryView:
     own_tools = [cfg.make() for cfg in self.config.agent_config.own_tool_configs]
     toolbox = Toolbox([*task.tool.tools, *own_tools]) if own_tools else task.tool
 
-    recorder = TurnRecorder(self.storage, self.summary, trajectory_id=self.id)
+    recorder = TurnRecorder(
+        trajectory_id=self.id,
+        storage=self.storage,
+        summary=self.summary,
+        budget=budget,
+    )
     try:
         initial = task.reset()
-        recorder.record_reset(initial)            # Episode-only helper on recorder
-        await self.agent.run(initial.obs, toolbox, recorder)
+        recorder.record_reset(initial)            # Episode-only helper
+        # Wire LLMs etc. to the recorder so LLM.call() auto-emits
+        # LLMCallEvent. Sub-component-aware agents (Genny, React,
+        # GenericAgent) override attach_recorder to propagate.
+        self.agent.attach_recorder(recorder)
+        env_tool = as_async(task.tool or task.toolbox)
+        await self.agent.run(initial.obs, env_tool)
     except BudgetExceeded as e:
         recorder.record_failure(e)
     except TaskDone:
@@ -636,13 +693,16 @@ elided from the pseudo-code above for clarity. This RFC does not add new
 OTel surface (no per-tool-call, no per-turn spans). The trajectory event
 stream is the harness's structured per-call/per-turn observability.
 
-The agent cannot prevent finalization. The agent receives `toolbox`
-and `recorder` — the `task` reference never leaks. The monitoring
-wrappers are installed onto `task.tool`'s leaves once, baking the
-task ref in for `Task.step`-equivalent semantics (STOP, postprocess,
-done detection, step-eval). `record_reset` / `record_failure` /
-`record_evaluation` are Episode-only helpers on `TurnRecorder` (not
-actively hidden from agents, but conventionally Episode's).
+The agent cannot prevent finalization. The agent receives only
+`env_tool` — the `task` reference never leaks, the recorder is
+attached separately. The monitoring wrappers are installed onto
+`task.tool`'s leaves once, baking the task ref in for `Task.step`-
+equivalent semantics (STOP, postprocess, done detection, step-eval).
+`record_reset` / `record_failure` / `record_evaluation` are
+Episode-only helpers on `TurnRecorder` (not actively hidden from
+agents, but conventionally Episode's). `on_llm_call` is the only
+producer-facing entrypoint — called automatically by `LLM.call(...)`
+when a recorder is attached.
 
 Note: `task.evaluate()` is called with no obs in `finally`. Tasks that need
 the final obs to evaluate must track it internally (cube-standard's `Task`
@@ -652,19 +712,17 @@ already does for the gym path). This avoids the harness having to chase the
 ### Event-stream trajectory
 
 ```python
-class AgentEvent(TypedBaseModel):
-    id: str                            # for ToolCallEvent.agent_event_id back-reference
-    actions: list[Action]              # intended tool calls (each has Action.id)
-    llm_calls: list[LLMCall]
-    thoughts: str | None
-    response_text: str | None          # assistant's prose alongside the tool calls
+class LLMCallEvent(TypedBaseModel):
+    id: str                            # turn_id for child ToolCallEvents
+    call: LLMCall | None               # full prompt/response/usage (None on legacy decode only)
     profiling: dict[str, tuple[float, float]]
     error: StepError | None
 
 class ToolCallEvent(TypedBaseModel):
     id: str                            # for step-wise EvaluationEvent.parent_event_id back-ref
-    parent_event_id: str               # the parent AgentEvent.id
-    action_id: str | None              # references one of agent_event.actions[i].id
+    parent_event_id: str               # the parent LLMCallEvent.id (or RESET sentinel)
+    action_id: str | None              # echoes Action.id
+    action: Action | None              # full action payload — self-contained trajectory
     obs: Observation                   # what came back to the agent (empty when error)
     error: StepError | None            # set when execute_action returned a StepError
     turn_id: str                       # groups sibling parallel calls
@@ -675,8 +733,12 @@ class EvaluationEvent(TypedBaseModel):
     is_terminal: bool                  # True iff this is Episode's final evaluate
     parent_event_id: str | None        # for step-wise: the ToolCallEvent.id; None for terminal
 
+class AgentErrorEvent(TypedBaseModel):
+    id: str
+    error: StepError                   # Episode-level failure not tied to a specific call
+
 class TrajectoryEvent(TypedBaseModel):
-    output: AgentEvent | ToolCallEvent | EvaluationEvent
+    output: LLMCallEvent | ToolCallEvent | EvaluationEvent | AgentErrorEvent
     start_time: float
     end_time: float
 ```
@@ -686,9 +748,11 @@ Two replacement abstractions take its place — see *Storage & Loaders* below.
 
 Why this shape:
 
-- **`AgentEvent` carries both the actions list and the assistant's response
-  text**, so XRay can display what the agent "said" alongside what it fired —
-  even when several tool calls land in parallel.
+- **One `LLMCallEvent` per LLM API call**, not per "turn" — collapses the
+  prior batched `AgentEvent`. Streaming-friendly: each event lands as soon
+  as the LLM call completes; no batched flush at turn boundaries. An agent
+  that makes 3 LLM calls per step (Genny: compact + summarize + act) emits
+  3 LLMCallEvents; XRay groups them by `turn_id`.
 - **`ToolCallEvent` carries only `obs` + `error`** — the agent's view of
   what came back. `reward` / `done` / `info` are NOT here:
   - `done` is signalled by the `TaskDone(BaseException)` exception

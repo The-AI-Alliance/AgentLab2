@@ -50,27 +50,33 @@ load-upgrade path but is not exported from `cube_harness.core`.
 
 ```python
 # In cube_harness.core
-class AgentEvent(TypedBaseModel):
-    id: str                            # references target for ToolCallEvent.agent_event_id
-    actions: list[Action]              # intended tool calls; each Action.id is the link
-    llm_calls: list[LLMCall]
-    thoughts: str | None
-    response_text: str | None          # assistant prose alongside tool calls
+class LLMCallEvent(TypedBaseModel):
+    id: str                            # turn_id for child ToolCallEvents
+    call: LLMCall | None               # full prompt/response/usage (None on legacy decode only)
     profiling: dict[str, tuple[float, float]]
     error: StepError | None
 
 class ToolCallEvent(TypedBaseModel):
-    agent_event_id: str                # parent AgentEvent.id
-    action_id: str                     # AgentEvent.actions[i].id
-    output: EnvironmentOutput          # obs / reward / done / info / error
+    id: str                            # for step-wise EvaluationEvent.parent_event_id back-ref
+    parent_event_id: str               # parent LLMCallEvent.id (or RESET sentinel)
+    action_id: str | None              # echoes Action.id
+    action: Action | None              # full action payload — self-contained trajectory
+    obs: Observation                   # what came back to the agent (empty when error)
+    error: StepError | None            # set when execute_action returned a StepError
     turn_id: str                       # groups parallel siblings
 
 class EvaluationEvent(TypedBaseModel):
     reward: float
     info: dict
+    is_terminal: bool
+    parent_event_id: str | None        # ToolCallEvent.id for step-wise; None for terminal
+
+class AgentErrorEvent(TypedBaseModel):
+    id: str
+    error: StepError                   # Episode-level failure not tied to a call
 
 class TrajectoryEvent(TypedBaseModel):
-    output: AgentEvent | ToolCallEvent | EvaluationEvent
+    output: LLMCallEvent | ToolCallEvent | EvaluationEvent | AgentErrorEvent
     start_time: float
     end_time: float
 
@@ -124,14 +130,15 @@ class TrajectoryView:
 
 1. Events are ordered by `start_time` and represent the agent's interaction
    with the task. They are **not** required to alternate.
-2. Every `ToolCallEvent.agent_event_id` and `ToolCallEvent.action_id` must
-   resolve to an `AgentEvent` and one of its `actions` entries appearing
-   earlier in the trajectory.
-3. At most one `EvaluationEvent` per trajectory; if present, it is the last
-   event.
-4. `AgentEvent.id` is unique within a trajectory.
-5. `turn_id` is unique per `AgentEvent`; all `ToolCallEvent`s spawned from one
-   `AgentEvent` share the same `turn_id`.
+2. Every `ToolCallEvent.parent_event_id` must resolve to either a preceding
+   `LLMCallEvent.id` or the `RESET` sentinel (for tool calls fired before
+   any LLM call, e.g. the synthetic reset event).
+3. `EvaluationEvent` may appear step-wise (after `MonitoredTool` dispatch
+   when `task.validate_per_step=True`) AND once terminal (`is_terminal=True`,
+   emitted by Episode in `finally`).
+4. `LLMCallEvent.id` is unique within a trajectory.
+5. `turn_id` equals the parent `LLMCallEvent.id`; all `ToolCallEvent`s
+   spawned from one LLM turn share that `turn_id`.
 6. `TrajectoryView` never accumulates the full event list in memory; the
    per-view cache is bounded by accessed events and is freed when the
    view is GC'd.
@@ -141,12 +148,14 @@ class TrajectoryView:
 - The legacy `EnvironmentOutput | AgentOutput` union is removed from
   `TrajectoryEvent.output`. Callers that pattern-match on those types must
   switch to the new event types.
-- `AgentOutput` itself remains as the return type of `Agent.step()` — it is
-  internally converted into an `AgentEvent` by `TurnRecorder.record()`.
+- `AgentOutput` is now a minimal `{actions, error}` payload — what
+  `Agent.step()` returns. LLM calls auto-emit `LLMCallEvent` via
+  `LLM.attach_recorder`/`LLM.call(...)` — `AgentOutput` no longer
+  bundles `llm_calls` / `thoughts` / `response_text` / `profiling`.
 - Migrating from `traj.steps[i]` to `view[i]` changes element types: the
   former gave `TrajectoryStep`, the latter gives `TrajectoryEvent`. Inspect
-  `event.output` to discriminate `AgentEvent` / `ToolCallEvent` /
-  `EvaluationEvent`.
+  `event.output` to discriminate `LLMCallEvent` / `ToolCallEvent` /
+  `EvaluationEvent` / `AgentErrorEvent`.
 - The view's internal cache is unbounded *within one episode*. Callers
   that iterate every event of a SWE-bench-scale episode and then keep
   the view alive will hold all events in memory — drop the view when
@@ -160,14 +169,26 @@ class TrajectoryView:
 
 ```python
 class Agent(ABC):
-    def step(self, obs: Observation) -> AgentOutput        # unchanged
+    def step(self, obs: Observation) -> AgentOutput        # unchanged shape: {actions, error}
+
+    def attach_recorder(self, recorder: "TurnRecorder") -> None:
+        """Stash on self._recorder; subclasses override to propagate
+        to held LLMs so LLM.call(...) auto-emits LLMCallEvent."""
+
     async def run(
         self,
         initial_obs: Observation,
         env_tool: AbstractAsyncTool,               # always async-shaped; see "async-uniform" below
-        recorder: "TurnRecorder",
     ) -> None
 ```
+
+**No recorder parameter.** `Episode` calls
+`agent.attach_recorder(recorder)` BEFORE `run()`. Recording happens
+automatically: `LLM.call(prompt, tag)` emits `LLMCallEvent` if its
+`_recorder` is set; `MonitoredTool.execute_action` emits `ToolCallEvent`.
+Agent code never touches the recorder directly. `self._recorder.budget`
+is available for introspection (Genny.step uses it for graceful
+self-stop).
 
 **Async-uniform env_tool.** `Agent.run`'s `env_tool` parameter is
 narrowed to `AbstractAsyncTool` (NOT `AbstractTool | AbstractAsyncTool`).
@@ -187,14 +208,15 @@ Default implementation in the base class:
 1. `obs = initial_obs`
 2. Loop:
    1. `agent_output = await asyncio.to_thread(self.step, obs)`.
-   2. `recorder.record(agent_output)`.
-   3. If `not agent_output.actions and not agent_output.error`: return.
-   4. For each action: `result = await env_tool.execute_action(action)`.
+      LLM calls inside `step()` auto-emit `LLMCallEvent` via the
+      attached recorder; the agent does NOT bundle them.
+   2. If `not agent_output.actions and not agent_output.error`: return.
+   3. For each action: `result = await env_tool.execute_action(action)`.
       May raise `TaskDone` (graceful, includes STOP_ACTION /
       `task.finished()` true) or `BudgetExceeded` — both propagate to
       `Episode`.
-   5. If `result` is `StepError`: return.
-   6. `obs = result`.
+   4. If `result` is `StepError`: return.
+   5. `obs = result`.
 
 Agents that want parallel tool calls override `run` and dispatch
 N actions via `asyncio.gather(*(env_tool.execute_action(a) for a in actions))`.
@@ -203,60 +225,63 @@ The async-uniform shape means parallel-dispatch agents (e.g.
 
 ### `TurnRecorder`
 
-Agent-facing telemetry sink, constructed by `Episode` per-episode.
+The trajectory's event sink — no longer an agent-facing API.
+Built by `Episode` per-episode; producers attach to it.
 
 ```python
 class TurnRecorder:
-    # Coarse — one call per LLM cycle, all-at-once. Default agent uses this.
-    def record(self, output: AgentOutput) -> None
-    # Granular — for streaming agents that emit incrementally.
-    def begin_turn(self) -> "Turn"
-
-class Turn:
-    # Context manager. __exit__ flushes one AgentEvent built from
-    # accumulated fields.
-    def add_llm_call(self, call: LLMCall) -> None
-    def add_thought(self, text: str) -> None
-    def add_response_text(self, text: str) -> None
-    def add_profile(self, label: str, start: float, end: float) -> None
-    def add_error(self, err: StepError) -> None
-```
-
-`record(output)` is internally implemented as a thin wrapper around
-`begin_turn()` — one underlying code path, two surfaces.
-
-#### Lossy capture path (for connectors)
-
-External-framework connectors (LangGraph, Codex CLI, A2A, …) often cannot
-break the run into per-turn `AgentEvent`s — they only expose a final
-output and aggregate usage. For these, `TurnRecorder` provides a lossy
-shortcut:
-
-```python
-class TurnRecorder:
-    def record_external_run(
+    def __init__(
         self,
-        final_text: str | None,
-        usage: Usage | None,                  # tokens, cost — best-effort
-        raw_events: list[dict] | None = None, # framework-specific stream, opaque blob
-    ) -> None:
-        """Emit one synthetic AgentEvent summarizing an external agent's run.
+        trajectory_id: str,
+        storage: Storage | None,
+        summary: SummaryProcessor | None,
+        budget: Budget | None,
+    ): ...
 
-        Use when the connector cannot decompose the agent's execution into
-        per-turn events. The synthetic AgentEvent carries the final response
-        text and the aggregated usage; `raw_events` is preserved verbatim
-        on the event for post-hoc inspection but is not interpreted by the
-        recorder or summary.
+    # Producer-facing hook called by LLM.call() auto-emit:
+    def on_llm_call(
+        self,
+        call: LLMCall,
+        profiling: dict[str, tuple[float, float]] | None = None,
+        error: StepError | None = None,
+    ) -> str                                       # returns event id (also new current_turn_id)
 
-        Connectors that CAN observe per-turn events (Pydantic AI, LangGraph,
-        OpenAI Agents SDK, Inspect AI) should use record() or begin_turn()
-        instead — record_external_run is the fallback for opaque frameworks.
-        """
+    # Episode-only boundary helpers:
+    def record_reset(self, initial: EnvironmentOutput) -> None
+    def record_failure(self, exc: BaseException) -> None        # → AgentErrorEvent
+    def record_evaluation(self, reward: float, info: dict | None = None,
+                          *, is_terminal: bool = True) -> None
+
+    # Getter consumed by MonitoredTool.parent_event_id_getter:
+    def current_turn_id(self) -> str
+
+    @property
+    def budget(self) -> Budget                                  # for agent introspection
 ```
 
-The trade-off is documented per-connector: full-visibility frameworks use
-the standard path; opaque ones use this. See *Connector taxonomy* in
-[proposal.md](proposal.md).
+`LLM.attach_recorder(recorder)` wires the LLM so every `.call()`
+auto-emits. `Agent.attach_recorder(recorder)` is overridden by agents
+that hold LLMs to propagate the wiring (`Genny`, `React`,
+`GenericAgent`). The legacy `record(AgentOutput)` / `begin_turn()` /
+`Turn` / `add_*` surface is **dropped** — producer auto-emit replaces
+it.
+
+#### `RecorderConfig` (forward seam)
+
+A pydantic `RecorderConfig` field on `EpisodeConfig` reserves the
+hook for Phase-2 sinks (OTel, RL HTTP, custom). Phase 1 ships an
+empty `RecorderConfig` — `FileStorage` + `SummaryProcessor` are
+always-on; future fields like `enable_otel: bool` and
+`rl_http_endpoint: str | None` plug in additively.
+
+#### Connector path (Phase 2)
+
+External-framework connectors (LangGraph, Codex CLI, A2A, …) that
+can't decompose the agent's execution into per-turn events emit
+synthetic `LLMCallEvent`s by calling `recorder.on_llm_call(...)`
+directly with a hand-rolled `LLMCall` (best-effort prompt/usage).
+The old lossy `record_external_run` shortcut was dropped — the
+auto-emit hook is the same path for native and connector use.
 
 ### Semantics
 
@@ -280,8 +305,11 @@ the standard path; opaque ones use this. See *Connector taxonomy* in
 2. Either `Agent.step` (sync turn) or `Agent.run` (async loop) must be
    implementable; agents that override `run` only must still provide a
    trivial `step` that raises `NotImplementedError` for clarity.
-3. Every LLM call inside `step` or `run` must be captured in the resulting
-   `AgentEvent.llm_calls` (via `recorder.record(...)` or `Turn.add_llm_call(...)`).
+3. Every LLM call inside `step` or `run` should go through
+   `LLM.call(prompt, tag)` (which auto-emits `LLMCallEvent` when a
+   recorder is attached). Agents that hold the LLM but skip
+   `attach_recorder` propagation deliberately opt those LLM calls out
+   of the trajectory.
 
 ### Contracts for implementers
 
