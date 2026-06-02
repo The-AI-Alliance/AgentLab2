@@ -28,14 +28,17 @@ from cube_harness.recipe import run
 
 agent = GENNY_CONFIGS["swe"]
 agent.llm_config = LLMConfig(model_name="gpt-5.4-mini", temperature=1.0)
-agent.budget.cost_limit = 2.0
 
+# Budget caps moved from GennyConfig to Experiment under the
+# agent-owns-loop refactor: max_steps → Budget.max_turns,
+# max_cost_usd → Budget.max_cost_usd.
 exp = Experiment(
     name="genny-swebench-verified",
     agent_config=agent,
     benchmark_config=SWEBENCH_CONFIGS["default"],
     infra=INFRA_CONFIGS["local"],
-    max_steps=agent.budget.max_actions or 150,
+    max_steps=150,
+    max_cost_usd=2.0,
 )
 
 if __name__ == "__main__":

@@ -344,12 +344,17 @@ class TurnRecorder:
             # Bump budget.turns so MonitoredTool's exhausted check fires
             # on the right boundary (one LLM turn = one increment).
             self.budget.turns += 1
-            # Bump budget.cost_usd from this turn's LLM calls so the
-            # max_cost_usd ceiling actually trips. Each LLMCall.usage.cost
-            # is the dollar cost the LiteLLM wrapper recorded for that call.
+            # Bump cost + token counters from this turn's LLM calls so
+            # max_cost_usd / max_prompt_tokens / max_completion_tokens
+            # ceilings actually trip. Mirrors what SummaryProcessor does
+            # for the per-episode summary, but feeds the live Budget so
+            # `Budget.exhausted` enforces end-to-end and `str(budget)`
+            # reports current consumption to agents that introspect it.
             for call in event.llm_calls:
                 if call.usage is not None:
                     self.budget.cost_usd += call.usage.cost
+                    self.budget.prompt_tokens += call.usage.prompt_tokens
+                    self.budget.completion_tokens += call.usage.completion_tokens
         self._append_event(TrajectoryEvent(output=event, start_time=start, end_time=end))
         # Enforce budget AFTER the flush so the AgentEvent that took us
         # past the cap is recorded before we abort the run. This

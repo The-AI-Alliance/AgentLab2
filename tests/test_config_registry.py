@@ -35,8 +35,12 @@ def test_canonical_registries_are_constructible() -> None:
 
 
 def test_validated_assignment_on_canonical_config() -> None:
+    """Mutating a config field should validate the type at assignment.
+
+    Budget caps moved off GennyConfig to Experiment/Episode; the
+    remaining mutable knob is `display_budget_every_k: int`."""
     agent = GENNY_CONFIGS["swe"]
-    agent.budget.cost_limit = 2.0  # nested ValidatedConfig
-    assert agent.budget.cost_limit == 2.0
+    agent.display_budget_every_k = 10
+    assert agent.display_budget_every_k == 10
     with pytest.raises(ValidationError):
-        agent.budget.cost_limit = "free"  # type: ignore[assignment]
+        agent.display_budget_every_k = "many"  # type: ignore[assignment]

@@ -36,6 +36,7 @@ class EpisodeConfig(TypedBaseModel):
     exp_name: str
     output_dir: Path
     max_steps: int
+    max_cost_usd: float | None = None
     task_config: TaskConfig
 
 
@@ -64,6 +65,7 @@ class Episode:
         max_steps: int,
         storage: Storage | None,
         runtime_context: RuntimeContext | None,
+        max_cost_usd: float | None = None,
     ) -> None:
         self.config = EpisodeConfig(
             id=id,
@@ -71,6 +73,7 @@ class Episode:
             exp_name=exp_name,
             output_dir=output_dir,
             max_steps=max_steps,
+            max_cost_usd=max_cost_usd,
             task_config=task_config,
         )
         self._runtime_context = runtime_context
@@ -211,7 +214,10 @@ class Episode:
                 # turn id. The shared EventCounter is what makes
                 # recorder writes and monitored-tool writes land on a
                 # single global event-numbering sequence on disk.
-                budget = Budget(max_turns=self.config.max_steps)
+                budget = Budget(
+                    max_turns=self.config.max_steps,
+                    max_cost_usd=self.config.max_cost_usd,
+                )
                 event_counter = EventCounter()
                 metadata_updates: dict = {}
                 recorder = TurnRecorder(

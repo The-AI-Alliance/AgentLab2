@@ -52,40 +52,96 @@ if TYPE_CHECKING:
 
 
 class Budget(TypedBaseModel):
-    """Per-episode resource budget enforced by `MonitoredTool` wrappers.
+    """Per-episode resource budget enforced by `MonitoredTool` + `TurnRecorder`.
 
-    Phase 1 enforces only `max_turns` (and optional `max_tool_calls` if
-    set). The cost / wallclock limits are declared so the field names are
-    stable; their enforcement lands when there's end-to-end cost
-    accounting (Phase 2).
+    Caps:
+      - `max_turns`: agent step() calls.
+      - `max_tool_calls`: monitored tool dispatches.
+      - `max_cost_usd`: cumulative LLM call cost (from `LLMCall.usage.cost`).
+      - `max_prompt_tokens` / `max_completion_tokens`: per-direction
+        cumulative token usage.
+      - `max_wallclock_s`: elapsed seconds since the Budget was created.
+
+    Counters bumped during the run:
+      - `turns` / `cost_usd` / `prompt_tokens` / `completion_tokens` —
+        by `TurnRecorder._flush_agent_event` from `AgentEvent.llm_calls`.
+      - `tool_calls` — by `MonitoredTool._record_tool_call`.
+      - `started_at` — set once at construction; elapsed time derived from it.
+
+    `Budget.exhausted` returns True iff any configured cap is at-or-past
+    its limit. `MonitoredTool` raises `BudgetExceeded(BaseException)`
+    when it is. Agents can also introspect the live budget via
+    `recorder.budget` for graceful self-stop and prompt-injection
+    ("you have X% budget left") — see `Budget.__str__`.
     """
 
     max_turns: int = 1_000
     max_tool_calls: int | None = None
     max_cost_usd: float | None = None
+    max_prompt_tokens: int | None = None
+    max_completion_tokens: int | None = None
     max_wallclock_s: float | None = None
 
     # Counters mutated in place during the run.
     turns: int = 0
     tool_calls: int = 0
     cost_usd: float = 0.0
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
     started_at: float = Field(default_factory=time.time)
 
     @property
     def exhausted(self) -> bool:
-        """True iff any configured limit (turns / tool_calls / cost /
-        wallclock) is at-or-past its cap. Checked by MonitoredTool on
-        entry to every execute_action and by TurnRecorder after every
-        AgentEvent flush."""
+        """True iff any configured cap is at-or-past its limit. Checked
+        by MonitoredTool on entry to every execute_action and by
+        TurnRecorder after every AgentEvent flush."""
         if self.turns >= self.max_turns:
             return True
         if self.max_tool_calls is not None and self.tool_calls >= self.max_tool_calls:
             return True
         if self.max_cost_usd is not None and self.cost_usd >= self.max_cost_usd:
             return True
+        if self.max_prompt_tokens is not None and self.prompt_tokens >= self.max_prompt_tokens:
+            return True
+        if self.max_completion_tokens is not None and self.completion_tokens >= self.max_completion_tokens:
+            return True
         if self.max_wallclock_s is not None and (time.time() - self.started_at) >= self.max_wallclock_s:
             return True
         return False
+
+    def __str__(self) -> str:
+        """Concise human-readable summary of budget usage — suitable for
+        injection into an LLM prompt so the agent can plan against
+        what's left. Only configured caps are listed; empty string when
+        no cap is set (no signal to convey).
+
+        Format: `"budget used: turns 34/150 (23%), cost $1.20/$5.00 (24%), tokens 1200/5000 prompt (24%), tokens 100/1000 completion (10%), 60s/300s wallclock (20%)"`
+        """
+        parts: list[str] = []
+        # max_turns has a non-None default (1000), so we always show it.
+        # Guard the zero case so a max_turns=0 (born-exhausted, used in
+        # tests) doesn't div-by-zero in the percent calc.
+        if self.max_turns > 0:
+            parts.append(f"turns {self.turns}/{self.max_turns} ({self.turns / self.max_turns * 100:.0f}%)")
+        else:
+            parts.append(f"turns {self.turns}/{self.max_turns}")
+        if self.max_tool_calls is not None:
+            pct = self.tool_calls / self.max_tool_calls * 100 if self.max_tool_calls > 0 else 0.0
+            parts.append(f"tool_calls {self.tool_calls}/{self.max_tool_calls} ({pct:.0f}%)")
+        if self.max_cost_usd is not None:
+            pct = self.cost_usd / self.max_cost_usd * 100 if self.max_cost_usd > 0 else 0.0
+            parts.append(f"cost ${self.cost_usd:.2f}/${self.max_cost_usd:.2f} ({pct:.0f}%)")
+        if self.max_prompt_tokens is not None:
+            pct = self.prompt_tokens / self.max_prompt_tokens * 100 if self.max_prompt_tokens > 0 else 0.0
+            parts.append(f"prompt_tokens {self.prompt_tokens}/{self.max_prompt_tokens} ({pct:.0f}%)")
+        if self.max_completion_tokens is not None:
+            pct = self.completion_tokens / self.max_completion_tokens * 100 if self.max_completion_tokens > 0 else 0.0
+            parts.append(f"completion_tokens {self.completion_tokens}/{self.max_completion_tokens} ({pct:.0f}%)")
+        if self.max_wallclock_s is not None:
+            elapsed = time.time() - self.started_at
+            pct = elapsed / self.max_wallclock_s * 100 if self.max_wallclock_s > 0 else 0.0
+            parts.append(f"{elapsed:.0f}s/{self.max_wallclock_s:.0f}s wallclock ({pct:.0f}%)")
+        return "budget used: " + ", ".join(parts)
 
 
 class BudgetExceeded(BaseException):

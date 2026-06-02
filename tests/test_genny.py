@@ -12,13 +12,22 @@ from cube.benchmark import BenchmarkClarifications
 from cube.core import Action, ActionSchema, Observation
 
 from cube_harness.agents.genny import (
-    BudgetConfig,
     Genny,
     GennyConfig,
     _format_action_list,
     _truncate_message,
 )
 from cube_harness.llm import LLMConfig, LLMResponse, Usage
+from cube_harness.recorder import TurnRecorder
+from cube_harness.tool import Budget
+
+
+def _attach_recorder(agent: Genny, budget: Budget | None = None) -> None:
+    """Mimic what the base `Agent.run` does on entry — stash a
+    TurnRecorder (with a Budget) on the agent so step()'s budget
+    checks have something to read."""
+    agent._recorder = TurnRecorder(trajectory_id="t", budget=budget or Budget(max_turns=100))
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -42,10 +51,12 @@ def _make_schema(name: str = "click", description: str = "Click an element.") ->
 
 def _make_agent(
     enable_summarize: bool = False,
+    display_budget_every_k: int = 5,
 ) -> Genny:
     config = GennyConfig(
         llm_config=LLMConfig(model_name="test"),
         enable_summarize=enable_summarize,
+        display_budget_every_k=display_budget_every_k,
     )
     return Genny(config=config, action_schemas=[_make_schema()])
 
@@ -279,24 +290,25 @@ class TestChooseContext:
         assert messages[-1]["content"] == agent.config.act_prompt
 
     def test_budget_status_in_final_prompt_at_display_step(self) -> None:
-        budget = BudgetConfig(max_actions=50, display_every_k=5)
-        agent = _make_agent()
-        agent.config = agent.config.model_copy(update={"budget": budget})
+        """When step() is at a display tick (turns % display_budget_every_k
+        == 0), the framework `Budget` summary string injects into the
+        final user prompt so the LLM can plan against what's left."""
+        agent = _make_agent(display_budget_every_k=5)
         agent.goal = [{"role": "user", "content": "goal"}]
         agent._latest_obs = [{"role": "user", "content": "obs"}]
-        msg, _ = budget.check(0.0, 0, 5)  # step=5 is first display step
-        messages = agent._choose_context(msg)
-        assert "cumulative episode budget: 5/50 steps" in messages[-1]["content"]
+        # Mimic Genny.step()'s message construction at the display tick
+        # (turns=5, max_turns=50).
+        budget = Budget(max_turns=50, turns=5)
+        messages = agent._choose_context(str(budget))
+        assert "budget used: turns 5/50" in messages[-1]["content"]
 
     def test_budget_status_absent_between_display_steps(self) -> None:
-        budget = BudgetConfig(max_actions=50, display_every_k=5)
-        agent = _make_agent()
-        agent.config = agent.config.model_copy(update={"budget": budget})
+        """No message means no injection — Genny just doesn't pass one."""
+        agent = _make_agent(display_budget_every_k=5)
         agent.goal = [{"role": "user", "content": "goal"}]
         agent._latest_obs = [{"role": "user", "content": "obs"}]
-        msg, _ = budget.check(0.0, 0, 3)  # step=3 is not a display step
-        messages = agent._choose_context(msg)
-        assert "cumulative episode budget" not in messages[-1]["content"]
+        messages = agent._choose_context(None)  # step=3 between display ticks
+        assert "budget used" not in messages[-1]["content"]
 
 
 # ---------------------------------------------------------------------------
@@ -461,15 +473,13 @@ class TestStep:
         all_contents = [_content(m) for group in agent.history for m in group]
         assert any("response" in c for c in all_contents)
 
-    def test_step_increments_action_count(self) -> None:
+    def test_step_issues_stop_action_when_budget_exhausted(self) -> None:
+        """Genny self-stops gracefully (emits STOP_ACTION) when the
+        framework Budget reports `exhausted=True`. This is the soft-stop
+        path; MonitoredTool's hard `BudgetExceeded` is the safety net."""
         agent = _make_agent()
-        agent.llm = MagicMock(return_value=_mock_llm_response())
-        agent.step(Observation.from_text("goal"))
-        assert agent._actions_cnt == 1
-
-    def test_step_issues_stop_action_when_limit_reached(self) -> None:
-        agent = _make_agent()
-        agent.config = agent.config.model_copy(update={"budget": BudgetConfig(max_actions=0)})
+        # Budget with max_turns=0 is born exhausted.
+        _attach_recorder(agent, Budget(max_turns=0))
         result = agent.step(Observation.from_text("obs"))
         assert len(result.actions) == 1
         assert result.actions[0].name == "final_step"
@@ -677,202 +687,14 @@ class TestFlatHistory:
         assert any("step1 response" in c for c in all_contents)
 
 
-# ---------------------------------------------------------------------------
-# BudgetConfig.check
-# ---------------------------------------------------------------------------
-
-
-class TestBudgetConfig:
-    # --- busted cases ---
-
-    def test_busted_max_actions_at_limit(self) -> None:
-        b = BudgetConfig(max_actions=10)
-        _, busted = b.check(0.0, 0, 10)
-        assert busted
-
-    def test_busted_max_actions_over_limit(self) -> None:
-        b = BudgetConfig(max_actions=10)
-        _, busted = b.check(0.0, 0, 11)
-        assert busted
-
-    def test_not_busted_max_actions_below_limit(self) -> None:
-        b = BudgetConfig(max_actions=10)
-        _, busted = b.check(0.0, 0, 9)
-        assert not busted
-
-    def test_busted_cost_limit(self) -> None:
-        b = BudgetConfig(cost_limit=1.0)
-        _, busted = b.check(1.0, 0, 3)
-        assert busted
-
-    def test_busted_token_limit(self) -> None:
-        b = BudgetConfig(token_limit=1000)
-        _, busted = b.check(0.0, 1000, 3)
-        assert busted
-
-    def test_busted_returns_no_msg(self) -> None:
-        b = BudgetConfig(cost_limit=1.0)
-        msg, busted = b.check(2.0, 0, 5)
-        assert busted
-        assert msg is None
-
-    def test_no_limits_never_busted(self) -> None:
-        b = BudgetConfig()
-        _, busted = b.check(999.0, 999_999, 999)
-        assert not busted
-
-    # --- status message cases ---
-
-    def test_no_msg_at_step_zero(self) -> None:
-        b = BudgetConfig(max_actions=50, display_every_k=5)
-        msg, _ = b.check(0.0, 0, 0)
-        assert msg is None
-
-    def test_no_msg_between_display_steps(self) -> None:
-        b = BudgetConfig(max_actions=50, display_every_k=5)
-        msg, _ = b.check(0.0, 0, 3)
-        assert msg is None
-
-    def test_msg_at_display_step(self) -> None:
-        b = BudgetConfig(max_actions=50, display_every_k=5)
-        msg, _ = b.check(0.0, 0, 5)
-        assert msg == "cumulative episode budget: 5/50 steps."
-
-    def test_msg_at_subsequent_display_step(self) -> None:
-        b = BudgetConfig(max_actions=50, display_every_k=5)
-        msg, _ = b.check(0.0, 0, 10)
-        assert msg == "cumulative episode budget: 10/50 steps."
-
-    def test_msg_cost_usage_percentage(self) -> None:
-        b = BudgetConfig(cost_limit=4.0, display_every_k=5)
-        msg, _ = b.check(1.0, 0, 5)  # 25%
-        assert msg == "cumulative episode budget: 25.0% token usage."
-
-    def test_msg_token_usage_percentage(self) -> None:
-        b = BudgetConfig(token_limit=1000, display_every_k=5)
-        msg, _ = b.check(0.0, 500, 5)  # 50%
-        assert msg == "cumulative episode budget: 50.0% token usage."
-
-    def test_msg_uses_max_of_cost_and_token_pct(self) -> None:
-        b = BudgetConfig(cost_limit=4.0, token_limit=1000, display_every_k=5)
-        # cost 10%, tokens 50% → should report 50%
-        msg, _ = b.check(0.4, 500, 5)
-        assert msg == "cumulative episode budget: 50.0% token usage."
-
-    def test_msg_steps_and_usage_combined(self) -> None:
-        b = BudgetConfig(max_actions=100, cost_limit=2.0, display_every_k=5)
-        msg, _ = b.check(1.0, 0, 10)  # 50% cost
-        assert msg == "cumulative episode budget: 10/100 steps, 50.0% token usage."
-
-    def test_no_msg_when_no_limits_configured(self) -> None:
-        b = BudgetConfig(display_every_k=5)
-        msg, _ = b.check(0.0, 0, 5)
-        assert msg is None
-
-    def test_display_every_k_respected(self) -> None:
-        b = BudgetConfig(max_actions=100, display_every_k=3)
-        msg3, _ = b.check(0.0, 0, 3)
-        msg4, _ = b.check(0.0, 0, 4)
-        msg6, _ = b.check(0.0, 0, 6)
-        assert msg3 is not None
-        assert msg4 is None
-        assert msg6 is not None
-
-
-# ---------------------------------------------------------------------------
-# cost_limit
-# ---------------------------------------------------------------------------
-
-
-def _mock_llm_response_with_cost(cost: float, text: str = "response") -> LLMResponse:
-    from litellm import Message as LitellmMessage
-
-    return LLMResponse(
-        message=LitellmMessage(role="assistant", content=text),
-        usage=Usage(prompt_tokens=10, completion_tokens=5, cost=cost),
-    )
-
-
-class TestCostLimit:
-    def test_no_stop_when_below_limit(self) -> None:
-        config = GennyConfig(llm_config=LLMConfig(model_name="test"), budget=BudgetConfig(cost_limit=1.0))
-        agent = Genny(config=config, action_schemas=[_make_schema()])
-        agent.llm = MagicMock(return_value=_mock_llm_response_with_cost(0.10))
-        agent.step(Observation.from_text("task"))
-        # LLM was called (not short-circuited by cost limit)
-        agent.llm.assert_called_once()
-
-    def test_stop_when_limit_reached(self) -> None:
-        config = GennyConfig(llm_config=LLMConfig(model_name="test"), budget=BudgetConfig(cost_limit=0.05))
-        agent = Genny(config=config, action_schemas=[_make_schema()])
-        agent.llm = MagicMock(return_value=_mock_llm_response_with_cost(0.10))
-        agent.step(Observation.from_text("task"))  # spends $0.10, exceeds limit
-        result = agent.step(Observation.from_text("task2"))
-        assert result.actions[0].name == "final_step"
-
-    def test_no_limit_when_cost_limit_none(self) -> None:
-        config = GennyConfig(llm_config=LLMConfig(model_name="test"), budget=BudgetConfig(cost_limit=None))
-        agent = Genny(config=config, action_schemas=[_make_schema()])
-        agent._total_cost = 999.0
-        agent.llm = MagicMock(return_value=_mock_llm_response_with_cost(0.0))
-        agent.step(Observation.from_text("task"))
-        # LLM was called despite enormous accumulated cost because cost_limit=None
-        agent.llm.assert_called_once()
-
-    def test_total_cost_accumulates(self) -> None:
-        config = GennyConfig(llm_config=LLMConfig(model_name="test"), budget=BudgetConfig(cost_limit=10.0))
-        agent = Genny(config=config, action_schemas=[_make_schema()])
-        agent.llm = MagicMock(return_value=_mock_llm_response_with_cost(0.50))
-        agent.step(Observation.from_text("t1"))
-        agent.step(Observation.from_text("t2"))
-        assert agent._total_cost == pytest.approx(1.0)
-
-
-# ---------------------------------------------------------------------------
-# token_limit
-# ---------------------------------------------------------------------------
-
-
-def _mock_llm_response_with_tokens(prompt_tokens: int, completion_tokens: int, text: str = "response") -> LLMResponse:
-    from litellm import Message as LitellmMessage
-
-    return LLMResponse(
-        message=LitellmMessage(role="assistant", content=text),
-        usage=Usage(prompt_tokens=prompt_tokens, completion_tokens=completion_tokens),
-    )
-
-
-class TestTokenLimit:
-    def test_no_stop_when_below_limit(self) -> None:
-        config = GennyConfig(llm_config=LLMConfig(model_name="test"), budget=BudgetConfig(token_limit=1000))
-        agent = Genny(config=config, action_schemas=[_make_schema()])
-        agent.llm = MagicMock(return_value=_mock_llm_response_with_tokens(10, 5))
-        agent.step(Observation.from_text("task"))
-        agent.llm.assert_called_once()
-
-    def test_stop_when_limit_reached(self) -> None:
-        config = GennyConfig(llm_config=LLMConfig(model_name="test"), budget=BudgetConfig(token_limit=10))
-        agent = Genny(config=config, action_schemas=[_make_schema()])
-        agent.llm = MagicMock(return_value=_mock_llm_response_with_tokens(8, 5))
-        agent.step(Observation.from_text("task"))  # uses 13 tokens, exceeds limit
-        result = agent.step(Observation.from_text("task2"))
-        assert result.actions[0].name == "final_step"
-
-    def test_no_limit_when_token_limit_none(self) -> None:
-        config = GennyConfig(llm_config=LLMConfig(model_name="test"), budget=BudgetConfig(token_limit=None))
-        agent = Genny(config=config, action_schemas=[_make_schema()])
-        agent._total_tokens = 999_999
-        agent.llm = MagicMock(return_value=_mock_llm_response_with_tokens(0, 0))
-        agent.step(Observation.from_text("task"))
-        agent.llm.assert_called_once()
-
-    def test_total_tokens_accumulates(self) -> None:
-        config = GennyConfig(llm_config=LLMConfig(model_name="test"), budget=BudgetConfig(token_limit=10_000))
-        agent = Genny(config=config, action_schemas=[_make_schema()])
-        agent.llm = MagicMock(return_value=_mock_llm_response_with_tokens(100, 50))
-        agent.step(Observation.from_text("t1"))
-        agent.step(Observation.from_text("t2"))
-        assert agent._total_tokens == 300
+# BudgetConfig.check / TestCostLimit / TestTokenLimit deleted:
+# - BudgetConfig is gone — caps live on the framework `cube_harness.tool.Budget`
+#   constructed by Episode from `Experiment.max_steps` / `Experiment.max_cost_usd`.
+# - Cost & token tracking is in `TurnRecorder._flush_agent_event` (covered by
+#   `tests/test_recorder_dual_api.py::test_recorder_accumulates_cost_into_budget`
+#   and `::test_recorder_triggers_budget_exceeded_on_cost`).
+# - Genny's soft-stop via `recorder.budget.exhausted` is covered by
+#   `test_step_issues_stop_action_when_budget_exhausted` above.
 
 
 # ---------------------------------------------------------------------------

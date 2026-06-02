@@ -73,6 +73,11 @@ class Agent(ABC):
 
     def __init__(self, config: AgentConfig):
         self.config = config
+        # Default Agent.run stashes `recorder` here on entry so
+        # subclasses that override only step() can introspect the live
+        # budget via `self._recorder.budget` for graceful self-stop and
+        # prompt injection. None when step() is called outside of run().
+        self._recorder: "TurnRecorder | None" = None
 
     @abstractmethod
     def step(self, obs: Observation) -> AgentOutput:
@@ -114,7 +119,12 @@ class Agent(ABC):
         those belong to Episode (lifecycle) or the toolbox (per-call).
         `toolbox.execute_action` is wrapped in `asyncio.to_thread` for
         sync Toolbox; awaited directly for AsyncToolbox.
+
+        Side-effect: stashes `recorder` on `self._recorder` so subclasses
+        that override only `step()` can introspect the live budget for
+        graceful self-stop or prompt injection — `self._recorder.budget`.
         """
+        self._recorder = recorder
         execute = _make_execute_callable(toolbox)
         obs = initial_obs
         while True:

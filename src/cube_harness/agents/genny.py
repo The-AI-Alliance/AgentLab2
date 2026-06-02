@@ -35,7 +35,7 @@ from contextlib import contextmanager
 from typing import cast
 
 from cube.benchmark import BenchmarkConfig
-from cube.core import Action, ActionSchema, Observation, ValidatedConfig
+from cube.core import Action, ActionSchema, Observation
 from cube.task import STOP_ACTION
 from litellm import Message
 from pydantic import Field
@@ -141,54 +141,6 @@ def _truncate_message(msg: dict, max_chars: int) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Budget config
-# ---------------------------------------------------------------------------
-
-
-class BudgetConfig(ValidatedConfig):
-    """Episode budget limits and periodic status display.
-
-    Single entry point: check(cost, tokens, step) -> (status_msg | None, busted).
-    - busted=True when any configured limit is exceeded → caller should STOP.
-    - status_msg is a human-readable summary injected into the prompt every
-      display_every_k steps; None when it is not a display step or nothing is configured.
-
-    Format: "cumulative episode budget: 34/150 steps, 35% token usage."
-    Token usage % = max(cost/cost_limit, tokens/token_limit) across whichever limits are set.
-    """
-
-    max_actions: int | None = None
-    cost_limit: float | None = None
-    token_limit: int | None = None
-    display_every_k: int = 5
-
-    def check(self, cost: float, tokens: int, step: int) -> tuple[str | None, bool]:
-        """Return (status_message_or_None, is_over_budget)."""
-        busted = (
-            (self.max_actions is not None and step >= self.max_actions)
-            or (self.cost_limit is not None and cost >= self.cost_limit)
-            or (self.token_limit is not None and tokens >= self.token_limit)
-        )
-        if busted:
-            return None, True
-        msg: str | None = None
-        if step > 0 and step % self.display_every_k == 0:
-            parts: list[str] = []
-            if self.max_actions is not None:
-                parts.append(f"{step}/{self.max_actions} steps")
-            if self.cost_limit is not None or self.token_limit is not None:
-                pct = 0.0
-                if self.cost_limit is not None and self.cost_limit > 0:
-                    pct = max(pct, cost / self.cost_limit)
-                if self.token_limit is not None and self.token_limit > 0:
-                    pct = max(pct, tokens / self.token_limit)
-                parts.append(f"{pct * 100:.1f}% token usage")
-            if parts:
-                msg = "cumulative episode budget: " + ", ".join(parts) + "."
-        return msg, False
-
-
-# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
@@ -255,8 +207,13 @@ class GennyConfig(AgentConfig):
 
     # Misc
     max_obs_chars: int | None = None  # None = no truncation
-    # Episode budget: step/cost/token limits + periodic status display.
-    budget: BudgetConfig = Field(default_factory=BudgetConfig)
+    # How often to inject the framework `Budget` summary into the prompt
+    # ("budget used: turns 34/150 (23%), cost $1.20/$5.00 (24%), …").
+    # The actual limits live on `cube_harness.tool.Budget` constructed by
+    # Episode (max_turns, max_cost_usd, max_prompt_tokens, …); Genny just
+    # decides when to display the summary so the LLM can plan against
+    # what's left. 0 disables injection entirely.
+    display_budget_every_k: int = 5
     # Retry budget when the model returns no tool calls. On each retry the empty response
     # and a correction user message are appended; if still no tool calls after all retries,
     # a STOP action is returned. 0 = no retry (preserves current behavior).
@@ -317,7 +274,7 @@ class Genny(Agent):
     output_content_types: list[str] = ["application/json"]
 
     def __init__(self, config: GennyConfig, action_schemas: list[ActionSchema], task_id: str | None = None):
-        self.config = config
+        super().__init__(config)  # initialize self.config + self._recorder=None
         self.task_id = task_id
         if task_id is None and (config.task_hints or config.task_clarification):
             logger.debug(
@@ -346,21 +303,26 @@ class Genny(Agent):
         self.summary_actions: list[str] = []  # Mode B: action taken per step, separate message for cache stability
         self.history: list[list[dict | Message]] = []  # Mode A / flat: completed (obs, asst) pairs
         self._latest_obs: list[dict | Message] = []  # current step's obs, not yet in history
-        self._actions_cnt: int = 0
-        self._total_cost: float = 0.0
-        self._total_tokens: int = 0
         self._compacted_summary: str = ""  # injected into system message after compaction
 
     def step(self, obs: Observation) -> AgentOutput:
-        budget_msg, busted = self.config.budget.check(self._total_cost, self._total_tokens, self._actions_cnt)
-        if busted:
-            logger.info(
-                "Budget limit reached (step=%d cost=$%.4f tokens=%d), issuing STOP.",
-                self._actions_cnt,
-                self._total_cost,
-                self._total_tokens,
-            )
+        # Soft-stop on budget. The framework Budget lives on
+        # `self._recorder.budget` — stashed by the base Agent.run on
+        # entry. Checking `exhausted` BEFORE work lets the agent emit
+        # STOP_ACTION cleanly rather than have MonitoredTool raise
+        # BudgetExceeded mid-call (which is the safety-net path for
+        # agents that don't self-check).
+        budget = self._recorder.budget if self._recorder is not None else None
+        if budget is not None and budget.exhausted:
+            logger.info("Budget limit reached (%s), issuing STOP.", budget)
             return AgentOutput(actions=[Action(name=STOP_ACTION.name, arguments={})])
+
+        # Budget summary for the LLM, every K turns. Empty when no caps
+        # are set or when `display_budget_every_k=0`.
+        budget_msg: str | None = None
+        every_k = self.config.display_budget_every_k
+        if budget is not None and every_k > 0 and budget.turns > 0 and budget.turns % every_k == 0:
+            budget_msg = str(budget)
 
         profiler = Profiler()
 
@@ -410,10 +372,10 @@ class Genny(Agent):
             + ([sum_call] if sum_call is not None else [])
             + ([compact_call] if compact_call is not None else [])
         )
-        for call in llm_calls:
-            self._total_cost += call.usage.cost
-            self._total_tokens += call.usage.prompt_tokens + call.usage.completion_tokens
-        self._actions_cnt += 1
+        # Cost / token tracking lives on `recorder.budget` now —
+        # TurnRecorder bumps it from `agent_output.llm_calls` when this
+        # AgentEvent flushes. Genny used to duplicate the tally in
+        # `_total_cost / _total_tokens / _actions_cnt`; those are gone.
         return AgentOutput(
             actions=actions,
             llm_calls=llm_calls,

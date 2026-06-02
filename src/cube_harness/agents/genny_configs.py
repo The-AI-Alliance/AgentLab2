@@ -15,7 +15,7 @@ a recipe constructs the `LLMConfig` it wants and assigns it.
 
 from cube.core import ConfigRegistry
 
-from cube_harness.agents.genny import BudgetConfig, GennyConfig
+from cube_harness.agents.genny import GennyConfig
 from cube_harness.llm import LLMConfig
 
 SYSTEM_PROMPT = "You are a helpful assistant that can interact with a computer shell to solve programming tasks. If an action seems to have no apparent effect, avoid retrying it."
@@ -52,8 +52,6 @@ DEFAULT_MODEL = "gpt-5.4-mini"
 def make_agent_config(
     llm_config: LLMConfig | None = None,
     template: str = DEFAULT_TEMPLATE,
-    max_actions: int = 150,
-    cost_limit: float = 1.0,
 ) -> GennyConfig:
     """Helper for the canonical ``GENNY_CONFIGS`` entries.
 
@@ -64,6 +62,12 @@ def make_agent_config(
     this helper set ``interleaved_thinking=True`` here unconditionally, but
     with ``reasoning_effort=None`` that was a silent no-op — the LLMConfig
     validator added in PR#430 now rejects that combination outright.)
+
+    Budget caps moved to Episode/Experiment: pass `max_steps` (and
+    forthcoming `max_cost_usd`) on `Experiment(...)` instead of on
+    GennyConfig. Genny reads the live budget via `recorder.budget`
+    (stashed by the base Agent.run) for graceful self-stop + in-prompt
+    display.
     """
     return GennyConfig(
         llm_config=llm_config or LLMConfig(model_name=DEFAULT_MODEL),
@@ -72,7 +76,6 @@ def make_agent_config(
         flat_history=True,
         step_prompt="",
         max_format_errors=3,
-        budget=BudgetConfig(max_actions=max_actions, cost_limit=cost_limit),
     )
 
 
