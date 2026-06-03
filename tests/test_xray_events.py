@@ -117,6 +117,21 @@ def test_parallel_siblings_share_one_group() -> None:
     assert ep.accompanying_indices(2) == [0, 1, 3]
 
 
+def test_grouping_is_order_independent() -> None:
+    # A child decoded BEFORE its parent must still resolve to the parent's group
+    # (grouping follows parent_event_id links, not stream position).
+    ep = xe.EpisodeEvents([_tool("obs1", "llm1"), _llm("llm1")])
+    assert ep.group_for(0).members == [0, 1]
+    assert ep.group_for(1).members == [0, 1]
+    assert ep.accompanying_indices(0) == [1]
+
+
+def test_self_referential_parent_does_not_recurse() -> None:
+    # A malformed self-parent link must not blow the recursion stack.
+    ep = xe.EpisodeEvents([_tool("x", "x")])
+    assert ep.group_for(0).members == [0]
+
+
 def test_terminal_eval_attaches_to_last_group() -> None:
     # No parent link on the terminal eval -> it joins the most recent group.
     ep = xe.EpisodeEvents([_llm("llm1"), _tool("obs1", "llm1"), _eval(1.0, terminal=True)])

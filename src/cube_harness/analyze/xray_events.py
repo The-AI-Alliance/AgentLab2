@@ -147,34 +147,50 @@ class EpisodeEvents:
             self._group_members.setdefault(root, []).append(i)
 
     def _compute_roots(self) -> list[int]:
-        """Map each event index to its group-root index (one pass, in order).
+        """Map each event index to its group-root index.
 
         Roots are LLM calls and the reset observation. Tool calls and step-wise
-        evaluations resolve to their parent's root. Terminal evaluations and
-        agent errors — which currently lack a parent link upstream — attach to
-        the most recent root by stream position (a heuristic that becomes exact
-        once the producers stamp `parent_event_id` on them).
+        evaluations resolve to their parent's root by *following parent_event_id
+        links* (via the precomputed id→index map), so grouping is independent of
+        stream order — a child decoded before its parent still resolves
+        correctly. Terminal evaluations and agent errors — which currently lack
+        a parent link upstream — attach to the most recent root by stream
+        position (a heuristic that becomes exact once the producers stamp
+        `parent_event_id` on them).
         """
-        root_of = [0] * len(self.events)
+        root_of: list[int | None] = [None] * len(self.events)
+
+        def resolve(i: int, seen: frozenset[int]) -> int:
+            """Root of the parent chain at `i` (order-independent, memoized)."""
+            if root_of[i] is not None:
+                return root_of[i]  # type: ignore[return-value]
+            if i in seen:  # malformed self/cyclic parent link — break the cycle
+                root_of[i] = i
+                return i
+            out = self.events[i].output
+            parent_id: str | None = None
+            if isinstance(out, ToolCallEvent) and out.parent_event_id != RESET_PARENT:
+                parent_id = out.parent_event_id
+            elif isinstance(out, EvaluationEvent) and out.parent_event_id:
+                parent_id = out.parent_event_id
+            p = self._id_to_index.get(parent_id) if parent_id else None
+            root = resolve(p, seen | {i}) if p is not None else i
+            root_of[i] = root
+            return root
+
+        # Forward pass: parent-linked events resolve through `resolve`;
+        # parent-less terminal evals / agent errors attach to the most recent
+        # group root seen so far (positional fallback).
         last_root: int | None = None
         for i, ev in enumerate(self.events):
             out = ev.output
-            root = i
-            if isinstance(out, LLMCallEvent):
-                root = i
-            elif isinstance(out, ToolCallEvent):
-                if out.parent_event_id != RESET_PARENT:
-                    p = self._id_to_index.get(out.parent_event_id)
-                    root = root_of[p] if p is not None else i
-            elif isinstance(out, EvaluationEvent):
-                p = self._id_to_index.get(out.parent_event_id) if out.parent_event_id else None
-                root = root_of[p] if p is not None else (last_root if last_root is not None else i)
-            elif isinstance(out, AgentErrorEvent):
-                root = last_root if last_root is not None else i
-            root_of[i] = root
-            if root == i:  # this event opens a new group
+            if isinstance(out, (EvaluationEvent, AgentErrorEvent)) and not getattr(out, "parent_event_id", None):
+                root_of[i] = last_root if last_root is not None else i
+            else:
+                resolve(i, frozenset())
+            if root_of[i] == i:  # this event opens a new group
                 last_root = i
-        return root_of
+        return [r if r is not None else i for i, r in enumerate(root_of)]
 
     @classmethod
     def from_view(cls, view: TrajectoryView) -> "EpisodeEvents":

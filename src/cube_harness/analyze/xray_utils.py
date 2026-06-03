@@ -1393,11 +1393,24 @@ def render_group_error_md(events: EpisodeEvents, group: EventGroup) -> str:
 
 
 def render_group_debug_json(events: EpisodeEvents, group: EventGroup) -> str:
-    """Debug pane: raw JSON dump of every event in the group."""
+    """Debug pane: raw JSON dump of every event in the group.
+
+    Dumps `event.output` with its concrete type (rather than the
+    `TrajectoryEvent` wrapper, whose union `output` field triggers noisy
+    Pydantic serializer warnings on every non-matching arm).
+    """
     dump = []
     for idx in group.members:
         ev = events[idx]
-        dump.append({"index": idx, "event": ev.model_dump(mode="json")})
+        dump.append(
+            {
+                "index": idx,
+                "kind": type(ev.output).__name__,
+                "start_time": ev.start_time,
+                "end_time": ev.end_time,
+                "output": ev.output.model_dump(mode="json"),
+            }
+        )
     return json.dumps(dump, indent=2, default=str)
 
 
