@@ -1,16 +1,17 @@
 """Unit tests for the flat event-stream view model (`analyze.xray_events`).
 
-These assert the parent-link pairing XRay relies on: an observation pairs with
-the LLM call that produced it, an LLM call pairs with the observation(s) it
-produced, and parallel siblings (several tool calls sharing one parent) all
-pair back to that single LLM call. No Gradio, no disk.
+These assert the dependency-graph grouping XRay relies on: an LLM call, the
+observation(s) it produced, their step-wise rewards, and any error in the
+chain all resolve to one logical group, so selecting any card surfaces the
+whole "why did the agent do this, what did it observe, what reward, any error"
+story. Parallel siblings share one group; terminal evals with no parent link
+attach to the most recent group. No Gradio, no disk.
 """
 
 from cube.core import Action, Observation, StepError
 
 from cube_harness.analyze import xray_events as xe
 from cube_harness.core import (
-    AgentErrorEvent,
     EvaluationEvent,
     LLMCallEvent,
     ToolCallEvent,
@@ -76,14 +77,29 @@ def test_reset_observation_has_no_parent() -> None:
     assert ep.accompanying_indices(0) == []
 
 
-def test_resolve_pair_normalizes_either_side() -> None:
+def test_group_normalizes_either_side() -> None:
     ep = _gym_stream()
-    # Selecting the LLM call and selecting its observation resolve to the same pair.
-    assert ep.resolve_pair(1) == (1, [2])
-    assert ep.resolve_pair(2) == (1, [2])
+    # Selecting the LLM call and selecting its observation yield the same group.
+    g_llm = ep.group_for(1)
+    g_obs = ep.group_for(2)
+    assert g_llm.members == g_obs.members == [1, 2]
+    assert g_llm.llm_index == 1  # index 1 is the LLM call
+    assert g_obs.observation_indices == [2]
 
 
-def test_parallel_siblings_share_one_parent() -> None:
+def test_stepwise_eval_groups_with_its_toolcall() -> None:
+    # llm1 -> obs1 -> step-wise reward(obs1): all one logical group.
+    ev_obs = _tool("obs1", "llm1")
+    step_eval = TrajectoryEvent(output=EvaluationEvent(reward=0.5, is_terminal=False, parent_event_id="obs1"))
+    ep = xe.EpisodeEvents([_llm("llm1"), ev_obs, step_eval])
+    g = ep.group_for(2)  # select the reward
+    assert g.members == [0, 1, 2]
+    assert g.llm_index == 0
+    assert g.observation_indices == [1]
+    assert g.evaluation_indices == [2]
+
+
+def test_parallel_siblings_share_one_group() -> None:
     ep = xe.EpisodeEvents(
         [
             _llm("llm1"),
@@ -92,19 +108,22 @@ def test_parallel_siblings_share_one_parent() -> None:
             _tool("c", "llm1", "list"),
         ]
     )
-    # The LLM call lights up all three parallel observations...
+    # The LLM call and all three parallel observations form one group.
     assert ep.child_indices(0) == [1, 2, 3]
-    # ...and each observation pairs back to the single LLM call.
-    for obs_idx in (1, 2, 3):
-        assert ep.parent_index(obs_idx) == 0
-        assert ep.resolve_pair(obs_idx) == (0, [obs_idx])
-    assert ep.resolve_pair(0) == (0, [1, 2, 3])
+    g = ep.group_for(2)
+    assert g.members == [0, 1, 2, 3]
+    assert g.observation_indices == [1, 2, 3]
+    # Selecting any observation highlights the LLM call + the two siblings.
+    assert ep.accompanying_indices(2) == [0, 1, 3]
 
 
-def test_eval_and_error_render_alone() -> None:
-    ep = xe.EpisodeEvents([_eval(0.0, terminal=True), TrajectoryEvent(output=AgentErrorEvent(error=_err()))])
-    assert ep.resolve_pair(0) == (None, [])
-    assert ep.resolve_pair(1) == (None, [])
+def test_terminal_eval_attaches_to_last_group() -> None:
+    # No parent link on the terminal eval -> it joins the most recent group.
+    ep = xe.EpisodeEvents([_llm("llm1"), _tool("obs1", "llm1"), _eval(1.0, terminal=True)])
+    g = ep.group_for(2)
+    assert g.members == [0, 1, 2]
+    assert g.llm_index == 0
+    assert g.evaluation_indices == [2]
 
 
 def test_typed_extractors_are_none_safe() -> None:
