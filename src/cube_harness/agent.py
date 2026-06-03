@@ -134,86 +134,44 @@ class Agent(ABC):
         initial_obs: Observation,
         env_tool: "AbstractAsyncTool",
     ) -> None:
-        """Default gym-style loop on top of `self.step` — the canonical
-        entry point invoked by `Episode` (RFC `agent-owns-loop`).
+        """Default gym-style loop on top of `self.step` — Episode's canonical entry point.
 
-        Sync `step()` agents get this for free — they never write a
-        line of async code. Agents that want parallel tool calls,
-        async LLM dispatch, or streaming observability override this
-        method instead.
+        Sync `step()` agents get this for free. Override `run` directly
+        for parallel tool dispatch, async LLM, or streaming (see
+        `GennyParallel`).
 
-        The `env_tool` parameter is always `AbstractAsyncTool` — Episode
-        wraps sync tools in a thin `asyncio.to_thread`-based adapter
-        at the boundary so the agent's view is uniformly async. One
-        `await env_tool.execute_action(action) -> Observation | StepError`
-        call site regardless of the underlying tool's sync/async nature.
-
-        The recorder is NOT a parameter — Episode attaches it via
-        `agent.attach_recorder(recorder)` BEFORE calling `run()`. LLM
-        calls inside `step()` auto-emit; tool calls auto-emit; the
-        agent code never touches the recorder directly. For
-        introspection (e.g. budget self-stop), `self._recorder.budget`
-        is available.
+        `env_tool` is uniformly `AbstractAsyncTool`: Episode adapts sync
+        tools at the boundary. The recorder is attached out-of-band via
+        `attach_recorder()` before `run` is called; LLM/tool events
+        auto-emit. `self._recorder.budget` is available for self-stop.
 
         Termination:
-
-          * Graceful: `self.step` returns empty actions with no error.
-          * `TaskDone` raised by a `MonitoredTool` when the task's
-            `finished()` check returned True OR the agent emitted the
-            STOP_ACTION sentinel — propagates to Episode and is captured
-            in its outer `except`. Agents must NOT catch BaseException.
-          * `BudgetExceeded` raised by a monitored tool — same
-            propagation pattern.
+          * Graceful: `step` returns empty actions with no error.
+          * `TaskDone` from a MonitoredTool (task `finished()` or
+            STOP_ACTION) — propagates; do NOT catch BaseException.
+          * `BudgetExceeded` from a MonitoredTool — propagates.
         """
         obs = initial_obs
         while True:
-            # The signature is async for symmetry with agents that need
-            # true async (Genny streaming, GennyParallel's asyncio.gather
-            # over MonitoredTool calls). The default body, however, runs
-            # `step()` directly on the event loop — no `asyncio.to_thread`
-            # wrap. In a one-episode-per-process world (Ray) nothing else
-            # is scheduled on the loop during `step()`, so the wrap would
-            # buy nothing and cost debugability: pdb would land in a
-            # thread-pool worker and tracebacks would cross thread
-            # boundaries. Agents that genuinely need a non-blocking step
-            # (because they co-schedule episodes, or run truly concurrent
-            # work mid-step) override `run` directly.
+            # Sync body under async signature — debugable on the main
+            # thread. Override `run` for true async/concurrent work.
             agent_output = self.step(obs)
-            # Bump `budget.turns` (one agent step) and enforce caps —
-            # AFTER step() so LLM calls inside step() emit first, but
-            # BEFORE dispatching any actions so a turn that crosses
-            # `max_turns` doesn't get to dispatch.
+            # Bump turns AFTER step() (so its LLM calls emit) and BEFORE
+            # dispatch (so a turn that crosses max_turns can't dispatch).
             if self._recorder is not None:
                 self._recorder.on_step()
-            # Graceful done: empty actions AND no error.
-            # If error is set, raise via StepError so Episode tags the
-            # episode FAILED. A bare return would silently look like
-            # success.
             if agent_output.error is not None:
                 raise RuntimeError(f"Agent step returned error: {agent_output.error.exception_str}")
             if not agent_output.actions:
                 return
-            # Dispatch each action sequentially. The default loop is
-            # ONE action per step in practice (Genny.step returns 1
-            # action even with parallel_tool_calls=False); for multi-
-            # action turns, agents override `run` (see GennyParallel)
-            # so they can fan out and merge observations correctly.
-            # We dispatch all N here but accumulate observations into
-            # the next prompt by way of MonitoredTool side-effects;
-            # an env_tool.execute_action returning StepError aborts
-            # the run — Episode finalizes with the failure recorded
-            # via the MonitoredTool's emit + Episode's outer except.
+            # Sequential dispatch. Multi-action agents needing fan-out
+            # / result merging override `run` (see GennyParallel).
             last_obs: Observation | None = None
             for action in agent_output.actions:
                 result = await env_tool.execute_action(action)
                 if isinstance(result, StepError):
-                    # Surface as failure so Episode records it (record_failure
-                    # via the outer except wraps it in AgentErrorEvent).
                     raise RuntimeError(f"Tool dispatch returned StepError: {result.exception_str}")
                 last_obs = result
-            # Feed the LAST observation back. Multi-action agents that
-            # need result merging should override `run` (GennyParallel
-            # does this via `_merge_results`).
             if last_obs is not None:
                 obs = last_obs
 
