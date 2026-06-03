@@ -61,15 +61,18 @@ class Budget(TypedBaseModel):
       - `max_wallclock_s`: elapsed seconds since the Budget was created.
 
     Counters bumped during the run:
-      - `turns` / `cost_usd` / `prompt_tokens` / `completion_tokens` —
-        by `EventStreamer._flush_agent_event` from `AgentEvent.llm_calls`.
+      - `turns` — by `EventStreamer.on_step()`, once per `Agent.run`
+        iteration (one agent step). NOT per LLM call.
+      - `cost_usd` / `prompt_tokens` / `completion_tokens` — by
+        `EventStreamer.on_llm_call()` per LLM API call (cumulative
+        across multi-LLM-call steps).
       - `tool_calls` — by `MonitoredTool._record_tool_call`.
       - `started_at` — set once at construction; elapsed time derived from it.
 
     `Budget.exhausted` returns True iff any configured cap is at-or-past
     its limit. `MonitoredTool` raises `BudgetExceeded(BaseException)`
     when it is. Agents can also introspect the live budget via
-    `recorder.budget` for graceful self-stop and prompt-injection
+    `self._recorder.budget` for graceful self-stop and prompt-injection
     ("you have X% budget left") — see `Budget.__str__`.
     """
 
@@ -94,7 +97,7 @@ class Budget(TypedBaseModel):
     # real OS thread via `asyncio.to_thread`. Without this lock the
     # `tool_calls += 1` in `_record_tool_call` would race across N
     # workers and `max_tool_calls` could overrun. Mirrors the
-    # `SummaryProcessor` lock added for the same parallel path.
+    # `EventStreamer._lock` added for the same parallel path.
     _lock: threading.Lock = PrivateAttr(default_factory=threading.Lock)
 
     def bump_tool_calls(self) -> None:
@@ -130,7 +133,7 @@ class Budget(TypedBaseModel):
     def exhausted(self) -> bool:
         """True iff any configured cap is at-or-past its limit. Checked
         by MonitoredTool on entry to every execute_action and by
-        EventStreamer after every AgentEvent flush.
+        EventStreamer after every LLM call (via `on_llm_call`).
 
         Lock-protected so the multi-field read is coherent against
         concurrent bumps from parallel tool-call workers."""

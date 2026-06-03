@@ -17,12 +17,14 @@ See companion: `cube-standard/openspec/changes/agent-owns-loop/deltas.md`.
 
 ### Relationship to recent dev changes
 
-- `stream-trajectory-steps` already lands the "stream every step to disk,
-  never accumulate in memory" pattern (`Trajectory.steps=[]` on return,
-  `SummaryProcessor` as the single source of aggregates). This RFC adopts
-  that pattern wholesale and changes only **what** is streamed: the event
-  union expands from `EnvironmentOutput | AgentOutput` to
-  `AgentEvent | ToolCallEvent | EvaluationEvent`.
+- `stream-trajectory-steps` already lands the "stream every step to
+  disk, never accumulate in memory" pattern. This RFC adopts that
+  pattern wholesale and changes both **what** is streamed and **who
+  streams it**: the event union expands from
+  `EnvironmentOutput | AgentOutput` to `LLMCallEvent | ToolCallEvent |
+  EvaluationEvent | AgentErrorEvent`, and the prior `SummaryProcessor`
+  is folded into `EventStreamer` (no separate aggregator class; counter
+  folding happens inline as events flow through).
 - `e760f9e5` (cleanup: delete unused tool implementations + telemetry
   wrapper) already removed `ToolWithTelemetry`, `AsyncToolWithTelemetry`,
   and the `openspec/specs/tool/` spec layer. The tool spec is **created
@@ -247,9 +249,13 @@ class EventStreamer:
         self,
         trajectory_id: str,
         storage: Storage | None,
-        summary: SummaryProcessor | None,
         budget: Budget | None,
     ): ...
+
+    # Sole fan-out entry point. Folds per-episode stats counters and
+    # forwards to sinks. All producers (LLM, MonitoredTool, the
+    # boundary helpers below) funnel through this method.
+    def emit(self, te: TrajectoryEvent) -> str
 
     # Producer-facing hook called by LLM.call() auto-emit:
     def on_llm_call(
@@ -259,6 +265,9 @@ class EventStreamer:
         error: StepError | None = None,
     ) -> str                                       # returns event id (also new current_parent_event_id)
 
+    # Bump `budget.turns` and enforce; called by Agent.run per step.
+    def on_step(self) -> None
+
     # Episode-only boundary helpers:
     def record_reset(self, initial: EnvironmentOutput) -> None
     def record_failure(self, exc: BaseException) -> None        # → AgentErrorEvent
@@ -267,6 +276,12 @@ class EventStreamer:
 
     # Getter consumed by MonitoredTool.parent_event_id_getter:
     def current_parent_event_id(self) -> str
+
+    # Final per-episode stats. Written to TrajectoryMetadata.summary_stats
+    # at finalize. Replaces the dropped SummaryProcessor; no separate
+    # episode_summary.jsonl is written.
+    def summary_stats(self, *, duration: float | None,
+                      final_reward: float) -> dict
 
     @property
     def budget(self) -> Budget                                  # for agent introspection
@@ -283,8 +298,9 @@ it.
 
 A pydantic `EventStreamerConfig` field on `EpisodeConfig` reserves the
 hook for Phase-2 sinks (OTel, RL HTTP, custom). Phase 1 ships an
-empty `EventStreamerConfig` — `FileStorage` + `SummaryProcessor` are
-always-on; future fields like `enable_otel: bool` and
+empty `EventStreamerConfig` — `FileStorage` is the sole sink
+(per-episode stats are folded directly inside the streamer; no
+separate sink for them). Future fields like `enable_otel: bool` and
 `rl_http_endpoint: str | None` plug in additively.
 
 #### Connector path (Phase 2)
@@ -356,10 +372,10 @@ class MonitoredTool(AsyncTool):
     def __init__(
         self,
         inner: Tool | AsyncTool,
-        trajectory: Trajectory,
+        emit: Callable[[TrajectoryEvent], str],   # streamer.emit
         budget: Budget,
-        storage: Storage,
-        summary: SummaryProcessor,
+        parent_event_id_getter: Callable[[], str] | None = None,
+        task: Any | None = None,
     )
 
     @property
@@ -600,9 +616,9 @@ decodes events on demand via `view[i]` / iteration.
 2. If `events/` exists + only `status.json` exists (mid-run crash before
    metadata first-write) → stub metadata view, `is_complete == False`.
 3. If `steps/` exists (V1 archive) → legacy-upgrade view; iteration
-   synthesizes events on the fly: `_act` (AgentOutput) → `AgentEvent`,
-   `_obs` (EnvironmentOutput) → `ToolCallEvent` parented to the most
-   recent agent event.
+   synthesizes events on the fly: `_act` (AgentOutput) → `LLMCallEvent`
+   (with `call=None`), `_obs` (EnvironmentOutput) → `ToolCallEvent`
+   parented to the most recent LLM call event.
 
 `list_episodes()` reads only `episode.metadata.json` per episode dir.
 Used for study aggregation, EpisodeRecord generation, Atlas indexing.
@@ -618,10 +634,21 @@ Used for study aggregation, EpisodeRecord generation, Atlas indexing.
 
 ### Summary
 
-`SummaryProcessor` keeps `n_agent_events`, `n_tool_calls`, `n_evaluations`
-counters in place of `n_agent_steps` / `n_env_steps`. Existing
-`episode_summary.jsonl` line format is otherwise unchanged. The deprecated
-field names remain as JSON aliases.
+Per-episode summary stats now live INSIDE the streamer: counters
+(`n_llm_calls`, `n_tool_calls`, `n_evaluations`, `total_actions`,
+token/cost totals, first-seen `error_type`) are folded incrementally
+as events flow through `EventStreamer.emit(te)`. `summary_stats(...)`
+returns the final dict, persisted to `TrajectoryMetadata.summary_stats`
+at finalize.
+
+Notable simplifications:
+- `SummaryProcessor` class deleted; no separate sink for stats.
+- `episode_summary.jsonl` per-event log dropped — no production
+  consumer was reading it. Final totals are on the metadata file.
+- For back-compat with XRay's table columns, the summary dict
+  surfaces `n_llm_calls` as both `n_agent_steps` and `total_llm_calls`,
+  and `n_tool_calls` as `n_env_steps` (since the prior counts were
+  per-LLM-call and per-env-step in the dropped batched model).
 
 ---
 
@@ -770,9 +797,9 @@ The following are **deleted outright** (no deprecation alias):
   renders all tabs.
 - **Smoke**: a new experiment dir (events/ layout) loads through XRay and
   renders all tabs.
-- **Unit**: `EventStreamer.record()` and `EventStreamer.begin_turn()` produce
-  equivalent `AgentEvent`s; both paths preserve `AgentEvent.id`,
-  back-references, and field set.
+- **Unit**: `EventStreamer.emit()` fold + sink fan-out is coherent under
+  parallel dispatch (lock-guarded counters; see
+  `tests/test_summary_concurrency.py`).
 - **Unit**: `MonitoredTool.execute_action` returns `Observation | StepError`
   unchanged, records a `ToolCallEvent` per call, raises `BudgetExceeded`
   when budget is exhausted. Drop-in compatibility: a Toolbox with mixed
@@ -789,8 +816,9 @@ The following are **deleted outright** (no deprecation alias):
 1. ~~**Budget granularity.**~~ **Resolved.** All caps (`max_turns`,
    `max_tool_calls`, `max_cost_usd`, `max_prompt_tokens`,
    `max_completion_tokens`, `max_wallclock_s`) ship enforced. `Budget.exhausted`
-   checks every cap; `EventStreamer._flush_agent_event` bumps cost + tokens from
-   each `LLMCall.usage`; `MonitoredTool` raises `BudgetExceeded` on tool-call
+   checks every cap; `EventStreamer.on_llm_call` bumps cost + tokens from
+   each `LLMCall.usage`; `EventStreamer.on_step` bumps `turns` once per
+   agent step; `MonitoredTool` raises `BudgetExceeded` on tool-call
    ticks. `max_steps` was never an alias — `max_turns` is the only name.
 2. **`Agent.step` deprecation timeline.** Decided: keep one release —
    `step` stays required as the canonical sync entry point. Agents

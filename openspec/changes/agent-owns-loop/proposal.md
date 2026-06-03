@@ -422,9 +422,15 @@ class EventStreamer:
         self,
         trajectory_id: str,
         storage: Storage | None,
-        summary: SummaryProcessor | None,
         budget: Budget | None,
     ): ...
+
+    # --- Single fan-out entry point. ---
+    def emit(self, te: TrajectoryEvent) -> str:
+        """Fold per-episode stats counters (under a lock) + forward
+        to each sink. Sole event-flow path: every producer (LLM,
+        MonitoredTool, the boundary helpers below) funnels through
+        this method."""
 
     # --- Producer-facing hook (called by LLM.call() auto-emit). ---
     def on_llm_call(
@@ -433,10 +439,15 @@ class EventStreamer:
         profiling: dict[str, tuple[float, float]] | None = None,
         error: StepError | None = None,
     ) -> str:
-        """Emit one LLMCallEvent, bump Budget (turn + LLM usage),
+        """Emit one LLMCallEvent, bump Budget (LLM usage cost+tokens),
         enforce caps. Returns the event id (stashed as the active
-        turn id so subsequent ToolCallEvents inherit it via
+        parent_event_id so subsequent ToolCallEvents inherit it via
         `parent_event_id_getter`)."""
+
+    # --- Agent-loop hook (called once per Agent.run iteration). ---
+    def on_step(self) -> None:
+        """Bump `budget.turns` + enforce. Turn-counting is per agent
+        step, NOT per LLM call (one step may make 0..N LLM calls)."""
 
     # --- Episode-only boundary helpers (not called by agents). ---
     def record_reset(self, initial: EnvironmentOutput) -> None: ...
@@ -444,6 +455,13 @@ class EventStreamer:
     def record_evaluation(self, reward: float, info: dict | None = None, *,
                           is_terminal: bool = True) -> None: ...
     def current_parent_event_id(self) -> str: ...                          # for MonitoredTool
+
+    # --- Final stats (queried by Episode at finalize). ---
+    def summary_stats(self, *, duration: float | None,
+                      final_reward: float) -> dict:
+        """Returns the per-episode stats dict written to
+        TrajectoryMetadata.summary_stats. Replaces the dropped
+        SummaryProcessor; no separate episode_summary.jsonl."""
 
     @property
     def budget(self) -> Budget: ...                                # for agent introspection
@@ -456,12 +474,14 @@ RL HTTP sink can subscribe to a clean stream of events.
 
 `EventStreamerConfig` is a forward seam on `EpisodeConfig` for sink
 configuration (OTel, RL HTTP, custom). Phase 1 ships an empty
-`EventStreamerConfig` with FileStorage + SummaryProcessor always-on; Phase
-2 adds fields like `enable_otel: bool` and `rl_http_endpoint: str | None`.
+`EventStreamerConfig` — `FileStorage` is the sole sink (per-episode
+stats are folded directly inside the streamer; no separate sink for
+them). Phase 2 adds fields like `enable_otel: bool` and
+`rl_http_endpoint: str | None`.
 
-Cross-turn state (trajectory_id, storage, summary, budget) lives on
-`Episode` and is bound into the `EventStreamer` at construction.
-Agents never read or write that state directly.
+Cross-episode state (sinks, budget) lives on `Episode` and is bound
+into the `EventStreamer` at construction. Agents never read or write
+that state directly.
 
 ### `TaskDone` — end-of-episode signal
 
@@ -499,10 +519,10 @@ class MonitoredTool(AsyncTool):
     def __init__(
         self,
         inner: Tool | AsyncTool,
-        trajectory: Trajectory,
+        emit: Callable[[TrajectoryEvent], str],   # streamer.emit
         budget: Budget,
-        storage: Storage,
-        summary: SummaryProcessor,
+        parent_event_id_getter: Callable[[], str] | None = None,
+        task: Any | None = None,
     ): ...
 
     @property

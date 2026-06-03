@@ -108,6 +108,25 @@ class LLMConfig(ValidatedConfig):
     # model thinks on step 0 and nowhere else — usually wrong for agents.
     interleaved_thinking: bool = False
     tool_choice: Literal["auto", "none", "required"] | None = "auto"
+    # `parallel_tool_calls` controls TWO things together:
+    #   1. The provider-side flag passed to OpenAI/Anthropic, allowing
+    #      the model to emit multiple `tool_calls` in one assistant
+    #      message when it wants to.
+    #   2. The cube-harness dispatch contract: when True, the framework
+    #      (specifically `GennyParallel.run`) fans the emitted tool
+    #      calls out via `asyncio.gather` — they execute concurrently,
+    #      results are merged into the next obs.
+    #
+    # Tool-call safety contract: when this is True, the agent author
+    # implicitly trusts the model to know which tool calls are safe to
+    # parallelize. There is no per-tool `parallel_safe` declaration in
+    # cube-harness — the model is the decision-maker, and tool
+    # descriptions in the prompt are where parallelism semantics get
+    # communicated ("call this tool at most once per turn", etc.).
+    # Set this to False for any agent whose tool set has shared
+    # mutable state across calls (e.g. browser Page, terminal shell);
+    # the framework will then dispatch sequentially. Default is False
+    # — conservative.
     parallel_tool_calls: bool = False
     num_retries: int = 5
     retry_strategy: Literal["exponential_backoff_retry", "constant_retry"] = "exponential_backoff_retry"

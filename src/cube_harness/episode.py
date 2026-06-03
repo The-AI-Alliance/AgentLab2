@@ -38,20 +38,24 @@ class EpisodeConfig(TypedBaseModel):
     max_steps: int
     max_cost_usd: float | None = None
     task_config: TaskConfig
-    # Recorder/sink configuration. Default = FileStorage + summary.
-    # Forward seam for OTel / RL HTTP / extra sinks (see EventStreamerConfig).
+    # Streamer/sink configuration. Default = FileStorage as the sole
+    # sink (counter folding for `summary_stats` lives inside the
+    # streamer itself, no separate sink). Forward seam for OTel /
+    # RL HTTP / extra sinks; see `EventStreamerConfig`.
     recorder_config: EventStreamerConfig = Field(default_factory=EventStreamerConfig)
 
 
 class Episode:
     """Manages the execution of an agent on a specific task in an environment.
 
-    RFC `agent-owns-loop` (Phase E): Episode no longer drives a per-turn
-    loop. It builds the monitored toolbox + EventStreamer, hands them to
-    `agent.run(initial_obs, task, streamer)`, and finalizes regardless of
-    how the agent returns or raises. The previous `_run_loop` is gone;
-    every agent (legacy `step()` and new overridden `run()`) flows
-    through the same Episode body.
+    RFC `agent-owns-loop`: Episode no longer drives a per-turn loop.
+    It builds the monitored env_tool + EventStreamer, attaches the
+    streamer to the agent's event producers (LLM, sub-agents) via
+    `agent.attach_recorder(streamer)`, then calls
+    `await agent.run(initial.obs, env_tool)` and finalizes regardless
+    of how the agent returns or raises. The previous `_run_loop` is
+    gone; every agent (legacy `step()` and new overridden `run()`)
+    flows through the same Episode body.
 
     Public `run()` stays sync — callers (`exp_runner`, recipes, Ray
     workers) keep their existing signature. Internally `run()` wraps an
