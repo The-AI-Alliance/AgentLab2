@@ -2096,9 +2096,7 @@ def render_event_rail_html(events: EpisodeEvents | None, selected: int) -> str:
 
     return (
         "<div id='xray-event-rail' style='max-height:640px;overflow-y:auto;padding:4px;"
-        "background:#f8f9fa;border-radius:8px;border:1px solid #e2e8f0;'>"
-        + "".join(cards_html)
-        + "</div>"
+        "background:#f8f9fa;border-radius:8px;border:1px solid #e2e8f0;'>" + "".join(cards_html) + "</div>"
     )
 
 
@@ -2128,13 +2126,17 @@ def render_group_observation_html(events: EpisodeEvents, group: EventGroup) -> t
         action = events.action(idx)
         label = action.name if action is not None else f"observation #{idx}"
         if multiple:
-            blocks.append(f"<h4 style='margin:8px 0 4px;'>🖥️ Sibling {n + 1}/{len(obs_indices)} — {html_lib.escape(label)}</h4>")
+            blocks.append(
+                f"<h4 style='margin:8px 0 4px;'>🖥️ Sibling {n + 1}/{len(obs_indices)} — {html_lib.escape(label)}</h4>"
+            )
         else:
             blocks.append(f"<h4 style='margin:8px 0 4px;'>🖥️ {html_lib.escape(label)}</h4>")
         img = screenshot_from_obs(obs)
         if img is not None:
             images.append(img)
-            blocks.append(f"<div style='font-size:12px;color:#6b7280;'>screenshot {img.size[0]}×{img.size[1]} → see gallery</div>")
+            blocks.append(
+                f"<div style='font-size:12px;color:#6b7280;'>screenshot {img.size[0]}×{img.size[1]} → see gallery</div>"
+            )
         if obs is not None:
             for content in obs.contents:
                 if isinstance(content.data, str) and content.data.strip():
@@ -2180,9 +2182,7 @@ def render_group_error_md(events: EpisodeEvents, group: EventGroup) -> str:
         if err is None:
             continue
         parts.append(
-            f"### ⚠️ {err.error_type}\n"
-            f"**Message:** {err.exception_str}\n\n"
-            f"**Stack Trace:**\n```\n{err.stack_trace}\n```"
+            f"### ⚠️ {err.error_type}\n**Message:** {err.exception_str}\n\n**Stack Trace:**\n```\n{err.stack_trace}\n```"
         )
     return "\n\n---\n\n".join(parts) if parts else "No errors in this group."
 

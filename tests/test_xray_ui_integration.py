@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 from cube_harness.analyze import xray_utils
-from cube_harness.analyze.xray_events import EpisodeEvents, KIND_LLM
+from cube_harness.analyze.xray_events import KIND_LLM, EpisodeEvents
 from cube_harness.core import LLMCallEvent
 from cube_harness.storage import FileStorage
 from tests.xray_fixture import build_demo_experiment

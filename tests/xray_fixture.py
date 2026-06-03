@@ -48,7 +48,9 @@ def _obs(goal: str, color: str, axtree: str) -> Observation:
     )
 
 
-def _llm_event(tag: str, user: str, assistant: str, ptoks: int, ctoks: int, cost: float, *, error: bool = False) -> LLMCallEvent:
+def _llm_event(
+    tag: str, user: str, assistant: str, ptoks: int, ctoks: int, cost: float, *, error: bool = False
+) -> LLMCallEvent:
     call = LLMCall(
         tag=tag,
         llm_config=LLMConfig(model_name="openai/gpt-4o-mini", temperature=0.7),
@@ -68,7 +70,11 @@ def _llm_event(tag: str, user: str, assistant: str, ptoks: int, ctoks: int, cost
             cost=cost,
         ),
     )
-    err = StepError(error_type="RateLimitError", exception_str="429 too many requests", stack_trace="…") if error else None
+    err = (
+        StepError(error_type="RateLimitError", exception_str="429 too many requests", stack_trace="…")
+        if error
+        else None
+    )
     return LLMCallEvent(call=call, error=err)
 
 
@@ -127,7 +133,9 @@ def build_demo_experiment(exp_dir: Path, traj_id: str = DEMO_TRAJ_ID) -> str:
     )
 
     # Turn 2 — PARALLEL: one LLM call, two tool calls, plus a step-wise reward.
-    l2 = _llm_event("act", "Type the query and read results.", "Typing 'shoes' and reading the page in parallel.", 420, 60, 0.006)
+    l2 = _llm_event(
+        "act", "Type the query and read results.", "Typing 'shoes' and reading the page in parallel.", 420, 60, 0.006
+    )
     ev(l2, 1002.3, 1010.0)
     t2a = ToolCallEvent(
         parent_event_id=l2.id,
@@ -146,7 +154,11 @@ def build_demo_experiment(exp_dir: Path, traj_id: str = DEMO_TRAJ_ID) -> str:
         1010.0,
         1010.6,
     )
-    ev(EvaluationEvent(reward=0.5, info={"progress": "found results"}, is_terminal=False, parent_event_id=t2a.id), 1010.6, 1010.6)
+    ev(
+        EvaluationEvent(reward=0.5, info={"progress": "found results"}, is_terminal=False, parent_event_id=t2a.id),
+        1010.6,
+        1010.6,
+    )
 
     # Turn 3 — an LLM-call error event, then a recovering final step.
     l3err = _llm_event("act", "Add first result to cart.", "(rate limited)", 0, 0, 0.0, error=True)
