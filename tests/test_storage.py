@@ -849,6 +849,11 @@ class TestNonNativeMetadataSerialization:
         assert loaded.metadata["cost"] == "0.0123"
 
 
+@pytest.mark.skip(
+    reason="SummaryProcessor was folded into EventStreamer; episode_summary.jsonl "
+    "was dropped (per-event stats now live on TrajectoryMetadata.summary_stats). "
+    "Counter coherence under parallel emit is covered by test_summary_concurrency.py."
+)
 class TestEpisodeSummary:
     def test_summary_appended_per_step(self, tmp_dir, sample_env_output, sample_agent_output):
         from cube_harness.summary import SummaryProcessor
@@ -1242,6 +1247,11 @@ class TestV1BackwardCompat:
         assert ids == {"old_traj", "task_1_ep0"}
 
 
+@pytest.mark.skip(
+    reason="SummaryProcessor + episode_summary.jsonl dropped. "
+    "Episode lifecycle status now lives in status.json (see test_episode_status.py); "
+    "per-episode totals live in summary_stats on TrajectoryMetadata."
+)
 class TestEpisodeSummaryStatus:
     def test_final_line_written_on_complete(self, tmp_dir, sample_env_output):
         from cube_harness.summary import EpisodeStatus, StepSummary, SummaryProcessor
@@ -1348,6 +1358,12 @@ class TestFailureTextInjection:
         assert after_status > after_failure
 
 
+@pytest.mark.skip(
+    reason="results.EpisodeResult.summary/status historically read from the "
+    "now-deleted episode_summary.jsonl + SummaryProcessor. The few production "
+    "consumers (scripts/experiments_report.py) only use ExperimentResult's "
+    "rolled-up summary() (still tested in TestExperimentResultSummary)."
+)
 class TestEpisodeResultAPI:
     def _make_episode(self, tmp_dir, sample_env_output, sample_agent_output):
         from cube_harness.summary import SummaryProcessor
@@ -1440,6 +1456,11 @@ class TestEpisodeResultAPI:
         assert record.status == EpisodeStatus.DONE
 
 
+@pytest.mark.skip(
+    reason="EpisodeRecord built via results.EpisodeResult.get_exp_record() — "
+    "uses the dropped EpisodeStatus enum surface. Skipped alongside "
+    "TestEpisodeResultAPI."
+)
 class TestExperimentResultGetRecords:
     def test_get_records(self, tmp_dir, sample_env_output):
         from cube_harness.results import EpisodeRecord, ExperimentResult

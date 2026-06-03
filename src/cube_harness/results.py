@@ -1,5 +1,13 @@
 import json
 from collections.abc import Iterator
+
+# Compatibility re-export: the lifecycle enum is now sourced from
+# `episode_status.EpisodeStatus`, but `results.EpisodeRecord.status`
+# fields persist a smaller subset (PENDING / RUNNING / DONE / FAILED)
+# from the old `summary.EpisodeStatus` enum that no longer exists.
+# Mirror the old surface so model_validate still recognizes those
+# string values when loading historic episode records.
+from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -16,7 +24,15 @@ from cube_harness.storage import (
     FileStorage,
     _read_step_file,
 )
-from cube_harness.summary import EpisodeStatus, ExperimentSummary, StepSummary
+from cube_harness.summary import ExperimentSummary
+
+
+class EpisodeStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    DONE = "done"
+    FAILED = "failed"
+
 
 if TYPE_CHECKING:
     from cube_harness.episode import EpisodeConfig
@@ -42,7 +58,9 @@ class EpisodeResult:
         self._metadata: Trajectory | None = None
         self._steps: dict[int, TrajectoryStep] = {}
         self._traj_id: str | None = None
-        self._summary: list[StepSummary] | None = None
+        # `episode_summary.jsonl` was dropped — per-event stats now live
+        # inside the streamer + on `TrajectoryMetadata.summary_stats`.
+        self._summary: list = []
 
     def trajectory_id(self) -> str:
         if self._traj_id is None:
@@ -66,28 +84,28 @@ class EpisodeResult:
     def summary_stats(self) -> dict[str, Any] | None:
         return self.metadata().summary_stats
 
-    def summary(self) -> list[StepSummary]:
-        if self._summary is None:
-            path = self._dir / "episode_summary.jsonl"
-            if not path.exists():
-                self._summary = []
-            else:
-                self._summary = [
-                    StepSummary.model_validate_json(line) for line in path.read_text().splitlines() if line.strip()
-                ]
+    def summary(self) -> list:
+        """DEPRECATED: returned per-event StepSummary rows from
+        `episode_summary.jsonl`. The jsonl was dropped — counters now
+        live on `TrajectoryMetadata.summary_stats`. Returns []."""
         return self._summary
 
     def status(self) -> EpisodeStatus:
-        path = self._dir / "episode_summary.jsonl"
-        if not path.exists():
+        """Derive the legacy 4-value EpisodeStatus from `status.json`.
+        Maps the live `episode_status.EpisodeStatus` (8-value lifecycle
+        enum) down to PENDING / RUNNING / DONE / FAILED for back-compat
+        with consumers of this module's older surface."""
+        raw = RawEpisodeStatus.read(self._dir / "status.json")
+        if raw is None:
             return EpisodeStatus.PENDING
-        last_line = None
-        for line in path.read_text().splitlines():
-            if line.strip():
-                last_line = line
-        if last_line is None:
+        status_str = raw.status.upper()
+        if status_str in ("QUEUED", "PENDING"):
             return EpisodeStatus.PENDING
-        return StepSummary.model_validate_json(last_line).status
+        if status_str == "RUNNING":
+            return EpisodeStatus.RUNNING
+        if status_str in ("COMPLETED", "DONE"):
+            return EpisodeStatus.DONE
+        return EpisodeStatus.FAILED
 
     def n_turns(self) -> int:
         steps_dir = self._dir / STEPS_DIR

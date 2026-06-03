@@ -21,7 +21,6 @@ from cube_harness.llm import is_permanent_llm_error
 from cube_harness.metrics.tracer import get_tracer
 from cube_harness.storage import FileStorage, Storage, TrajectoryView
 from cube_harness.streamer import EventStreamer, EventStreamerConfig
-from cube_harness.summary import SummaryProcessor
 from cube_harness.tool import Budget, BudgetExceeded, TaskDone, as_async, install_monitoring
 
 logger = logging.getLogger(__name__)
@@ -49,7 +48,7 @@ class Episode:
 
     RFC `agent-owns-loop` (Phase E): Episode no longer drives a per-turn
     loop. It builds the monitored toolbox + EventStreamer, hands them to
-    `agent.run(initial_obs, task, recorder)`, and finalizes regardless of
+    `agent.run(initial_obs, task, streamer)`, and finalizes regardless of
     how the agent returns or raises. The previous `_run_loop` is gone;
     every agent (legacy `step()` and new overridden `run()`) flows
     through the same Episode body.
@@ -149,11 +148,11 @@ class Episode:
             1. setup (status, task, action_set, agent, trajectory, dirs).
             2. wrap task.toolbox with MonitoredTool (install_monitoring).
             3. build EventStreamer bound to trajectory + storage + summary.
-            4. record initial obs (recorder.record_reset).
-            5. `await agent.run(initial.obs, task, recorder)` — the agent
+            4. record initial obs (streamer.record_reset).
+            5. `await agent.run(initial.obs, task, streamer)` — the agent
                drives its own loop now.
             6. finalize:
-               - terminal task.evaluate() → recorder.record_evaluation.
+               - terminal task.evaluate() → streamer.record_evaluation.
                - summary_stats + save_trajectory.
                - summary.on_episode_complete; EpisodeRecord.write.
                - task.close + tracer.shutdown.
@@ -173,7 +172,7 @@ class Episode:
         # Heartbeat 1: covers stuck task creation / reset.
         ep_status = self._open_status(trajectory_id)
         meta: TrajectoryMetadata | None = None
-        summary_proc: SummaryProcessor | None = None
+        streamer: EventStreamer | None = None
         max_steps_reached = False
 
         try:
@@ -211,33 +210,26 @@ class Episode:
                 (ep_dir / "episode_config.json").write_text(
                     self.config.model_dump_json(indent=2, serialize_as_any=True)
                 )
-                summary_proc = SummaryProcessor(ep_dir)
 
-                # 3. Build budget + recorder + install monitoring on the
-                # task's toolbox in place. Tool calls fired during the
-                # run record their parent via the recorder's current
-                # turn id. Event numbering is owned by storage.save_event
-                # — writers don't coordinate, no counter to thread.
+                # 3. Build budget + streamer + install monitoring. The
+                # streamer is the single event fan-out: producers (LLM,
+                # MonitoredTool) emit through `streamer.emit(...)`, which
+                # folds stats counters AND forwards to sinks (today
+                # FileStorage; OTel + RL HTTP plug in additively via
+                # EventStreamerConfig). Event numbering is owned by
+                # storage.save_event (per-trajectory `itertools.count`).
                 budget = Budget(
                     max_turns=self.config.max_steps,
                     max_cost_usd=self.config.max_cost_usd,
                 )
                 metadata_updates: dict = {}
-                recorder = EventStreamer(
+                streamer = EventStreamer(
                     trajectory_id=trajectory_id,
                     storage=self.storage,
-                    summary=summary_proc,
                     budget=budget,
                     metadata_updates=metadata_updates,
                 )
-                install_monitoring(
-                    task,
-                    trajectory_id,
-                    budget,
-                    parent_event_id_getter=recorder.current_parent_event_id,
-                    storage=self.storage,
-                    summary=summary_proc,
-                )
+                install_monitoring(task, streamer)
 
                 # 4. The env-tool the agent will see is the task's
                 # (now-monitored) tool, wrapped via `as_async` so the
@@ -261,7 +253,7 @@ class Episode:
 
                 # 5. Record the initial obs as a synthetic ToolCallEvent
                 # whose parent is the RESET sentinel.
-                recorder.record_reset(initial)
+                streamer.record_reset(initial)
                 logger.info(colored("Episode started — reset done", "blue"))
 
                 # 6. Attach the recorder to the agent's event producers
@@ -269,14 +261,14 @@ class Episode:
                 # propagates to held LLMs so their `.call()` auto-emits
                 # `LLMCallEvent`s — agent code never touches the
                 # recorder directly.
-                agent.attach_recorder(recorder)
+                agent.attach_recorder(streamer)
 
                 # 7. Drive the agent. agent.run is the canonical entry.
                 try:
                     await agent.run(initial.obs, env_tool)
                 except BudgetExceeded as e:
                     logger.info(colored(f"Budget exceeded: {e}", "yellow"))
-                    recorder.record_failure(e)
+                    streamer.record_failure(e)
                     max_steps_reached = True
                 except TaskDone:
                     # Clean episode end from the task side — agent emitted
@@ -288,7 +280,7 @@ class Episode:
                     # provider errors propagate after finalization so the
                     # runner stops the retry budget.
                     logger.exception(f"Error during agent.run: {e}")
-                    recorder.record_failure(e)
+                    streamer.record_failure(e)
                     raise
 
                 # 7. Terminal evaluation. cube-standard's Task.evaluate
@@ -305,9 +297,9 @@ class Episode:
                 try:
                     reward, info = task.evaluate()
                 except Exception as e:
-                    recorder.record_failure(e)
+                    streamer.record_failure(e)
                     raise
-                recorder.record_evaluation(reward, info, is_terminal=True)
+                streamer.record_evaluation(reward, info, is_terminal=True)
 
                 # Finalize: write the TrajectoryMetadata at episode end
                 # with summary_stats + reward_info + end_time, then
@@ -320,13 +312,11 @@ class Episode:
                         "metadata": final_metadata,
                         "end_time": end_time,
                         "reward_info": {"reward": reward, "done": True, **info},
-                        "summary_stats": summary_proc.summary_stats(
-                            duration=end_time - start_time, final_reward=reward
-                        ),
+                        "summary_stats": streamer.summary_stats(duration=end_time - start_time, final_reward=reward),
                     }
                 )
                 self.storage.finalize_episode(meta)
-                summary_proc.on_episode_complete(meta, self.storage)
+                self.storage.update_experiment_summary(meta)
                 try:
                     ep_record = EpisodeRecord.from_view(
                         self.storage.load_episode(meta.id),
@@ -357,14 +347,14 @@ class Episode:
             # Persist summary_stats on terminal failure paths too. With
             # it on the metadata stub, the XRay tables render correct
             # step/token/cost stats without loading any events.
-            if meta is not None and summary_proc is not None and meta.summary_stats is None:
+            if meta is not None and streamer is not None and meta.summary_stats is None:
                 try:
                     end = meta.end_time or time.time()
                     meta = meta.model_copy(
                         update={
-                            "summary_stats": summary_proc.summary_stats(
+                            "summary_stats": streamer.summary_stats(
                                 duration=end - (meta.start_time or end),
-                                final_reward=summary_proc.final_reward,
+                                final_reward=streamer.final_reward,
                             ),
                         }
                     )

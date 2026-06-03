@@ -44,19 +44,9 @@ def _build_recorder_and_storage(budget: Budget, task: object) -> tuple[EventStre
     """Build EventStreamer + storage + install monitoring — the way
     Episode does it. Storage owns event numbering; nothing to thread."""
     storage = _FakeStorage()
-    recorder = EventStreamer(
-        trajectory_id="t",
-        storage=storage,
-        budget=budget,
-    )
-    install_monitoring(
-        task,
-        trajectory_id="t",
-        budget=budget,
-        parent_event_id_getter=recorder.current_parent_event_id,
-        storage=storage,
-    )
-    return recorder, storage
+    streamer = EventStreamer(trajectory_id="t", storage=storage, budget=budget)
+    install_monitoring(task, streamer)
+    return streamer, storage
 
 
 class _SleepyTool(AbstractTool):

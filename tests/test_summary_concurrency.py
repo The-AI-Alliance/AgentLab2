@@ -1,27 +1,30 @@
-"""Regression: SummaryProcessor under concurrent on_event from
-parallel tool-call workers.
+"""Regression: EventStreamer's stats counters under concurrent emits
+from parallel tool-call workers.
 
 GennyParallel dispatches N tool calls via asyncio.gather +
-asyncio.to_thread. Each worker thread calls MonitoredTool.execute_action
-→ _record_tool_call → summary.on_event on the SAME SummaryProcessor.
-Without a lock, the read-modify-write of counters races: undercounted
-steps, dropped error_type, garbled jsonl rows.
+asyncio.to_thread. Each worker thread calls
+MonitoredTool.execute_action → _record_tool_call → streamer.emit on
+the SAME EventStreamer. Without the lock, the read-modify-write of
+counters races: undercounted steps, dropped error_type.
 
-Fixed by adding `threading.Lock` to SummaryProcessor in this PR's
-review pass. This test guards it.
+Fixed by the threading.Lock guarding `_fold_stats` inside the
+streamer. This test guards it.
+
+NOTE: prior to the SummaryProcessor → EventStreamer fold, this file
+tested the SummaryProcessor's jsonl writes. The jsonl was dropped
+along with SummaryProcessor; what remains worth guarding is just the
+counter coherence under parallel emit.
 """
 
-import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 
-from cube.core import Action, Observation
+from cube.core import Observation
 from litellm import Message
 
 from cube_harness.core import LLMCallEvent, ToolCallEvent, TrajectoryEvent
 from cube_harness.llm import LLMCall, LLMConfig, Prompt, Usage
-from cube_harness.summary import SummaryProcessor
+from cube_harness.streamer import EventStreamer
 
 
 def _tool_call_event() -> TrajectoryEvent:
@@ -45,7 +48,6 @@ def _agent_event() -> TrajectoryEvent:
         output=Message(content="ok", role="assistant"),
         usage=Usage(prompt_tokens=1, completion_tokens=1, total_tokens=2, cost=0.0),
     )
-    _ = Action  # silence unused
     return TrajectoryEvent(
         output=LLMCallEvent(call=call),
         start_time=0.0,
@@ -53,49 +55,44 @@ def _agent_event() -> TrajectoryEvent:
     )
 
 
-def test_on_event_concurrent_writes_count_correctly(tmp_path: Path) -> None:
-    """Fire N on_event calls from a thread pool, assert the counters
-    add up to N. Without the lock, the read-modify-write of
-    `_n_env_steps` would race and undercount."""
-    sp = SummaryProcessor(tmp_path)
+def test_concurrent_emit_counts_correctly() -> None:
+    """Fire N emit calls from a thread pool, assert the counters add
+    up to N. Without the lock, the read-modify-write of `_n_tool_calls`
+    would race and undercount."""
+    streamer = EventStreamer(trajectory_id="t")
     n_calls = 200
     barrier = threading.Barrier(n_calls)
 
     def worker() -> None:
         # Sync all workers to start at the same moment to maximize
-        # contention; without the lock the read-modify-write of
-        # `_n_env_steps` would race.
+        # contention.
         barrier.wait()
-        sp.on_event(_tool_call_event())
+        streamer.emit(_tool_call_event())
 
     with ThreadPoolExecutor(max_workers=n_calls) as pool:
         list(pool.map(lambda _: worker(), range(n_calls)))
 
-    assert sp._n_env_steps == n_calls
+    assert streamer._n_tool_calls == n_calls
 
 
-def test_on_event_concurrent_jsonl_lines_well_formed(tmp_path: Path) -> None:
-    """The episode_summary.jsonl file must contain one valid JSON line
-    per event — no interleaved / truncated rows from concurrent
-    writes."""
-    sp = SummaryProcessor(tmp_path)
-    n_calls = 200
+def test_concurrent_mixed_emit_keeps_counters_coherent() -> None:
+    """Mixed LLM + tool emits must leave counters consistent — total
+    events = sum of per-kind counts, no losses or double-counts."""
+    streamer = EventStreamer(trajectory_id="t")
+    n_calls = 300
     barrier = threading.Barrier(n_calls)
 
     def worker(i: int) -> None:
         barrier.wait()
-        # Mix kinds so the workers race on different code paths inside
-        # on_event (agent vs tool_call vs cost-bumping branches).
         if i % 3 == 0:
-            sp.on_event(_agent_event())
+            streamer.emit(_agent_event())
         else:
-            sp.on_event(_tool_call_event())
+            streamer.emit(_tool_call_event())
 
     with ThreadPoolExecutor(max_workers=n_calls) as pool:
         list(pool.map(worker, range(n_calls)))
 
-    lines = (tmp_path / "episode_summary.jsonl").read_text().splitlines()
-    assert len(lines) == n_calls
-    for line in lines:
-        # Each line is parseable JSON — no interleaved writes.
-        json.loads(line)
+    n_llm = (n_calls + 2) // 3  # ceil(n_calls / 3) — i=0,3,6,…
+    n_tool = n_calls - n_llm
+    assert streamer._n_llm_calls == n_llm
+    assert streamer._n_tool_calls == n_tool

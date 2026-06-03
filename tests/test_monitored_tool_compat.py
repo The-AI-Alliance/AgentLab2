@@ -94,20 +94,26 @@ def _make_monitored(
     parent_event_id_getter: Callable[[], str] | None = None,
 ) -> MonitoredTool | AsyncMonitoredTool:
     storage = storage if storage is not None else _FakeStorage()
+    # Inline a minimal emit callable that forwards to the test FakeStorage.
+    # Mirrors what `EventStreamer.emit` does — no stats fold needed since
+    # these tests inspect storage directly, not stats counters.
+
+    def emit(te: TrajectoryEvent) -> str:
+        storage.save_event(te, "t")
+        return te.output.id
+
     if isinstance(inner, AbstractAsyncTool):
         return AsyncMonitoredTool(
             inner,
-            trajectory_id="t",
+            emit=emit,
             budget=budget,
             parent_event_id_getter=parent_event_id_getter,
-            storage=storage,
         )
     return MonitoredTool(
         inner,
-        trajectory_id="t",
+        emit=emit,
         budget=budget,
         parent_event_id_getter=parent_event_id_getter,
-        storage=storage,
     )
 
 
@@ -269,18 +275,22 @@ def test_monitored_tool_forwards_direct_method_calls_to_inner() -> None:
     assert len(storage.tool_call_events()) == 0
 
 
+def _noop_emit(te: TrajectoryEvent) -> str:
+    return te.output.id
+
+
 def test_wrap_tool_picks_sync_or_async_by_inner_type() -> None:
     budget = Budget(max_turns=5)
-    sync_wrapped = wrap_tool(_SyncEchoTool(), trajectory_id="t", budget=budget)
-    async_wrapped = wrap_tool(_AsyncEchoTool(), trajectory_id="t", budget=budget)
+    sync_wrapped = wrap_tool(_SyncEchoTool(), emit=_noop_emit, budget=budget)
+    async_wrapped = wrap_tool(_AsyncEchoTool(), emit=_noop_emit, budget=budget)
     assert isinstance(sync_wrapped, MonitoredTool)
     assert isinstance(async_wrapped, AsyncMonitoredTool)
 
 
 def test_wrap_tool_is_idempotent() -> None:
     budget = Budget(max_turns=5)
-    once = wrap_tool(_SyncEchoTool(), trajectory_id="t", budget=budget)
-    twice = wrap_tool(once, trajectory_id="t", budget=budget)
+    once = wrap_tool(_SyncEchoTool(), emit=_noop_emit, budget=budget)
+    twice = wrap_tool(once, emit=_noop_emit, budget=budget)
     assert twice is once
 
 
@@ -294,10 +304,36 @@ class _FakeTask:
         setattr(self, attr, Toolbox(tools))
 
 
+def _make_streamer(
+    budget: Budget,
+    storage: _FakeStorage | None = None,
+    parent_event_id_getter: Callable[[], str] | None = None,
+) -> object:
+    """Lightweight streamer stand-in matching the duck-typed surface
+    `install_monitoring` reads: `.emit`, `.budget`,
+    `.current_parent_event_id`. Avoids importing EventStreamer to
+    keep this test module agnostic of streamer wiring."""
+
+    class _S:
+        def __init__(self) -> None:
+            self.budget = budget
+            self._store = storage if storage is not None else _FakeStorage()
+
+        def emit(self, te: TrajectoryEvent) -> str:
+            self._store.save_event(te, "t")
+            return te.output.id
+
+        def current_parent_event_id(self) -> str:
+            return parent_event_id_getter() if parent_event_id_getter is not None else "reset"
+
+    s = _S()
+    s.storage = s._store  # noqa: SLF001 — convenience accessor used by tests below
+    return s
+
+
 def test_install_monitoring_wraps_each_member_in_place() -> None:
     task = _FakeTask([_SyncEchoTool()])
-    budget = Budget(max_turns=5)
-    install_monitoring(task, trajectory_id="t", budget=budget)
+    install_monitoring(task, _make_streamer(Budget(max_turns=5)))
     assert all(isinstance(t, MonitoredTool) for t in task.toolbox.tools)
     assert "sync_echo" in task.toolbox._action_name_to_tool
 
@@ -305,8 +341,8 @@ def test_install_monitoring_wraps_each_member_in_place() -> None:
 def test_install_monitoring_is_idempotent() -> None:
     task = _FakeTask([_SyncEchoTool()])
     budget = Budget(max_turns=5)
-    install_monitoring(task, trajectory_id="t", budget=budget)
-    install_monitoring(task, trajectory_id="t", budget=budget)
+    install_monitoring(task, _make_streamer(budget))
+    install_monitoring(task, _make_streamer(budget))
     assert len(task.toolbox.tools) == 1
     assert isinstance(task.toolbox.tools[0], MonitoredTool)
     assert not isinstance(task.toolbox.tools[0].inner, MonitoredTool)
@@ -316,9 +352,8 @@ def test_install_monitoring_dispatch_records_event() -> None:
     """After install_monitoring, calling task.toolbox.execute_action
     transitively writes a ToolCallEvent."""
     task = _FakeTask([_SyncEchoTool()])
-    budget = Budget(max_turns=5)
     storage = _FakeStorage()
-    install_monitoring(task, trajectory_id="t", budget=budget, storage=storage)
+    install_monitoring(task, _make_streamer(Budget(max_turns=5), storage=storage))
     task.toolbox.execute_action(_action("sync_echo", msg="hi"))
     assert len(storage.tool_call_events()) == 1
 
@@ -332,8 +367,7 @@ def test_install_monitoring_recurses_into_nested_toolboxes() -> None:
             self.toolbox = outer_box
 
     task = _Task()
-    budget = Budget(max_turns=5)
-    install_monitoring(task, trajectory_id="t", budget=budget)
+    install_monitoring(task, _make_streamer(Budget(max_turns=5)))
     # Every leaf is wrapped; toolboxes stay as toolboxes.
     assert isinstance(outer_box.tools[0], Toolbox)
     assert isinstance(outer_box.tools[0].tools[0], MonitoredTool)
@@ -341,18 +375,14 @@ def test_install_monitoring_recurses_into_nested_toolboxes() -> None:
 
 
 def test_install_monitoring_with_parent_event_id_getter() -> None:
-    """parent_event_id_getter is late-bound to the recorder's current turn.
+    """parent_event_id_getter is late-bound to the streamer's current turn.
     Recorded events carry the value the getter returns at call time."""
     task = _FakeTask([_SyncEchoTool()])
-    budget = Budget(max_turns=5)
     storage = _FakeStorage()
     current_turn = {"v": "agent-001"}
     install_monitoring(
         task,
-        trajectory_id="t",
-        budget=budget,
-        parent_event_id_getter=lambda: current_turn["v"],
-        storage=storage,
+        _make_streamer(Budget(max_turns=5), storage=storage, parent_event_id_getter=lambda: current_turn["v"]),
     )
     task.toolbox.execute_action(_action("sync_echo"))
     current_turn["v"] = "agent-002"

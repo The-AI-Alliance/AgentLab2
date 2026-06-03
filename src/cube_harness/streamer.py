@@ -1,4 +1,4 @@
-"""EventStreamer — the trajectory's event fan-out.
+"""EventStreamer — the trajectory's event fan-out + per-episode stats.
 
 The streamer is attached to each event-producing component:
 
@@ -16,14 +16,21 @@ Episode-only helpers (`record_reset`, `record_failure`,
 `record_evaluation`) remain on this object — they emit synthetic events
 at trajectory boundaries that no component naturally owns.
 
+Per-episode stats (n_llm_calls, n_tool_calls, n_evaluations,
+total_actions, tokens, cost, first error, ...) are folded INSIDE the
+streamer as events flow through. `summary_stats()` returns the final
+dict — what previously lived on a separate `SummaryProcessor`. No
+per-event jsonl is written; the dict in `TrajectoryMetadata` is the
+single source of truth.
+
 `EventStreamerConfig` is the forward seam for multi-sink fan-out:
 FileStorage today; OTel + RL HTTP + custom sinks land via additive
 config fields without changing this surface.
 """
 
 import logging
+import threading
 import time
-from typing import TYPE_CHECKING
 
 from cube.core import Action, EnvironmentOutput, StepError, TypedBaseModel
 
@@ -35,11 +42,7 @@ from cube_harness.core import (
     TrajectoryEvent,
 )
 from cube_harness.llm import LLMCall
-from cube_harness.tool import BudgetExceeded, _stream_event
-
-if TYPE_CHECKING:
-    from cube_harness.summary import SummaryProcessor
-
+from cube_harness.tool import BudgetExceeded
 
 logger = logging.getLogger(__name__)
 
@@ -51,61 +54,118 @@ RESET_PARENT_EVENT_ID = "reset"
 class EventStreamerConfig(TypedBaseModel):
     """Configuration for the per-episode `EventStreamer`.
 
-    Pydantic config object — follows the same "Python is the config"
-    philosophy as `LLMConfig` / `AgentConfig`. Lives on `EpisodeConfig`
-    so a recipe can opt sinks in or out without touching Episode.
-
-    Phase 1 (this PR): only the file-storage + summary sinks exist;
-    they're always on and don't need configuration. The class exists
-    as a forward seam — future fields:
+    Forward seam — empty today. Phase 1 ships FileStorage as the only
+    sink (always on). Future fields:
 
       * `enable_otel: bool` — emit each event as an OTel span.
-      * `rl_http_endpoint: str | None` — POST events to an RL trainer
-        HTTP endpoint (see `~/dev/cube-harness/docs/rl-integration.md`).
-      * `extra_sinks: list[SinkConfig]` — user-defined sinks for
-        third-party telemetry pipelines.
-
-    Default `EventStreamerConfig()` is the current Phase-1 behavior:
-    FileStorage + SummaryProcessor, nothing else.
+      * `rl_http_endpoint: str | None` — POST events to an RL trainer.
+      * `extra_sinks: list[SinkConfig]` — user-defined sinks.
     """
 
 
 class EventStreamer:
-    """The trajectory's event sink. Built by Episode; attached to event
-    producers (LLM, env_tool) via their respective `attach_recorder`
-    methods.
+    """The trajectory's event fan-out + stats accumulator.
 
-    Cross-turn state (storage, summary, budget) lives on Episode and is
-    bound here at construction. Producers stream events through
-    `_stream_event` (storage + summary); the recorder also bumps the
-    Budget counters and enforces caps after each LLM call.
+    Built by Episode; attached to event producers (LLM, env_tool) via
+    their respective `attach_recorder` methods. Producers call
+    `emit(te)` which:
 
-    `current_parent_event_id()` returns the id of the most recent LLMCallEvent,
-    or `RESET_PARENT_EVENT_ID` if no LLM call has fired yet. Used by
-    MonitoredTool's parent_event_id_getter.
+      1. Folds stats counters (under a lock to be safe under parallel
+         tool dispatch from GennyParallel's asyncio.to_thread workers).
+      2. Forwards to every sink (currently FileStorage; OTel + RL HTTP
+         land via `EventStreamerConfig`).
+      3. Returns the event id.
+
+    `current_parent_event_id()` returns the id of the most recent
+    `LLMCallEvent`, or `RESET_PARENT_EVENT_ID` if no LLM call has
+    fired yet. Used by `MonitoredTool`'s `parent_event_id_getter` so
+    each ToolCallEvent parents under the LLM call that spawned it.
     """
 
     def __init__(
         self,
         trajectory_id: str,
         storage: object | None = None,
-        summary: "SummaryProcessor | None" = None,
         budget: object | None = None,
         metadata_updates: dict | None = None,
     ) -> None:
         self.trajectory_id = trajectory_id
         self.storage = storage
-        self.summary = summary
         # `cube_harness.tool.Budget`; loose-typed to avoid circular import.
         self.budget = budget
         # Mutable side-channel dict passed from Episode; merged into
-        # TrajectoryMetadata.metadata at finalize. Connectors that need a
-        # back-channel write here.
+        # TrajectoryMetadata.metadata at finalize. Connectors that need
+        # a back-channel write here.
         self.metadata_updates = metadata_updates if metadata_updates is not None else {}
         self._current_parent_event_id: str | None = None
-        self._n_llm_calls_emitted = 0
+        # Stats counters folded as events flow through. Lock guards the
+        # multi-counter read-modify-write under parallel dispatch.
+        self._lock = threading.Lock()
+        self._n_llm_calls = 0
+        self._n_tool_calls = 0
+        self._n_evaluations = 0
+        self._total_actions = 0
+        self._prompt_tokens = 0
+        self._completion_tokens = 0
+        self._cached_tokens = 0
+        self._cache_creation_tokens = 0
+        self._cost_usd = 0.0
+        self._reward = 0.0
+        self._done = False
+        self._error_type: str | None = None
 
-    # --- producer-facing hook (called by LLM.call() auto-emit) ---
+    # ----- single fan-out entry point ---------------------------------------
+
+    def emit(self, te: TrajectoryEvent) -> str:
+        """Fold stats + forward to sinks. Returns the event's id.
+
+        Sole event-flow entry point. LLM producers, MonitoredTool, and
+        the Episode-only boundary helpers all funnel through here so
+        every event flows through the same stats fold + sink fan-out.
+        """
+        with self._lock:
+            self._fold_stats(te.output)
+        # Sinks: today just FileStorage. Multi-sink fan-out lands when
+        # EventStreamerConfig grows OTel / RL HTTP fields.
+        if self.storage is not None:
+            save_event = getattr(self.storage, "save_event", None)
+            if save_event is not None:
+                save_event(te, self.trajectory_id)
+        # EvaluationEvent doesn't carry an `id` field (parent_event_id
+        # links it to a ToolCallEvent or it's terminal). Return empty
+        # string for those so producers that don't need the id don't
+        # have to special-case.
+        return getattr(te.output, "id", "")
+
+    def _fold_stats(self, out: object) -> None:
+        """Update per-episode counters from one event. Must hold `self._lock`."""
+        if isinstance(out, LLMCallEvent):
+            self._n_llm_calls += 1
+            if out.call is not None and out.call.usage is not None:
+                u = out.call.usage
+                self._prompt_tokens += u.prompt_tokens
+                self._completion_tokens += u.completion_tokens
+                self._cached_tokens += u.cached_tokens
+                self._cache_creation_tokens += u.cache_creation_tokens
+                self._cost_usd += u.cost
+            if out.error is not None and self._error_type is None:
+                self._error_type = out.error.error_type
+        elif isinstance(out, ToolCallEvent):
+            self._n_tool_calls += 1
+            if out.action is not None:
+                self._total_actions += 1
+            if out.error is not None and self._error_type is None:
+                self._error_type = out.error.error_type
+        elif isinstance(out, EvaluationEvent):
+            self._n_evaluations += 1
+            self._reward = out.reward
+            if out.is_terminal:
+                self._done = True
+        elif isinstance(out, AgentErrorEvent):
+            if self._error_type is None:
+                self._error_type = out.error.error_type
+
+    # ----- producer-facing hook (called by LLM.call() auto-emit) ------------
 
     def on_llm_call(
         self,
@@ -113,17 +173,16 @@ class EventStreamer:
         profiling: dict[str, tuple[float, float]] | None = None,
         error: StepError | None = None,
     ) -> str:
-        """Emit one `LLMCallEvent`, bump LLM-usage counters
+        """Emit one `LLMCallEvent`, bump Budget LLM-usage counters
         (cost + tokens), enforce caps. Returns the event id (also
-        stashed as the active turn id for subsequent tool calls).
+        stashed as the active parent_event_id for subsequent tool calls).
 
-        Note: does NOT bump `budget.turns` — turn-counting is per
-        agent step, not per LLM call (one step may make 0..N calls).
-        The agent loop calls `on_step` per iteration instead.
+        Does NOT bump `budget.turns` — turn-counting is per agent step,
+        not per LLM call (one step may make 0..N calls). The agent loop
+        calls `on_step` per iteration instead.
         """
         event = LLMCallEvent(call=call, profiling=dict(profiling or {}), error=error)
         self._current_parent_event_id = event.id
-        self._n_llm_calls_emitted += 1
         start, end = self._llm_window(profiling)
         if self.budget is not None and call.usage is not None:
             self.budget.bump_llm_usage(
@@ -131,14 +190,9 @@ class EventStreamer:
                 prompt=call.usage.prompt_tokens,
                 completion=call.usage.completion_tokens,
             )
-        _stream_event(
-            TrajectoryEvent(output=event, start_time=start, end_time=end),
-            self.trajectory_id,
-            self.storage,
-            self.summary,
-        )
-        # Enforce AFTER stream so the LLM call that crossed the cap is
-        # on disk before we abort. Mirrors what MonitoredTool does on
+        self.emit(TrajectoryEvent(output=event, start_time=start, end_time=end))
+        # Enforce AFTER emit so the LLM call that crossed the cap is on
+        # disk before we abort. Mirrors what MonitoredTool does on
         # tool dispatch.
         if self.budget is not None and self.budget.exhausted:
             raise BudgetExceeded()
@@ -164,7 +218,7 @@ class EventStreamer:
         now = time.time()
         return now, now
 
-    # --- Episode-only helpers (trajectory boundaries) ---
+    # ----- Episode-only boundary helpers ------------------------------------
 
     def record_reset(self, initial: EnvironmentOutput) -> None:
         """Synthetic ToolCallEvent capturing the initial observation from `task.reset()`."""
@@ -178,20 +232,10 @@ class EventStreamer:
             turn_id=RESET_PARENT_EVENT_ID,
         )
         ts = time.time()
-        _stream_event(
-            TrajectoryEvent(output=event, start_time=ts, end_time=ts),
-            self.trajectory_id,
-            self.storage,
-            self.summary,
-        )
+        self.emit(TrajectoryEvent(output=event, start_time=ts, end_time=ts))
 
     def record_failure(self, exc: BaseException) -> None:
-        """Capture an Episode-level failure as an `AgentErrorEvent`.
-
-        Accepts BaseException because the Budget/TaskDone signals
-        extend BaseException. Does NOT bump budget — we are already
-        past the failure point.
-        """
+        """Capture an Episode-level failure as an `AgentErrorEvent`."""
         if isinstance(exc, Exception):
             err = StepError.from_exception(exc)
         else:
@@ -202,33 +246,55 @@ class EventStreamer:
             )
         event = AgentErrorEvent(error=err)
         ts = time.time()
-        _stream_event(
-            TrajectoryEvent(output=event, start_time=ts, end_time=ts),
-            self.trajectory_id,
-            self.storage,
-            self.summary,
-        )
+        self.emit(TrajectoryEvent(output=event, start_time=ts, end_time=ts))
 
     def record_evaluation(self, reward: float, info: dict | None = None, *, is_terminal: bool = True) -> None:
         """Record a `task.evaluate()` result.
 
         Terminal flavor (default): Episode emits exactly one in
         `finally`. The step-wise flavor (`is_terminal=False`) is emitted
-        by `MonitoredTool` directly through `_record_step_evaluation`
-        — this API surfaces the terminal path only.
+        by `MonitoredTool` directly — this API surfaces the terminal
+        path only.
         """
         ev = EvaluationEvent(reward=float(reward), info=dict(info or {}), is_terminal=is_terminal)
         ts = time.time()
-        _stream_event(
-            TrajectoryEvent(output=ev, start_time=ts, end_time=ts),
-            self.trajectory_id,
-            self.storage,
-            self.summary,
-        )
+        self.emit(TrajectoryEvent(output=ev, start_time=ts, end_time=ts))
 
-    # --- getter consumed by MonitoredTool.parent_event_id_getter ---
+    # ----- read-only state surfaced for MonitoredTool's getter --------------
 
     def current_parent_event_id(self) -> str:
         """The id of the most recently emitted LLMCallEvent, or
         `RESET_PARENT_EVENT_ID` if no LLM call has fired yet."""
         return self._current_parent_event_id or RESET_PARENT_EVENT_ID
+
+    # ----- per-episode summary (folded incrementally; queried at finalize) --
+
+    @property
+    def has_error(self) -> bool:
+        return self._error_type is not None
+
+    @property
+    def final_reward(self) -> float:
+        """Reward of the most recent EvaluationEvent (the trajectory's final reward)."""
+        return self._reward
+
+    def summary_stats(self, *, duration: float | None, final_reward: float) -> dict:
+        """Final per-episode stats. Written to `TrajectoryMetadata.summary_stats`
+        at finalize. The single source of truth for XRay's per-trajectory
+        table (no separate jsonl file is written under the auto-recorder
+        model)."""
+        with self._lock:
+            return {
+                "n_env_steps": self._n_tool_calls,
+                "n_agent_steps": self._n_llm_calls,
+                "total_actions": self._total_actions,
+                "total_llm_calls": self._n_llm_calls,
+                "duration": duration,
+                "prompt_tokens": self._prompt_tokens,
+                "completion_tokens": self._completion_tokens,
+                "cached_tokens": self._cached_tokens,
+                "cache_creation_tokens": self._cache_creation_tokens,
+                "cost": self._cost_usd,
+                "final_reward": final_reward,
+                "error_type": self._error_type,
+            }
