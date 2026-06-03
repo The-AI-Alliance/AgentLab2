@@ -88,8 +88,9 @@ storage loader (`TrajectoryView._step_to_event`); the viewer never sees the old
    `experiment_status.json` so the viewer cannot accidentally kill live work.
 2. Consumes events only; V1/V2 legacy layouts are adapted to events in the
    loader (`TrajectoryView`), never in the viewer.
-3. Background loading: a worker thread populates `trajectories` incrementally;
-   stale threads self-abort by comparing `_bg_gen`.
+3. Live polling: a `gr.Timer.tick` handler refreshes in-flight trajectories and
+   the tables incrementally; only the selected episode's events are held in
+   memory (others keep just their metadata stub).
 4. Displays `_missing=True` stub trajectories (planned but never ran) distinctly.
 5. Injects `_failure_text` from `failure.txt` into metadata when a trajectory has
    no `end_time` — so failed episodes show their stack trace in the UI.

@@ -88,4 +88,4 @@ def test_evaluation_and_error_panes(tmp_path: Path) -> None:
 def test_debug_pane_is_valid_json(tmp_path: Path) -> None:
     ep = _events(tmp_path)
     dump = json.loads(xray_utils.render_group_debug_json(ep, ep.group_for(0)))
-    assert isinstance(dump, list) and dump and "event" in dump[0]
+    assert isinstance(dump, list) and dump and "output" in dump[0] and "kind" in dump[0]
