@@ -1,4 +1,4 @@
-"""Tests for MonitoredTool / AsyncMonitoredTool — drop-in compatibility,
+"""Tests for MonitoredTool — drop-in compatibility,
 mixed toolbox dispatch, budget enforcement, and install_monitoring.
 
 Design note: the RFC originally specified a single async wrapper, but in
@@ -20,7 +20,6 @@ from cube.tool import AbstractAsyncTool, AbstractTool, AsyncToolbox, Toolbox
 
 from cube_harness.core import ToolCallEvent, TrajectoryEvent
 from cube_harness.tool import (
-    AsyncMonitoredTool,
     Budget,
     BudgetExceeded,
     MonitoredTool,
@@ -92,23 +91,14 @@ def _make_monitored(
     *,
     storage: _FakeStorage | None = None,
     parent_event_id_getter: Callable[[], str] | None = None,
-) -> MonitoredTool | AsyncMonitoredTool:
+) -> MonitoredTool:
+    """Construct a MonitoredTool. One class wraps any inner kind now."""
     storage = storage if storage is not None else _FakeStorage()
-    # Inline a minimal emit callable that forwards to the test FakeStorage.
-    # Mirrors what `EventStreamer.emit` does — no stats fold needed since
-    # these tests inspect storage directly, not stats counters.
 
     def emit(te: TrajectoryEvent) -> str:
         storage.save_event(te, "t")
         return te.output.id
 
-    if isinstance(inner, AbstractAsyncTool):
-        return AsyncMonitoredTool(
-            inner,
-            emit=emit,
-            budget=budget,
-            parent_event_id_getter=parent_event_id_getter,
-        )
     return MonitoredTool(
         inner,
         emit=emit,
@@ -135,10 +125,33 @@ def test_sync_monitored_tool_returns_observation_unchanged() -> None:
     assert isinstance(result, Observation)
 
 
-def test_async_monitored_tool_returns_observation_unchanged() -> None:
+def test_async_inner_via_async_execute_action() -> None:
+    """Async inner is supported via the dual `async_execute_action` API.
+    Calling sync `execute_action` on an async-inner MonitoredTool raises
+    a TypeError — the test below verifies the sync path's safety check."""
     budget = Budget(max_agent_steps=5)
     tool = _make_monitored(_AsyncEchoTool(), budget)
-    result = asyncio.run(tool.execute_action(_action("async_echo", msg="hi")))
+    result = asyncio.run(tool.async_execute_action(_action("async_echo", msg="hi")))
+    assert isinstance(result, Observation)
+
+
+def test_async_inner_sync_execute_action_raises() -> None:
+    """`MonitoredTool.execute_action` is sync — sync inners only. Calling
+    it with an async inner raises TypeError directing the caller to
+    `async_execute_action`."""
+    budget = Budget(max_agent_steps=5)
+    tool = _make_monitored(_AsyncEchoTool(), budget)
+    with pytest.raises(TypeError, match="async_execute_action"):
+        tool.execute_action(_action("async_echo", msg="hi"))
+
+
+def test_sync_inner_via_async_execute_action() -> None:
+    """Sync inner works through async dispatch too — runs directly on
+    the current task with NO `to_thread` hop. Lets one code path serve
+    both inner kinds."""
+    budget = Budget(max_agent_steps=5)
+    tool = _make_monitored(_SyncEchoTool(), budget)
+    result = asyncio.run(tool.async_execute_action(_action("sync_echo", msg="hi")))
     assert isinstance(result, Observation)
 
 
@@ -154,11 +167,18 @@ def test_monitored_tool_records_event_per_call() -> None:
 
 
 def test_wrong_inner_type_raises() -> None:
+    """MonitoredTool accepts sync OR async cube tools — but not arbitrary objects."""
+
+    class _NotATool:
+        pass
+
     budget = Budget(max_agent_steps=5)
-    with pytest.raises(TypeError):
-        MonitoredTool(_AsyncEchoTool(), trajectory_id="t", budget=budget)  # type: ignore[arg-type]
-    with pytest.raises(TypeError):
-        AsyncMonitoredTool(_SyncEchoTool(), trajectory_id="t", budget=budget)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="AbstractTool"):
+        MonitoredTool(
+            _NotATool(),  # type: ignore[arg-type]
+            emit=lambda te: te.output.id,
+            budget=budget,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -220,7 +240,7 @@ def test_sync_toolbox_with_mixed_monitored_and_unmonitored() -> None:
 
 
 def test_async_toolbox_with_mixed_monitored_and_unmonitored() -> None:
-    """Symmetric check for AsyncToolbox + AsyncMonitoredTool."""
+    """Symmetric check for AsyncToolbox containing async-inner MonitoredTool."""
 
     class _AsyncOther(AbstractAsyncTool):
         @property
@@ -279,12 +299,13 @@ def _noop_emit(te: TrajectoryEvent) -> str:
     return te.output.id
 
 
-def test_wrap_tool_picks_sync_or_async_by_inner_type() -> None:
+def test_wrap_tool_returns_monitored_tool_for_both_inner_kinds() -> None:
+    """One `MonitoredTool` class handles both sync and async inners."""
     budget = Budget(max_agent_steps=5)
     sync_wrapped = wrap_tool(_SyncEchoTool(), emit=_noop_emit, budget=budget)
     async_wrapped = wrap_tool(_AsyncEchoTool(), emit=_noop_emit, budget=budget)
     assert isinstance(sync_wrapped, MonitoredTool)
-    assert isinstance(async_wrapped, AsyncMonitoredTool)
+    assert isinstance(async_wrapped, MonitoredTool)
 
 
 def test_wrap_tool_is_idempotent() -> None:
