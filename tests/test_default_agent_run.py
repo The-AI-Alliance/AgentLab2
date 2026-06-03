@@ -1,5 +1,5 @@
 """Default Agent.run tests — verify the base class implementation
-reproduces today's gym-style loop and integrates with TurnRecorder +
+reproduces today's gym-style loop and integrates with EventStreamer +
 MonitoredTool.
 
 Uses a hand-rolled mock task (no LLM, no cube), so the test runs fast
@@ -17,7 +17,7 @@ from cube.tool import AbstractTool
 
 from cube_harness.agent import Agent, AgentConfig
 from cube_harness.core import AgentOutput, LLMCallEvent, ToolCallEvent, TrajectoryEvent
-from cube_harness.recorder import TurnRecorder
+from cube_harness.streamer import EventStreamer
 from cube_harness.tool import Budget, BudgetExceeded, TaskDone, as_async, install_monitoring
 
 # ---------------------------------------------------------------------------
@@ -109,16 +109,16 @@ class _FakeStorage:
         return [te.output for _, _, te in self.events]
 
 
-def _setup(task, budget: Budget) -> tuple[TurnRecorder, _FakeStorage]:
-    """Build TurnRecorder + storage + install monitoring — the way
+def _setup(task, budget: Budget) -> tuple[EventStreamer, _FakeStorage]:
+    """Build EventStreamer + storage + install monitoring — the way
     Episode does it. Storage owns event numbering; nothing to thread."""
     storage = _FakeStorage()
-    recorder = TurnRecorder(trajectory_id="t", storage=storage, budget=budget)
+    recorder = EventStreamer(trajectory_id="t", storage=storage, budget=budget)
     install_monitoring(
         task,
         trajectory_id="t",
         budget=budget,
-        parent_event_id_getter=recorder.current_turn_id,
+        parent_event_id_getter=recorder.current_parent_event_id,
         storage=storage,
     )
     return recorder, storage

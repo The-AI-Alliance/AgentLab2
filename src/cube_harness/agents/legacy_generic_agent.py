@@ -21,7 +21,7 @@ import re
 from typing import TYPE_CHECKING, Any, Callable, Literal
 
 if TYPE_CHECKING:
-    from cube_harness.recorder import TurnRecorder
+    from cube_harness.streamer import EventStreamer
 
 from cube.core import Action, ActionSchema, ImageContent, Observation, TypedBaseModel
 from cube.task import STOP_ACTION
@@ -951,7 +951,7 @@ class GenericAgent(Agent):
         self.goal: str = ""
         self._actions_cnt = 0
 
-    def attach_recorder(self, recorder: "TurnRecorder") -> None:
+    def attach_recorder(self, recorder: "EventStreamer") -> None:
         super().attach_recorder(recorder)
         self.llm.attach_recorder(recorder)
 

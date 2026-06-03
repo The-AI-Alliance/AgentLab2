@@ -107,7 +107,7 @@ class GennyParallel(Genny):
         while True:
             agent_output = await asyncio.to_thread(self.step, obs)
             # Bump `budget.turns` once per agent step (mirror Agent.run).
-            # See Budget.bump_turn / TurnRecorder.on_step for why
+            # See Budget.bump_turn / EventStreamer.on_step for why
             # turn-counting is per-step, not per-LLM-call.
             if self._recorder is not None:
                 self._recorder.on_step()

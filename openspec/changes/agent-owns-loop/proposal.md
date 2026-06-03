@@ -34,7 +34,7 @@ below).
 This PR (`agent-owns-loop` final):
 - Add `TrajectoryMetadata` + `TrajectoryView` (lazy reader).
 - Storage write-at-start; `load_episode` is the canonical lazy entry.
-- Production runtime (`Episode`, `MonitoredTool`, `TurnRecorder`,
+- Production runtime (`Episode`, `MonitoredTool`, `EventStreamer`,
   `EpisodeRecord`) writes/reads through the new API. No in-memory event
   accumulation. Crashed-mid-run episodes loadable.
 - Trajectory slimmed: keeps `id`, `metadata`, `steps` (materialized from
@@ -121,11 +121,11 @@ trajectories into typed event streams.
   `EvaluationEvent` (step-wise or terminal), `AgentErrorEvent`
   (Episode-level failure). Replaces the binary `EnvironmentOutput | AgentOutput`
   union AND the prior batched `AgentEvent`. Alternation invariant removed.
-- `TurnRecorder` is the trajectory's event sink — no longer an
+- `EventStreamer` is the trajectory's event sink — no longer an
   agent-facing API. Built by Episode; producers (LLM, MonitoredTool)
   emit through their `attach_recorder` hooks. The recorder forwards
   to storage + summary; future sinks (OTel, RL HTTP) plug in via
-  `RecorderConfig` on `EpisodeConfig`. The legacy
+  `EventStreamerConfig` on `EpisodeConfig`. The legacy
   `record(agent_output)` / `begin_turn()` / `Turn` / `add_*` surface
   was dropped in favor of producer auto-emit (cleaner UX, streaming-
   friendly, no batched flush boundaries).
@@ -186,7 +186,7 @@ trajectories into typed event streams.
   cube's sandbox.
 - **Connectors for existing agent frameworks.** CUBE should evaluate agents
   written against major frameworks without forcing reimplementation. Phase 1
-  adds two small seams (`TurnRecorder.record_external_run`, doc note on
+  adds two small seams (`EventStreamer.record_external_run`, doc note on
   `cube.server` as the canonical MCP endpoint for CLI-agent connectors).
   Phase 2 ships reference connector packages (LangGraph, Pydantic AI,
   OpenAI Agents SDK, Inspect AI, Claude Agent SDK, A2A, Codex CLI, Goose,
@@ -202,7 +202,7 @@ trajectories into typed event streams.
 class Agent(ABC):
     def step(self, obs: Observation) -> AgentOutput: ...   # unchanged
 
-    def attach_recorder(self, recorder: TurnRecorder) -> None:
+    def attach_recorder(self, recorder: EventStreamer) -> None:
         """Stash on self; subclasses override to propagate to held LLMs.
         Episode calls this before `run()`, so `self._recorder` is set
         for the duration of the loop (used by Genny.step to read
@@ -333,7 +333,7 @@ class MyAgent(Agent):
 ```
 
 That's it. The base `Agent.run` wraps `step()` in `asyncio.to_thread`,
-records the turn via `TurnRecorder.record()`, and dispatches each
+records the turn via `EventStreamer.record()`, and dispatches each
 action through `await env_tool.execute_action(...)`. `ReactAgent` and
 `Genny` work this way. Budget self-stop available via
 `self._recorder.budget` if you want to inject a "running low" prompt
@@ -406,15 +406,15 @@ class AgentWithMemory(Agent):
         # ToolCallEvents; memory calls don't.
 ```
 
-### `TurnRecorder`
+### `EventStreamer`
 
 The recorder is no longer an agent-facing API. It is a sink:
 event producers (LLM, MonitoredTool) emit through it; the recorder
 forwards to storage + summary (and, in Phase 2, to OTel / RL HTTP
-sinks via `RecorderConfig`).
+sinks via `EventStreamerConfig`).
 
 ```python
-class TurnRecorder:
+class EventStreamer:
     """The trajectory's event sink. Built by Episode; attached to event
     producers via their `attach_recorder` methods."""
 
@@ -443,7 +443,7 @@ class TurnRecorder:
     def record_failure(self, exc: BaseException) -> None: ...     # → AgentErrorEvent
     def record_evaluation(self, reward: float, info: dict | None = None, *,
                           is_terminal: bool = True) -> None: ...
-    def current_turn_id(self) -> str: ...                          # for MonitoredTool
+    def current_parent_event_id(self) -> str: ...                          # for MonitoredTool
 
     @property
     def budget(self) -> Budget: ...                                # for agent introspection
@@ -454,13 +454,13 @@ surface was dropped in favor of producer auto-emit. Less ceremony,
 streaming-friendly (no batched turn boundaries to flush), and the
 RL HTTP sink can subscribe to a clean stream of events.
 
-`RecorderConfig` is a forward seam on `EpisodeConfig` for sink
+`EventStreamerConfig` is a forward seam on `EpisodeConfig` for sink
 configuration (OTel, RL HTTP, custom). Phase 1 ships an empty
-`RecorderConfig` with FileStorage + SummaryProcessor always-on; Phase
+`EventStreamerConfig` with FileStorage + SummaryProcessor always-on; Phase
 2 adds fields like `enable_otel: bool` and `rl_http_endpoint: str | None`.
 
 Cross-turn state (trajectory_id, storage, summary, budget) lives on
-`Episode` and is bound into the `TurnRecorder` at construction.
+`Episode` and is bound into the `EventStreamer` at construction.
 Agents never read or write that state directly.
 
 ### `TaskDone` — end-of-episode signal
@@ -559,11 +559,11 @@ Every concern in today's `Episode._run_loop` has a clear new home.
 | Budget enforcement (`max_steps`, etc.) | `MonitoredTool` | Counts calls; raises `BudgetExceeded(BaseException)`. |
 | Heartbeat / `status.json` | `MonitoredTool` | Updates `last_heartbeat_at` per call. Cheap. |
 | Tool-side error handling (`StepError` from inner) | `MonitoredTool` | Records the `StepError` into the `ToolCallEvent`, returns it (does not raise). |
-| `AgentEvent` persistence (agent-step save) | `TurnRecorder` | `record()` or `Turn.__exit__` flushes one AgentEvent. |
-| Per-turn summary update (LLM calls, tokens, cost) | `TurnRecorder` | Updates `summary` from `AgentEvent.llm_calls`. |
-| Agent output logging | `TurnRecorder` | Logs alongside the event flush. |
+| `AgentEvent` persistence (agent-step save) | `EventStreamer` | `record()` or `Turn.__exit__` flushes one AgentEvent. |
+| Per-turn summary update (LLM calls, tokens, cost) | `EventStreamer` | Updates `summary` from `AgentEvent.llm_calls`. |
+| Agent output logging | `EventStreamer` | Logs alongside the event flush. |
 | Per-turn OTel span (`tracer.step("turn_N")`) | **Dropped** | Today's loop-level span goes away; agent-owns-loop has no central per-turn point to wrap. Per-turn data lives in `AgentEvent` (richer than a span name). The episode-level span (below) is preserved. |
-| Agent-side error capture (`agent.step` raised) | `TurnRecorder.record_failure` | Episode's `except` calls it after `agent.run` raises. |
+| Agent-side error capture (`agent.step` raised) | `EventStreamer.record_failure` | Episode's `except` calls it after `agent.run` raises. |
 | `done` detection | `Task.step` (cube-standard, unchanged) | Returns `EnvironmentOutput.done`. Default agent reads it. |
 | Per-step `reward` | `Task.step` (cube-standard, unchanged) | Comes through `EnvironmentOutput.reward`. |
 | Step-wise `evaluate` (`validate_per_step`) | `Task.step` (cube-standard, unchanged) | Built into `task.step` at [task.py:346](../../../src/cube/task.py#L346). |
@@ -666,7 +666,7 @@ async def run(self) -> TrajectoryView:
     own_tools = [cfg.make() for cfg in self.config.agent_config.own_tool_configs]
     toolbox = Toolbox([*task.tool.tools, *own_tools]) if own_tools else task.tool
 
-    recorder = TurnRecorder(
+    recorder = EventStreamer(
         trajectory_id=self.id,
         storage=self.storage,
         summary=self.summary,
@@ -719,7 +719,7 @@ attached separately. The monitoring wrappers are installed onto
 `task.tool`'s leaves once, baking the task ref in for `Task.step`-
 equivalent semantics (STOP, postprocess, done detection, step-eval).
 `record_reset` / `record_failure` / `record_evaluation` are
-Episode-only helpers on `TurnRecorder` (not actively hidden from
+Episode-only helpers on `EventStreamer` (not actively hidden from
 agents, but conventionally Episode's). `on_llm_call` is the only
 producer-facing entrypoint — called automatically by `LLM.call(...)`
 when a recorder is attached.

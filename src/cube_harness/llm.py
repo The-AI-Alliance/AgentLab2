@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any, Callable, List, Literal
 from uuid import uuid4
 
 if TYPE_CHECKING:
-    from cube_harness.recorder import TurnRecorder
+    from cube_harness.streamer import EventStreamer
 
 import litellm
 import tenacity
@@ -302,9 +302,9 @@ class LLM:
         # override (Agent / Genny / etc). When unset, `LLM.call()` returns
         # the LLMCall without emitting — useful for tests and for agents
         # that hold an LLM but don't want its calls in the trajectory.
-        self._recorder: "TurnRecorder | None" = None
+        self._recorder: "EventStreamer | None" = None
 
-    def attach_recorder(self, recorder: "TurnRecorder") -> None:
+    def attach_recorder(self, recorder: "EventStreamer") -> None:
         """Wire this LLM to a recorder so `.call()` auto-emits an
         `LLMCallEvent` per API call. Idempotent — re-attaching to a new
         recorder is safe (replaces the prior ref)."""

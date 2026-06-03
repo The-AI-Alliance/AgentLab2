@@ -13,7 +13,7 @@ from cube_harness.core import AgentOutput
 if TYPE_CHECKING:
     from cube.tool import AbstractAsyncTool
 
-    from cube_harness.recorder import TurnRecorder
+    from cube_harness.streamer import EventStreamer
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +77,9 @@ class Agent(ABC):
         # propagate it down (Genny does this for its `self.llm`).
         # Agent-side reads of `self._recorder.budget` for graceful
         # self-stop and prompt injection rely on this being set.
-        self._recorder: "TurnRecorder | None" = None
+        self._recorder: "EventStreamer | None" = None
 
-    def attach_recorder(self, recorder: "TurnRecorder") -> None:
+    def attach_recorder(self, recorder: "EventStreamer") -> None:
         """Wire the recorder into this agent and its event-producing
         children (LLMs, etc). Called by `Episode` once, before `run()`.
 

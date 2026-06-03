@@ -1,22 +1,24 @@
-"""TurnRecorder — the trajectory's event sink.
+"""EventStreamer — the trajectory's event fan-out.
 
-Part of RFC `agent-owns-loop`. After the `auto-recorder` follow-up,
-agents never call the recorder directly. The recorder is attached to
-each event-producing component:
+The streamer is attached to each event-producing component:
 
-  - `LLM.attach_recorder(recorder)` — every `.call()` emits an
-    `LLMCallEvent`. The recorder stashes the latest LLMCallEvent.id as
-    the active turn id.
+  - `LLM.attach_recorder(streamer)` — every `.call()` emits an
+    `LLMCallEvent`. The streamer stashes the latest `LLMCallEvent.id`
+    so subsequent `ToolCallEvent`s can parent under it.
   - `MonitoredTool` (Episode-installed) — every `.execute_action()`
-    emits a `ToolCallEvent` with `parent_event_id` / `turn_id` resolved
-    via the recorder's `current_turn_id()` getter.
+    emits a `ToolCallEvent` with `parent_event_id` resolved via the
+    streamer's `current_parent_event_id()` getter.
 
-Agent code is reduced to `await self.llm.call(prompt)` +
-`await env_tool.execute_action(action)`. Recorder is invisible.
+From the agent's POV the streamer is invisible: code is just
+`await self.llm.call(prompt)` + `await env_tool.execute_action(action)`.
 
 Episode-only helpers (`record_reset`, `record_failure`,
 `record_evaluation`) remain on this object — they emit synthetic events
 at trajectory boundaries that no component naturally owns.
+
+`EventStreamerConfig` is the forward seam for multi-sink fan-out:
+FileStorage today; OTel + RL HTTP + custom sinks land via additive
+config fields without changing this surface.
 """
 
 import logging
@@ -46,8 +48,8 @@ logger = logging.getLogger(__name__)
 RESET_PARENT_EVENT_ID = "reset"
 
 
-class RecorderConfig(TypedBaseModel):
-    """Configuration for the per-episode `TurnRecorder`.
+class EventStreamerConfig(TypedBaseModel):
+    """Configuration for the per-episode `EventStreamer`.
 
     Pydantic config object — follows the same "Python is the config"
     philosophy as `LLMConfig` / `AgentConfig`. Lives on `EpisodeConfig`
@@ -63,12 +65,12 @@ class RecorderConfig(TypedBaseModel):
       * `extra_sinks: list[SinkConfig]` — user-defined sinks for
         third-party telemetry pipelines.
 
-    Default `RecorderConfig()` is the current Phase-1 behavior:
+    Default `EventStreamerConfig()` is the current Phase-1 behavior:
     FileStorage + SummaryProcessor, nothing else.
     """
 
 
-class TurnRecorder:
+class EventStreamer:
     """The trajectory's event sink. Built by Episode; attached to event
     producers (LLM, env_tool) via their respective `attach_recorder`
     methods.
@@ -78,7 +80,7 @@ class TurnRecorder:
     `_stream_event` (storage + summary); the recorder also bumps the
     Budget counters and enforces caps after each LLM call.
 
-    `current_turn_id()` returns the id of the most recent LLMCallEvent,
+    `current_parent_event_id()` returns the id of the most recent LLMCallEvent,
     or `RESET_PARENT_EVENT_ID` if no LLM call has fired yet. Used by
     MonitoredTool's parent_event_id_getter.
     """
@@ -100,7 +102,7 @@ class TurnRecorder:
         # TrajectoryMetadata.metadata at finalize. Connectors that need a
         # back-channel write here.
         self.metadata_updates = metadata_updates if metadata_updates is not None else {}
-        self._current_turn_id: str | None = None
+        self._current_parent_event_id: str | None = None
         self._n_llm_calls_emitted = 0
 
     # --- producer-facing hook (called by LLM.call() auto-emit) ---
@@ -120,7 +122,7 @@ class TurnRecorder:
         The agent loop calls `on_step` per iteration instead.
         """
         event = LLMCallEvent(call=call, profiling=dict(profiling or {}), error=error)
-        self._current_turn_id = event.id
+        self._current_parent_event_id = event.id
         self._n_llm_calls_emitted += 1
         start, end = self._llm_window(profiling)
         if self.budget is not None and call.usage is not None:
@@ -226,7 +228,7 @@ class TurnRecorder:
 
     # --- getter consumed by MonitoredTool.parent_event_id_getter ---
 
-    def current_turn_id(self) -> str:
+    def current_parent_event_id(self) -> str:
         """The id of the most recently emitted LLMCallEvent, or
         `RESET_PARENT_EVENT_ID` if no LLM call has fired yet."""
-        return self._current_turn_id or RESET_PARENT_EVENT_ID
+        return self._current_parent_event_id or RESET_PARENT_EVENT_ID

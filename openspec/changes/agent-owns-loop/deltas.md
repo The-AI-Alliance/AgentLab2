@@ -171,7 +171,7 @@ class TrajectoryView:
 class Agent(ABC):
     def step(self, obs: Observation) -> AgentOutput        # unchanged shape: {actions, error}
 
-    def attach_recorder(self, recorder: "TurnRecorder") -> None:
+    def attach_recorder(self, recorder: "EventStreamer") -> None:
         """Stash on self._recorder; subclasses override to propagate
         to held LLMs so LLM.call(...) auto-emits LLMCallEvent."""
 
@@ -236,13 +236,13 @@ N actions via `asyncio.gather(*(env_tool.execute_action(a) for a in actions))`.
 The async-uniform shape means parallel-dispatch agents (e.g.
 `GennyParallel`) don't need their own sync-vs-async branch either.
 
-### `TurnRecorder`
+### `EventStreamer`
 
 The trajectory's event sink — no longer an agent-facing API.
 Built by `Episode` per-episode; producers attach to it.
 
 ```python
-class TurnRecorder:
+class EventStreamer:
     def __init__(
         self,
         trajectory_id: str,
@@ -257,7 +257,7 @@ class TurnRecorder:
         call: LLMCall,
         profiling: dict[str, tuple[float, float]] | None = None,
         error: StepError | None = None,
-    ) -> str                                       # returns event id (also new current_turn_id)
+    ) -> str                                       # returns event id (also new current_parent_event_id)
 
     # Episode-only boundary helpers:
     def record_reset(self, initial: EnvironmentOutput) -> None
@@ -266,7 +266,7 @@ class TurnRecorder:
                           *, is_terminal: bool = True) -> None
 
     # Getter consumed by MonitoredTool.parent_event_id_getter:
-    def current_turn_id(self) -> str
+    def current_parent_event_id(self) -> str
 
     @property
     def budget(self) -> Budget                                  # for agent introspection
@@ -279,11 +279,11 @@ that hold LLMs to propagate the wiring (`Genny`, `React`,
 `Turn` / `add_*` surface is **dropped** — producer auto-emit replaces
 it.
 
-#### `RecorderConfig` (forward seam)
+#### `EventStreamerConfig` (forward seam)
 
-A pydantic `RecorderConfig` field on `EpisodeConfig` reserves the
+A pydantic `EventStreamerConfig` field on `EpisodeConfig` reserves the
 hook for Phase-2 sinks (OTel, RL HTTP, custom). Phase 1 ships an
-empty `RecorderConfig` — `FileStorage` + `SummaryProcessor` are
+empty `EventStreamerConfig` — `FileStorage` + `SummaryProcessor` are
 always-on; future fields like `enable_otel: bool` and
 `rl_http_endpoint: str | None` plug in additively.
 
@@ -442,7 +442,7 @@ async def run(self) -> Trajectory:
     # task.toolbox is mutated in place so task.step also goes through monitored wrappers.
     install_monitoring(task, trajectory, budget, self.storage, self.summary)
 
-    recorder = TurnRecorder(trajectory, self.storage, self.summary)
+    recorder = EventStreamer(trajectory, self.storage, self.summary)
     initial = task.reset()
     recorder.record_reset(initial)
     try:
@@ -475,7 +475,7 @@ The `trajectory` lives on `Episode`. The agent receives `task` and
 `task.toolbox`, so any path through tools (gym-style `task.astep` or
 tool-level `task.toolbox.execute_action`) emits monitoring uniformly.
 
-`TurnRecorder` exposes Episode-only helpers (`record_reset`,
+`EventStreamer` exposes Episode-only helpers (`record_reset`,
 `record_failure`, `record_evaluation`) on the same object as the agent-facing
 methods, to keep event construction in one place. Agents should not call
 these; the convention is documented but not actively prevented in v1.
@@ -735,7 +735,7 @@ The following are **deleted outright** (no deprecation alias):
   removed from the public API. The legacy V1 reader uses it internally
   but it is not exported.
 - `Trajectory.streaming` flag — no longer needed; events are always
-  streamed to disk by `MonitoredTool` / `TurnRecorder` and never
+  streamed to disk by `MonitoredTool` / `EventStreamer` and never
   accumulated.
 - `Trajectory.steps` field/alias — replaced by `TrajectoryView` iteration.
 - `Trajectory.last_env_step`, `last_env_output`, `n_agent_steps`,
@@ -770,7 +770,7 @@ The following are **deleted outright** (no deprecation alias):
   renders all tabs.
 - **Smoke**: a new experiment dir (events/ layout) loads through XRay and
   renders all tabs.
-- **Unit**: `TurnRecorder.record()` and `TurnRecorder.begin_turn()` produce
+- **Unit**: `EventStreamer.record()` and `EventStreamer.begin_turn()` produce
   equivalent `AgentEvent`s; both paths preserve `AgentEvent.id`,
   back-references, and field set.
 - **Unit**: `MonitoredTool.execute_action` returns `Observation | StepError`
@@ -789,7 +789,7 @@ The following are **deleted outright** (no deprecation alias):
 1. ~~**Budget granularity.**~~ **Resolved.** All caps (`max_turns`,
    `max_tool_calls`, `max_cost_usd`, `max_prompt_tokens`,
    `max_completion_tokens`, `max_wallclock_s`) ship enforced. `Budget.exhausted`
-   checks every cap; `TurnRecorder._flush_agent_event` bumps cost + tokens from
+   checks every cap; `EventStreamer._flush_agent_event` bumps cost + tokens from
    each `LLMCall.usage`; `MonitoredTool` raises `BudgetExceeded` on tool-call
    ticks. `max_steps` was never an alias — `max_turns` is the only name.
 2. **`Agent.step` deprecation timeline.** Decided: keep one release —

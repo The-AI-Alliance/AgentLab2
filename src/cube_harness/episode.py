@@ -19,8 +19,8 @@ from cube_harness.episode_status import TERMINAL_STATUSES, EpisodeStatus, next_r
 from cube_harness.eval_log import EpisodeRecord
 from cube_harness.llm import is_permanent_llm_error
 from cube_harness.metrics.tracer import get_tracer
-from cube_harness.recorder import RecorderConfig, TurnRecorder
 from cube_harness.storage import FileStorage, Storage, TrajectoryView
+from cube_harness.streamer import EventStreamer, EventStreamerConfig
 from cube_harness.summary import SummaryProcessor
 from cube_harness.tool import Budget, BudgetExceeded, TaskDone, as_async, install_monitoring
 
@@ -40,15 +40,15 @@ class EpisodeConfig(TypedBaseModel):
     max_cost_usd: float | None = None
     task_config: TaskConfig
     # Recorder/sink configuration. Default = FileStorage + summary.
-    # Forward seam for OTel / RL HTTP / extra sinks (see RecorderConfig).
-    recorder_config: RecorderConfig = Field(default_factory=RecorderConfig)
+    # Forward seam for OTel / RL HTTP / extra sinks (see EventStreamerConfig).
+    recorder_config: EventStreamerConfig = Field(default_factory=EventStreamerConfig)
 
 
 class Episode:
     """Manages the execution of an agent on a specific task in an environment.
 
     RFC `agent-owns-loop` (Phase E): Episode no longer drives a per-turn
-    loop. It builds the monitored toolbox + TurnRecorder, hands them to
+    loop. It builds the monitored toolbox + EventStreamer, hands them to
     `agent.run(initial_obs, task, recorder)`, and finalizes regardless of
     how the agent returns or raises. The previous `_run_loop` is gone;
     every agent (legacy `step()` and new overridden `run()`) flows
@@ -148,7 +148,7 @@ class Episode:
         Flow:
             1. setup (status, task, action_set, agent, trajectory, dirs).
             2. wrap task.toolbox with MonitoredTool (install_monitoring).
-            3. build TurnRecorder bound to trajectory + storage + summary.
+            3. build EventStreamer bound to trajectory + storage + summary.
             4. record initial obs (recorder.record_reset).
             5. `await agent.run(initial.obs, task, recorder)` — the agent
                drives its own loop now.
@@ -223,7 +223,7 @@ class Episode:
                     max_cost_usd=self.config.max_cost_usd,
                 )
                 metadata_updates: dict = {}
-                recorder = TurnRecorder(
+                recorder = EventStreamer(
                     trajectory_id=trajectory_id,
                     storage=self.storage,
                     summary=summary_proc,
@@ -234,7 +234,7 @@ class Episode:
                     task,
                     trajectory_id,
                     budget,
-                    parent_event_id_getter=recorder.current_turn_id,
+                    parent_event_id_getter=recorder.current_parent_event_id,
                     storage=self.storage,
                     summary=summary_proc,
                 )

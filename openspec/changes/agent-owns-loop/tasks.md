@@ -18,7 +18,7 @@ delete the dead code the original phases couldn't touch.
 |---|---|---|
 | A: Core event types | ✅ shipped | `tests/test_event_types.py` (11/11) |
 | B: MonitoredTool + install_monitoring | ✅ shipped | `tests/test_monitored_tool_compat.py` (17/17) |
-| C: TurnRecorder | ✅ shipped | `tests/test_recorder_dual_api.py` (14/14, incl. record_external_run) |
+| C: EventStreamer | ✅ shipped | `tests/test_recorder_dual_api.py` (14/14, incl. record_external_run) |
 | D: Default Agent.run | ✅ shipped | `tests/test_default_agent_run.py` (4/4) |
 | E: Episode.run rewrite (async) | ✅ shipped | `tests/test_episode.py` + `test_cube_episode.py` + `test_experiment.py` (all pass) |
 | F: Storage event-file layout | ✅ shipped | `tests/test_storage_event_layout.py` (10/10) |
@@ -32,7 +32,7 @@ delete the dead code the original phases couldn't touch.
 | N: TrajectoryView lazy loader + per-view cache | ✅ shipped | `tests/test_episode_view.py` (12/12, V2 + V2-steps + crashed-mid-run) |
 | O: Write metadata-at-start + finalize_episode(meta) | ✅ shipped | episode.py rewrites |
 | P: Storage migration (load_episode, list_episodes, V1 upgrade) | ✅ shipped | covered by test_episode_view + test_storage |
-| P2: Episode + MonitoredTool + TurnRecorder + EpisodeRecord migration | ✅ shipped | 1022 unit tests pass |
+| P2: Episode + MonitoredTool + EventStreamer + EpisodeRecord migration | ✅ shipped | 1022 unit tests pass |
 | Q (scoped): load_trajectory wraps load_episode (XRay/utils/inspect_results unchanged) | ✅ shipped | smokes + cube debug suites |
 | T (scoped): slim Trajectory; drop events / streaming / event-stream helpers from Trajectory | ✅ shipped | core/storage diff = -200 LOC |
 | Smokes | ✅ green | agent_owns_loop_events, genny_parallel_recorder, xray_loads_event_trajectory, streaming_trajectory |
@@ -63,7 +63,7 @@ code:
    `ComputerBase` …) and `Toolbox.execute_action` asserts
    `isinstance(tool, AbstractTool)`, so a sync-Toolbox-compatible
    wrapper is necessary.
-2. **`Budget.turns` bookkeeping in `TurnRecorder`**, not just
+2. **`Budget.turns` bookkeeping in `EventStreamer`**, not just
    `MonitoredTool`. Some tests use a hand-rolled `task.step` that
    bypasses `tool.execute_action` entirely — without recorder-side
    bumping + `BudgetExceeded` raise, the loop runs forever on such
@@ -180,13 +180,13 @@ thread — not our task here.
 
 ---
 
-## Phase C — TurnRecorder (`cube_harness.summary` or new `cube_harness.recorder`)
+## Phase C — EventStreamer (`cube_harness.summary` or new `cube_harness.streamer`)
 
-- [ ] C1. `TurnRecorder` with `record(output)`, `begin_turn() → Turn`.
+- [ ] C1. `EventStreamer` with `record(output)`, `begin_turn() → Turn`.
 - [ ] C2. `Turn` context manager with `add_llm_call`, `add_thought`,
   `add_response_text`, `add_profile`, `add_error`; `__exit__` flushes one
   `AgentEvent`.
-- [ ] C3. Episode-only helpers on `TurnRecorder`: `record_reset`,
+- [ ] C3. Episode-only helpers on `EventStreamer`: `record_reset`,
   `record_failure`, `record_evaluation`.
 - [ ] C4. `record_external_run(final_text, usage, raw_events)` — lossy
   capture path for connectors (Phase 2 callers; ship now for the spec).
@@ -307,7 +307,7 @@ the structural parity test the user requested.
 
 ## Phase J — Connector seam (deferred bodies, Phase-1 plumbing only)
 
-- [ ] J1. `TurnRecorder.record_external_run` is implemented in Phase C
+- [ ] J1. `EventStreamer.record_external_run` is implemented in Phase C
   already; this phase verifies the contract works.
 - [ ] J2. Unit test: `tests/test_external_run_record.py` — calling it
   produces a single `AgentEvent` carrying `final_text` + `usage` +
@@ -506,7 +506,7 @@ when this lands.
 - [ ] T2. Delete public-API `TrajectoryStep` export (the legacy
   reader's internal version stays inside storage.py).
 - [ ] T3. Delete `Trajectory.streaming` plumbing in `MonitoredTool`,
-  `TurnRecorder`, `tool.py`, `recorder.py` — events are always streamed.
+  `EventStreamer`, `tool.py`, `recorder.py` — events are always streamed.
 - [ ] T4. Delete `Trajectory.last_env_step` / `last_env_output` /
   `n_agent_steps` / `n_env_steps` / `events_of_turn` (the
   Trajectory-method versions). `TrajectoryView` has the live versions.

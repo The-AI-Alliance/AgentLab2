@@ -18,7 +18,7 @@ from cube.tool import AbstractTool
 from cube_harness.agents.genny_parallel import GennyParallel, GennyParallelConfig
 from cube_harness.core import AgentOutput, ToolCallEvent, TrajectoryEvent
 from cube_harness.llm import LLMConfig
-from cube_harness.recorder import TurnRecorder
+from cube_harness.streamer import EventStreamer
 from cube_harness.tool import Budget, BudgetExceeded, as_async, install_monitoring
 
 
@@ -40,11 +40,11 @@ class _FakeStorage:
         return [te.output for _, _, te in self.events]
 
 
-def _build_recorder_and_storage(budget: Budget, task: object) -> tuple[TurnRecorder, _FakeStorage]:
-    """Build TurnRecorder + storage + install monitoring — the way
+def _build_recorder_and_storage(budget: Budget, task: object) -> tuple[EventStreamer, _FakeStorage]:
+    """Build EventStreamer + storage + install monitoring — the way
     Episode does it. Storage owns event numbering; nothing to thread."""
     storage = _FakeStorage()
-    recorder = TurnRecorder(
+    recorder = EventStreamer(
         trajectory_id="t",
         storage=storage,
         budget=budget,
@@ -53,7 +53,7 @@ def _build_recorder_and_storage(budget: Budget, task: object) -> tuple[TurnRecor
         task,
         trajectory_id="t",
         budget=budget,
-        parent_event_id_getter=recorder.current_turn_id,
+        parent_event_id_getter=recorder.current_parent_event_id,
         storage=storage,
     )
     return recorder, storage

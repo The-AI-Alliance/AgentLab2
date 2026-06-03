@@ -67,7 +67,7 @@ class Experiment(TypedBaseModel):
     resume: bool = False
     max_steps: int = MAX_STEPS
     # Per-episode dollar cap on cumulative LLM cost. None = no cap.
-    # Episode threads this into `Budget.max_cost_usd`; TurnRecorder bumps
+    # Episode threads this into `Budget.max_cost_usd`; EventStreamer bumps
     # `Budget.cost_usd` from `LLMCall.usage.cost`; `MonitoredTool` raises
     # `BudgetExceeded` when the agent runs over. Agents (e.g. Genny) also
     # read it via `recorder.budget` for graceful self-stop.

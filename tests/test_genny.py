@@ -16,15 +16,15 @@ from cube_harness.agents.genny import (
     _truncate_message,
 )
 from cube_harness.llm import LLMCall, LLMConfig, LLMResponse, Prompt, Usage
-from cube_harness.recorder import TurnRecorder
+from cube_harness.streamer import EventStreamer
 from cube_harness.tool import Budget
 
 
 def _attach_recorder(agent: Genny, budget: Budget | None = None) -> None:
     """Mimic what the base `Agent.run` does on entry — stash a
-    TurnRecorder (with a Budget) on the agent so step()'s budget
+    EventStreamer (with a Budget) on the agent so step()'s budget
     checks have something to read."""
-    agent._recorder = TurnRecorder(trajectory_id="t", budget=budget or Budget(max_turns=100))
+    agent._recorder = EventStreamer(trajectory_id="t", budget=budget or Budget(max_turns=100))
 
 
 # ---------------------------------------------------------------------------
@@ -765,7 +765,7 @@ class TestFlatHistory:
 # BudgetConfig.check / TestCostLimit / TestTokenLimit deleted:
 # - BudgetConfig is gone — caps live on the framework `cube_harness.tool.Budget`
 #   constructed by Episode from `Experiment.max_steps` / `Experiment.max_cost_usd`.
-# - Cost & token tracking is in `TurnRecorder._flush_agent_event` (covered by
+# - Cost & token tracking is in `EventStreamer._flush_agent_event` (covered by
 #   `tests/test_recorder_dual_api.py::test_recorder_accumulates_cost_into_budget`
 #   and `::test_recorder_triggers_budget_exceeded_on_cost`).
 # - Genny's soft-stop via `recorder.budget.exhausted` is covered by

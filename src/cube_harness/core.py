@@ -53,7 +53,7 @@ class TrajectoryStep(TypedBaseModel):
 class AgentErrorEvent(TypedBaseModel):
     """An agent-side or framework-side failure event.
 
-    Used by Episode + TurnRecorder.record_failure to capture exceptions
+    Used by Episode + EventStreamer.record_failure to capture exceptions
     that don't naturally belong on an LLMCallEvent or ToolCallEvent
     (BudgetExceeded, agent-side crashes outside an LLM/tool call, etc).
     Carries just the StepError payload — no need for a turn id since the

@@ -54,7 +54,7 @@ if TYPE_CHECKING:
 
 
 class Budget(TypedBaseModel):
-    """Per-episode resource budget enforced by `MonitoredTool` + `TurnRecorder`.
+    """Per-episode resource budget enforced by `MonitoredTool` + `EventStreamer`.
 
     Caps:
       - `max_turns`: agent step() calls.
@@ -66,7 +66,7 @@ class Budget(TypedBaseModel):
 
     Counters bumped during the run:
       - `turns` / `cost_usd` / `prompt_tokens` / `completion_tokens` —
-        by `TurnRecorder._flush_agent_event` from `AgentEvent.llm_calls`.
+        by `EventStreamer._flush_agent_event` from `AgentEvent.llm_calls`.
       - `tool_calls` — by `MonitoredTool._record_tool_call`.
       - `started_at` — set once at construction; elapsed time derived from it.
 
@@ -122,7 +122,7 @@ class Budget(TypedBaseModel):
 
     def bump_llm_usage(self, cost: float, prompt: int, completion: int) -> None:
         """Atomic bump of LLM-call cost + token counters. Called by
-        `TurnRecorder.on_llm_call` per LLM API call (so a multi-LLM-call
+        `EventStreamer.on_llm_call` per LLM API call (so a multi-LLM-call
         step accumulates correctly). Does NOT bump `turns` — that's
         `bump_turn`'s job."""
         with self._lock:
@@ -134,7 +134,7 @@ class Budget(TypedBaseModel):
     def exhausted(self) -> bool:
         """True iff any configured cap is at-or-past its limit. Checked
         by MonitoredTool on entry to every execute_action and by
-        TurnRecorder after every AgentEvent flush.
+        EventStreamer after every AgentEvent flush.
 
         Lock-protected so the multi-field read is coherent against
         concurrent bumps from parallel tool-call workers."""
@@ -363,7 +363,7 @@ class _MonitorState:
 
     def parent_event_id(self) -> str:
         """Resolve the parent_event_id to attribute to the next recorded
-        ToolCallEvent — late-bound to the TurnRecorder's current turn,
+        ToolCallEvent — late-bound to the EventStreamer's current turn,
         with a `RESET` sentinel fallback when no turn is active."""
         if self.parent_event_id_getter is not None:
             value = self.parent_event_id_getter()

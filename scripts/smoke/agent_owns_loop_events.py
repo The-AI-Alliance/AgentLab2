@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SMOKE: agent-owns-loop end-to-end (events/, MonitoredTool, TurnRecorder).
+"""SMOKE: agent-owns-loop end-to-end (events/, MonitoredTool, EventStreamer).
 
 Runs a small deterministic mock-cube experiment through the rewritten
 Episode (RFC `agent-owns-loop`, Phase E) and verifies:

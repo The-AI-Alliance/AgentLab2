@@ -32,7 +32,7 @@ import logging
 from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
-    from cube_harness.recorder import TurnRecorder
+    from cube_harness.streamer import EventStreamer
 
 from cube.benchmark import BenchmarkConfig
 from cube.core import Action, ActionSchema, Observation
@@ -288,7 +288,7 @@ class Genny(Agent):
         self._latest_obs: list[dict | Message] = []  # current step's obs, not yet in history
         self._compacted_summary: str = ""  # injected into system message after compaction
 
-    def attach_recorder(self, recorder: "TurnRecorder") -> None:
+    def attach_recorder(self, recorder: "EventStreamer") -> None:
         """Propagate the recorder to both held LLMs — act + summarize.
         Each `.call()` auto-emits an LLMCallEvent.
 

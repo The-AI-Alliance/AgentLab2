@@ -12,7 +12,7 @@ from cube_harness.llm import LLMConfig, Prompt
 from cube_harness.utils import parse_actions
 
 if TYPE_CHECKING:
-    from cube_harness.recorder import TurnRecorder
+    from cube_harness.streamer import EventStreamer
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +78,7 @@ class ReactAgent(Agent):
         self.history: list[dict | Message] = []
         self._actions_cnt = 0
 
-    def attach_recorder(self, recorder: "TurnRecorder") -> None:
+    def attach_recorder(self, recorder: "EventStreamer") -> None:
         super().attach_recorder(recorder)
         self.llm.attach_recorder(recorder)
 
