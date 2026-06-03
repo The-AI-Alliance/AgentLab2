@@ -243,7 +243,8 @@ class TestAgentOutput:
         """Test AgentOutput with default values."""
         output = AgentOutput()
         assert output.actions == []
-        assert output.llm_calls == []
+        # llm_calls field removed by the auto-recorder collapse; AgentOutput is now {actions, error}.
+        assert output.error is None
 
     def test_agent_output_multiple_actions(self):
         """Test AgentOutput with multiple actions."""

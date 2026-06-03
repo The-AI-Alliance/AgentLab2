@@ -18,7 +18,10 @@ GenericAgent while using the new cube-harness Action/Observation abstractions.
 
 import logging
 import re
-from typing import Any, Callable, Literal
+from typing import TYPE_CHECKING, Any, Callable, Literal
+
+if TYPE_CHECKING:
+    from cube_harness.recorder import TurnRecorder
 
 from cube.core import Action, ActionSchema, ImageContent, Observation, TypedBaseModel
 from cube.task import STOP_ACTION
@@ -948,7 +951,7 @@ class GenericAgent(Agent):
         self.goal: str = ""
         self._actions_cnt = 0
 
-    def attach_recorder(self, recorder) -> None:
+    def attach_recorder(self, recorder: "TurnRecorder") -> None:
         super().attach_recorder(recorder)
         self.llm.attach_recorder(recorder)
 

@@ -8,7 +8,7 @@ from cube.core import Action, EnvironmentOutput, Observation
 from cube.task import TaskConfig, TaskMetadata
 
 from cube_harness.agent import AgentConfig
-from cube_harness.core import AgentOutput, LLMCallEvent, ToolCallEvent, Trajectory, TrajectoryStep
+from cube_harness.core import AgentOutput, ToolCallEvent, Trajectory, TrajectoryStep
 from cube_harness.episode import Episode
 from cube_harness.storage import TrajectoryView
 from tests.conftest import MockAgent, MockAgentConfig, MockCubeTask, MockCubeTaskConfig, MockToolConfig
@@ -309,14 +309,17 @@ class TestEpisode:
         traj_id = f"{episode.config.task_config.task_id}_ep{episode.config.id}"
         view = storage.load_episode(traj_id)
 
-        # RFC agent-owns-loop: errors land on an LLMCallEvent (via
-        # recorder.record_failure) instead of an AgentOutput step.
-        agent_events = [e.output for e in view if isinstance(e.output, LLMCallEvent)]
-        assert len(agent_events) > 0, "No agent events found in trajectory"
-        error_event = next((e for e in agent_events if e.error is not None), None)
-        assert error_event is not None, "No error found in agent events"
-        assert error_event.error.error_type == "RuntimeError"
-        assert "Agent step failed" in error_event.error.exception_str
+        # Episode failures land on a dedicated `AgentErrorEvent` (emitted
+        # by `recorder.record_failure`). Agent.run raises through the
+        # outer except, which records the failure as the trajectory's
+        # last event before the exception propagates.
+        from cube_harness.core import AgentErrorEvent
+
+        error_events = [e.output for e in view if isinstance(e.output, AgentErrorEvent)]
+        assert len(error_events) >= 1, "No AgentErrorEvent found in trajectory"
+        err = error_events[-1].error
+        assert err.error_type == "RuntimeError"
+        assert "Agent step failed" in err.exception_str
 
     def test_episode_captures_env_error(self, tmp_dir, mock_agent_config):
         """Test Episode captures environment errors correctly in trajectory."""
@@ -352,14 +355,14 @@ class TestEpisode:
         traj_id = f"{episode.config.task_config.task_id}_ep{episode.config.id}"
         view = storage.load_episode(traj_id)
 
-        # RFC agent-owns-loop: env results are ToolCallEvents and the
-        # final eval is a separate EvaluationEvent. The error from a
-        # raised evaluate() is captured on the failure LLMCallEvent
-        # via recorder.record_failure.
-        agent_events = [e.output for e in view if isinstance(e.output, LLMCallEvent)]
-        error_event = next((e for e in agent_events if e.error is not None), None)
-        assert error_event is not None, "No error found in failure-LLMCallEvent"
-        assert "Environment validation failed" in error_event.error.exception_str
+        # Failures from task.evaluate() raised in the finally block are
+        # captured as an AgentErrorEvent via recorder.record_failure.
+        from cube_harness.core import AgentErrorEvent
+
+        error_events = [e.output for e in view if isinstance(e.output, AgentErrorEvent)]
+        assert len(error_events) >= 1, "No AgentErrorEvent found"
+        err = error_events[-1].error
+        assert "Environment validation failed" in err.exception_str
         # ToolCallEvents (env step proxies) should also be present from
         # the agent loop before the failure.
         tool_call_events = [e.output for e in view if isinstance(e.output, ToolCallEvent)]

@@ -916,7 +916,13 @@ def get_chat_branches(step: EnvironmentOutput | AgentOutput | None) -> dict[str,
     """
     if not isinstance(step, AgentOutput):
         return {}
-    return {(call.tag or call.id): _render_llm_call_html(call) for call in step.llm_calls}
+    # `llm_calls` is gone from AgentOutput post-auto-recorder; falls back
+    # to [] for new trajectories. LLM call data now lives on
+    # LLMCallEvents in the trajectory's event stream — XRay will render
+    # it from there once the event-card view ships
+    # (agent-owns-loop-xray follow-up PR).
+    llm_calls = getattr(step, "llm_calls", None) or []
+    return {(call.tag or call.id): _render_llm_call_html(call) for call in llm_calls}
 
 
 def _truncate(text: str, max_len: int) -> str:
@@ -989,8 +995,13 @@ def _format_agent_step_details(step: AgentOutput, duration_info: str) -> str:
     """Format AgentOutput details as markdown."""
     sections = [f"## 🤖 Agent Output{duration_info}\n"]
 
-    if step.llm_calls:
-        llm_call = step.llm_calls[0]
+    # `llm_calls` / `thoughts` gone from AgentOutput post-auto-recorder.
+    # getattr keeps the legacy V1 read path rendering while new
+    # trajectories show empty token / rationale sections until XRay's
+    # event-card view ships (agent-owns-loop-xray follow-up).
+    llm_calls = getattr(step, "llm_calls", None) or []
+    if llm_calls:
+        llm_call = llm_calls[0]
         usage = llm_call.usage
         if usage and usage.prompt_tokens > 0:
             token_parts = [f"📊 **Tokens:** prompt: {usage.prompt_tokens:,}"]
@@ -1004,8 +1015,9 @@ def _format_agent_step_details(step: AgentOutput, duration_info: str) -> str:
                 token_parts.append(f"💰 **${usage.cost:.4f}**")
             sections.append(" │ ".join(token_parts) + "\n")
 
-    if step.thoughts:
-        sections.append(f"### Rationale\n{_truncate(step.thoughts, 150000)}\n")
+    thoughts = getattr(step, "thoughts", None)
+    if thoughts:
+        sections.append(f"### Rationale\n{_truncate(thoughts, 150000)}\n")
 
     if step.actions:
         sections.append("### Actions\n")
@@ -1015,8 +1027,8 @@ def _format_agent_step_details(step: AgentOutput, duration_info: str) -> str:
     else:
         sections.append("*No actions taken*\n")
 
-    if step.llm_calls:
-        llm_call = step.llm_calls[0]
+    if llm_calls:
+        llm_call = llm_calls[0]
         if llm_call.output:
             msg = llm_call.output
             content = getattr(msg, "content", None)

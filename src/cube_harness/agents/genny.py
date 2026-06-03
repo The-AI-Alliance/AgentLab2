@@ -29,7 +29,10 @@ is a valid prefix of the next step, which starts the same way and appends one mo
 
 import json
 import logging
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from cube_harness.recorder import TurnRecorder
 
 from cube.benchmark import BenchmarkConfig
 from cube.core import Action, ActionSchema, Observation
@@ -285,7 +288,7 @@ class Genny(Agent):
         self._latest_obs: list[dict | Message] = []  # current step's obs, not yet in history
         self._compacted_summary: str = ""  # injected into system message after compaction
 
-    def attach_recorder(self, recorder) -> None:
+    def attach_recorder(self, recorder: "TurnRecorder") -> None:
         """Propagate the recorder to both held LLMs — act + summarize.
         Each `.call()` auto-emits an LLMCallEvent.
 

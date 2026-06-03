@@ -54,7 +54,7 @@ class _MockTask:
         self.accept_agent_stop = True
         self.validate_per_step = False
 
-    def finished(self, obs=None) -> bool:
+    def finished(self, obs: Observation | None = None) -> bool:
         _ = obs
         return self.counter >= self.done_after_n
 

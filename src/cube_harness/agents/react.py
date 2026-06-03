@@ -1,4 +1,5 @@
 import logging
+from typing import TYPE_CHECKING
 
 from cube.core import Action, ActionSchema, Observation
 from cube.task import STOP_ACTION
@@ -9,6 +10,9 @@ from cube_harness.agent import Agent, AgentConfig, apply_description_overrides
 from cube_harness.core import AgentOutput
 from cube_harness.llm import LLMConfig, Prompt
 from cube_harness.utils import parse_actions
+
+if TYPE_CHECKING:
+    from cube_harness.recorder import TurnRecorder
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +78,7 @@ class ReactAgent(Agent):
         self.history: list[dict | Message] = []
         self._actions_cnt = 0
 
-    def attach_recorder(self, recorder) -> None:
+    def attach_recorder(self, recorder: "TurnRecorder") -> None:
         super().attach_recorder(recorder)
         self.llm.attach_recorder(recorder)
 

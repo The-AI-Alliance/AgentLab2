@@ -16,7 +16,7 @@ from litellm import Message as LitellmMessage
 from litellm.types.utils import ChatCompletionMessageToolCall, Function
 
 from cube_harness.agents.genny import Genny, GennyConfig
-from cube_harness.llm import LLMConfig, LLMResponse, Prompt, Usage
+from cube_harness.llm import LLMCall, LLMConfig, LLMResponse, Prompt, Usage
 
 # ---------------------------------------------------------------------------
 # Infrastructure
@@ -33,7 +33,12 @@ def _llm_cfg(model: str = "test-model") -> LLMConfig:
 
 
 class CapturingLLM:
-    """Drop-in for LLM. Records every Prompt received; returns configurable responses."""
+    """Drop-in for LLM. Records every Prompt received; returns configurable responses.
+
+    Implements both the legacy `__call__(prompt) -> LLMResponse` AND the
+    new `call(prompt, tag="") -> LLMCall` surface, plus `attach_recorder`,
+    so it works against Genny post-auto-recorder.
+    """
 
     def __init__(self, responses: list[LLMResponse] | None = None) -> None:
         self.calls: list[Prompt] = []
@@ -42,10 +47,30 @@ class CapturingLLM:
             message=LitellmMessage(role="assistant", content="captured response"),
             usage=Usage(prompt_tokens=10, completion_tokens=5),
         )
+        # Surface the .config the real LLM has so LLMCall can be built.
+        self.config = _llm_cfg()
+        self._recorder: object | None = None
 
     def __call__(self, prompt: Prompt) -> LLMResponse:
         self.calls.append(prompt)
         return self._queue.pop(0) if self._queue else self._default
+
+    def attach_recorder(self, recorder: object) -> None:
+        self._recorder = recorder
+
+    def call(self, prompt: Prompt, tag: str = "") -> LLMCall:
+        """Mirror `LLM.call`: invoke `__call__`, wrap the response as
+        an LLMCall, auto-emit if a recorder is attached. The tests
+        don't actually attach a recorder, so the emit branch is a
+        no-op here."""
+        response = self(prompt)
+        return LLMCall(
+            tag=tag,
+            llm_config=self.config,
+            prompt=prompt,
+            output=response.message,
+            usage=response.usage,
+        )
 
 
 def _tool_response(tool_name: str = "click") -> LLMResponse:
@@ -747,7 +772,13 @@ class TestFormatErrorPromptShape:
         assert len(retry_2) == len(retry_1) + 2
 
     def test_all_retry_calls_in_llm_calls_output(self) -> None:
-        """All retry LLMCall objects appear in AgentOutput.llm_calls."""
+        """All retry LLM calls fire (initial + 2 retries when max_format_errors=2).
+
+        Post-auto-recorder, AgentOutput no longer bundles `llm_calls` —
+        every LLM call auto-emits an LLMCallEvent via the attached
+        recorder. We verify via the CapturingLLM's `calls` list (which
+        records each invocation) instead.
+        """
         no_tool = _text_response("thinking")
         tool = _tool_response()
 
@@ -755,10 +786,12 @@ class TestFormatErrorPromptShape:
         cap = CapturingLLM(responses=[no_tool, no_tool, tool])
         agent.llm = cap
 
-        result = agent.step(Observation.from_text("goal"))
+        agent.step(Observation.from_text("goal"))
 
-        act_calls = [c for c in result.llm_calls if c.tag == "act"]
-        assert len(act_calls) == 3  # initial + 2 retries
+        # CapturingLLM records every __call__ invocation; LLM.call wraps
+        # that, so cap.calls has one Prompt per LLM call made by the
+        # agent. We expect: initial act + 2 retries = 3.
+        assert len(cap.calls) == 3
 
 
 # ---------------------------------------------------------------------------

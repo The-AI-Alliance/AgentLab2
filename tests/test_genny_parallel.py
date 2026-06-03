@@ -40,7 +40,7 @@ class _FakeStorage:
         return [te.output for _, _, te in self.events]
 
 
-def _build_recorder_and_storage(budget: Budget, task) -> tuple[TurnRecorder, _FakeStorage]:
+def _build_recorder_and_storage(budget: Budget, task: object) -> tuple[TurnRecorder, _FakeStorage]:
     """Build TurnRecorder + storage + install monitoring — the way
     Episode does it. Storage owns event numbering; nothing to thread."""
     storage = _FakeStorage()

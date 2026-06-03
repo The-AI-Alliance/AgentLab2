@@ -160,6 +160,11 @@ class TestFileStorageWithLLMCalls:
             output=Message(role="assistant", content="Hi there!"),
         )
 
+    @pytest.mark.skip(
+        reason="AgentOutput.llm_calls field removed by the auto-recorder collapse. "
+        "LLM calls now stream as LLMCallEvent rather than being bundled into AgentOutput. "
+        "Test will be deleted alongside the V1/V2 read shims in agent-owns-loop-xray."
+    )
     def test_v2_keeps_llm_calls_inline(self, tmp_dir, sample_llm_call):
         storage = FileStorage(tmp_dir)
         agent_output = AgentOutput(
@@ -233,6 +238,11 @@ class TestFileStorageLoad:
         with pytest.raises(FileNotFoundError, match="Trajectory metadata not found"):
             storage.load_trajectory("nonexistent")
 
+    @pytest.mark.skip(
+        reason="AgentOutput.llm_calls field removed by the auto-recorder collapse. "
+        "Inline-llm_calls resolution is no longer a code path. "
+        "Test will be deleted alongside the V1/V2 read shims in agent-owns-loop-xray."
+    )
     def test_load_trajectory_resolves_inline_llm_calls(self, tmp_dir):
         storage = FileStorage(tmp_dir)
         llm_call = LLMCall(
@@ -344,9 +354,12 @@ class TestFileStorageRoundtrip:
         traj.steps.append(
             TrajectoryStep(output=EnvironmentOutput(obs=obs1, reward=0.0), start_time=100.0, end_time=101.0)
         )
+        # AgentOutput.llm_calls is gone — kept as a local reference for
+        # the inline-write portion of this test, but it's not part of the
+        # AgentOutput shape anymore.
+        _ = llm_call
         agent_output = AgentOutput(
             actions=[Action(id="act_1", name="click", arguments={"element": "btn"})],
-            llm_calls=[llm_call],
         )
         traj.steps.append(TrajectoryStep(output=agent_output, start_time=101.0, end_time=102.0))
         obs2 = Observation.from_text("Task completed")
@@ -372,8 +385,7 @@ class TestFileStorageRoundtrip:
         assert isinstance(step1.output, AgentOutput)
         assert len(step1.output.actions) == 1
         assert step1.output.actions[0].name == "click"
-        assert len(step1.output.llm_calls) == 1
-        assert step1.output.llm_calls[0].output.content == "I'll click the button."
+        # llm_calls removed from AgentOutput by the auto-recorder collapse.
 
         step2 = loaded.steps[2]
         assert isinstance(step2.output, EnvironmentOutput)
@@ -872,6 +884,11 @@ class TestEpisodeSummary:
         assert "tokens" in last
         assert "cost_usd" in last
 
+    @pytest.mark.skip(
+        reason="Tests SummaryProcessor.on_step folding tokens from AgentOutput.llm_calls — "
+        "that field is gone (auto-recorder collapse). The new SummaryProcessor.on_event "
+        "folds tokens from LLMCallEvent; see tests/test_summary_concurrency.py for coverage."
+    )
     def test_summary_tracks_running_totals(self, tmp_dir):
         from cube_harness.summary import SummaryProcessor
 
@@ -931,19 +948,17 @@ class TestMsgpackZstFormat:
         assert raw[:4] != b'{"_t'
 
     def test_compression_reduces_size(self, tmp_dir):
+        """Verify the msgpack+zstd step writer actually compresses.
+
+        AgentOutput post-auto-recorder no longer bundles LLMCalls, so
+        the payload is smaller — beef up the action arguments to keep
+        the compression delta visible (a few KB of repetitive text in
+        a tool arg compresses well).
+        """
         storage = FileStorage(tmp_dir)
-        llm_call = LLMCall(
-            id="call_1",
-            llm_config=LLMConfig(model_name="gpt-4"),
-            prompt=Prompt(
-                messages=[{"role": "system", "content": "You are helpful. " * 200}],
-                tools=[{"type": "function", "function": {"name": f"tool_{i}", "parameters": {}}} for i in range(20)],
-            ),
-            output=Message(role="assistant", content="I will help you. " * 100),
-        )
+        big_text = "You are helpful. " * 500  # ~8.5 KB of repetitive content
         agent_output = AgentOutput(
-            actions=[Action(name="click", arguments={"element": "btn"})],
-            llm_calls=[llm_call],
+            actions=[Action(name="echo", arguments={"text": big_text, "ctx": big_text})],
         )
         traj = Trajectory(id="task_1_ep0", metadata={"task_id": "task_1", "agent_name": "A"})
         traj.steps.append(TrajectoryStep(output=agent_output))
@@ -1156,6 +1171,11 @@ class TestV1BackwardCompat:
         ids = storage.list_trajectory_ids()
         assert set(ids) == {"traj_0", "traj_1"}
 
+    @pytest.mark.skip(
+        reason="Tests V1 inline-llm_call reference resolution into AgentOutput.llm_calls — "
+        "that field is gone (auto-recorder collapse). V1 legacy reads now degrade to "
+        "actions-only AgentOutput; full V1 removal is the agent-owns-loop-xray follow-up."
+    )
     def test_v1_with_llm_call_refs(self, tmp_dir: Path) -> None:
         traj_dir = tmp_dir / "trajectories"
         traj_dir.mkdir(parents=True, exist_ok=True)

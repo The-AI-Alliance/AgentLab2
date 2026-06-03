@@ -12,6 +12,7 @@ what was sent there rather than walking an in-memory list.
 """
 
 import asyncio
+from typing import Callable
 
 import pytest
 from cube.core import Action, ActionSchema, Observation, StepError
@@ -90,7 +91,7 @@ def _make_monitored(
     budget: Budget,
     *,
     storage: _FakeStorage | None = None,
-    parent_event_id_getter=None,
+    parent_event_id_getter: Callable[[], str] | None = None,
 ) -> MonitoredTool | AsyncMonitoredTool:
     storage = storage if storage is not None else _FakeStorage()
     if isinstance(inner, AbstractAsyncTool):
