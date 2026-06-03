@@ -64,7 +64,7 @@ class EventSink(Protocol):
 
     Sinks MUST be cheap and non-blocking. `emit()` is called on the agent
     loop's hot path under the streamer's stats-lock; a slow sink stalls
-    every parallel tool dispatch in `GennyParallel`. If a sink needs I/O
+    every parallel tool dispatch in `Genny[parallel_actions=True]`. If a sink needs I/O
     (HTTP, disk-fsync), do it in a background queue.
 
     The structural typing here matches `FileStorage.save_event` exactly,
@@ -95,7 +95,7 @@ class EventStreamer:
     `emit(te)` which:
 
       1. Folds stats counters (under a lock to be safe under parallel
-         tool dispatch from GennyParallel's asyncio.to_thread workers).
+         tool dispatch from Genny[parallel_actions=True]'s asyncio.to_thread workers).
       2. Forwards to every sink (currently FileStorage; OTel + RL HTTP
          land via `EventStreamerConfig`).
       3. Returns the event id.
@@ -120,7 +120,7 @@ class EventStreamer:
         # Mutable side-channel dict passed from Episode; merged into
         # TrajectoryMetadata.metadata at finalize. Writes from inside a
         # parallel-dispatch worker (e.g. an asyncio.to_thread tool call
-        # via GennyParallel) MUST hold `self._lock` — the dict itself
+        # via Genny[parallel_actions=True]) MUST hold `self._lock` — the dict itself
         # has no internal synchronization. Single-threaded callers can
         # write directly.
         self.metadata_updates = metadata_updates if metadata_updates is not None else {}

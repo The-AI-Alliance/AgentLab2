@@ -21,7 +21,7 @@ from cube_harness.llm import is_permanent_llm_error
 from cube_harness.metrics.tracer import get_tracer
 from cube_harness.storage import FileStorage, Storage, TrajectoryView
 from cube_harness.streamer import EventStreamer, EventStreamerConfig
-from cube_harness.tool import Budget, BudgetExceeded, TaskDone, as_async, install_monitoring
+from cube_harness.tool import Budget, BudgetExceeded, TaskDone, install_monitoring
 
 logger = logging.getLogger(__name__)
 
@@ -236,24 +236,20 @@ class Episode:
                 install_monitoring(task, streamer)
 
                 # 4. The env-tool the agent will see is the task's
-                # (now-monitored) tool, wrapped via `as_async` so the
-                # agent always gets `AbstractAsyncTool`-shaped surface
-                # (`await env_tool.execute_action(...)`) regardless of
-                # whether the underlying tool is sync or async. Sync
-                # tools dispatch via `asyncio.to_thread` inside the
-                # wrapper. Agent-private tools (memory, scratchpad, …)
-                # live on the agent itself — the agent composes them
-                # locally if it wants a unified dispatch:
-                #     combined = Toolbox([env_tool, self.memory])
-                # The framework stays out of agent-private tooling.
+                # (now-monitored) tool. `Agent.run` is the dispatcher;
+                # it picks `_run` (sync, no await) or `_arun` (async,
+                # gather) based on `AgentConfig.parallel_actions` and
+                # converts the env_tool's sync/async shape internally
+                # if needed (sync inner is wrapped in `AsyncToolbox`
+                # for `_arun`). Agent-private tools (memory, scratchpad,
+                # …) live on the agent itself.
                 # MUST match install_monitoring's lookup order (toolbox
                 # first) — otherwise when a task exposes both attrs the
                 # agent ends up with an UNMONITORED env_tool while the
                 # monitoring wrappers are installed on the other one.
                 # See tool.install_monitoring: `container = getattr(task,
                 # "toolbox", None) or getattr(task, "tool", None)`.
-                task_tool = getattr(task, "toolbox", None) or getattr(task, "tool", None)
-                env_tool = as_async(task_tool) if task_tool is not None else None
+                env_tool = getattr(task, "toolbox", None) or getattr(task, "tool", None)
 
                 # 5. Record the initial obs as a synthetic ToolCallEvent
                 # whose parent is the RESET sentinel.

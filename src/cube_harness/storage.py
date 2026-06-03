@@ -754,7 +754,7 @@ class FileStorage:
         lazily on first save. Numbering is owned by the storage —
         callers don't pass an event_num and don't coordinate. Safe
         under concurrent writes from `asyncio.to_thread` workers
-        (e.g. GennyParallel's parallel tool dispatch)."""
+        (e.g. Genny[parallel_actions=True]'s parallel tool dispatch)."""
         ep_dir = self._episode_dir(trajectory_id)
         if not ep_dir.exists():
             raise ValueError(f"Episode directory does not exist: {ep_dir}. Call save_metadata first.")

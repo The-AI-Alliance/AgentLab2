@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SMOKE: GennyParallel + Episode emit sibling ToolCallEvents in one turn.
+"""SMOKE: Genny[parallel_actions=True] + Episode emit sibling ToolCallEvents in one turn.
 
 Drives GennyParallel (RFC `agent-owns-loop`, Phase H) through the real
 Episode body (Phase E), but bypasses the LLM by injecting a scripted
@@ -28,7 +28,6 @@ from cube.task import Task, TaskConfig, TaskMetadata
 from cube.tool import Tool, ToolConfig, tool_action
 
 from cube_harness.agent import Agent, AgentConfig
-from cube_harness.agents.genny_parallel import GennyParallel
 from cube_harness.core import AgentOutput, LLMCallEvent, ToolCallEvent
 from cube_harness.exp_runner import run_sequentially
 from cube_harness.experiment import Experiment
@@ -97,12 +96,19 @@ class _ParallelBenchmarkConfig(BenchmarkConfig):
     benchmark_class = _ParallelBenchmark
 
 
-class _ScriptedParallelAgent(GennyParallel):
-    """GennyParallel without LLM — first step() returns 3 parallel
-    actions; second returns empty actions to graceful-stop."""
+class _ScriptedParallelAgent(Agent):
+    """Pure-Agent test driver, no LLM — first step() returns 3 parallel
+    actions; second returns empty actions to graceful-stop. Inherits
+    `_arun` (parallel) from Agent base; opt-in via parallel_actions=True
+    on the config."""
 
-    def __init__(self, _config: AgentConfig) -> None:
-        # Skip Genny.__init__ — we don't need the LLM machinery.
+    name = "_ScriptedParallelAgent"
+    description = "scripted parallel agent for smoke"
+    input_content_types: list[str] = []
+    output_content_types: list[str] = []
+
+    def __init__(self, config: AgentConfig) -> None:
+        super().__init__(config)
         self._called = 0
 
     def step(self, obs: Observation) -> AgentOutput:
@@ -120,6 +126,8 @@ class _ScriptedParallelAgent(GennyParallel):
 
 
 class _ScriptedAgentConfig(AgentConfig):
+    parallel_actions: bool = True  # opt into Agent._arun
+
     def make(self, action_set: object = None, **kwargs: object) -> "Agent":
         _ = action_set, kwargs
         return _ScriptedParallelAgent(self)

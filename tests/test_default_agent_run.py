@@ -18,7 +18,7 @@ from cube.tool import AbstractTool
 from cube_harness.agent import Agent, AgentConfig
 from cube_harness.core import AgentOutput, LLMCallEvent, ToolCallEvent, TrajectoryEvent
 from cube_harness.streamer import EventStreamer
-from cube_harness.tool import Budget, BudgetExceeded, TaskDone, as_async, install_monitoring
+from cube_harness.tool import Budget, BudgetExceeded, TaskDone, install_monitoring
 
 # ---------------------------------------------------------------------------
 # Mock pieces: a tiny "task" with a sync step that increments a counter
@@ -135,7 +135,7 @@ def test_default_run_completes_when_task_signals_done() -> None:
     agent = _CounterAgent(_CounterAgentConfig())
     agent.attach_recorder(recorder)
     try:
-        asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.toolbox)))
+        asyncio.run(agent.run(initial_obs=Observation(), env_tool=task.toolbox))
     except TaskDone:
         pass  # expected: task.finished() returned True after 3 counter increments
 
@@ -166,7 +166,7 @@ def test_default_run_terminates_on_empty_actions() -> None:
     recorder, storage = _setup(task, budget)
     agent = _NoopAgent(_CounterAgentConfig())
     agent.attach_recorder(recorder)
-    asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.toolbox)))
+    asyncio.run(agent.run(initial_obs=Observation(), env_tool=task.toolbox))
     outputs = storage.outputs()
     # No LLM call + empty actions => nothing was emitted by the agent
     # loop (LLM auto-emit doesn't fire; ToolCallEvent dispatch doesn't fire).
@@ -185,7 +185,7 @@ def test_default_run_records_parent_event_id_on_tool_calls() -> None:
     agent = _CounterAgent(_CounterAgentConfig())
     agent.attach_recorder(recorder)
     try:
-        asyncio.run(agent.run(Observation(), as_async(task.toolbox)))
+        asyncio.run(agent.run(Observation(), task.toolbox))
     except TaskDone:
         pass
 
@@ -212,7 +212,7 @@ def test_default_run_propagates_budget_exceeded() -> None:
     # The second tool call (turn 2) raises.
     raised: list[BaseException] = []
     try:
-        asyncio.run(agent.run(initial_obs=Observation(), env_tool=as_async(task.toolbox)))
+        asyncio.run(agent.run(initial_obs=Observation(), env_tool=task.toolbox))
     except BaseException as e:  # noqa: BLE001
         raised.append(e)
     assert any(isinstance(e, BudgetExceeded) for e in raised)

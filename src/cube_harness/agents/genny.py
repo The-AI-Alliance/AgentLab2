@@ -228,6 +228,20 @@ class GennyConfig(AgentConfig):
         )
 
     def make(self, action_set: list[ActionSchema] | None = None, task_id: str | None = None, **kwargs) -> "Genny":
+        # If the agent opted into parallel action dispatch, force the LLM to
+        # actually emit multiple tool calls per turn. Otherwise the agent's
+        # `_arun` body fans out over a one-element list — same wall-clock as
+        # sequential, no win. Caught by the agent-owns-loop reference
+        # baseline (gpt-5.4-mini on TerminalBench-2): parity with sequential
+        # because nothing flipped the flag. Force it here on the config
+        # that needs it, not the caller.
+        if self.parallel_actions and not self.llm_config.parallel_tool_calls:
+            logger.info(
+                "GennyConfig.parallel_actions=True: forcing llm_config.parallel_tool_calls=True "
+                "(was False — without it the LLM emits one tool call per turn and parallel "
+                "dispatch would be a no-op)."
+            )
+            self.llm_config = self.llm_config.model_copy(update={"parallel_tool_calls": True})
         return Genny(config=self, action_schemas=action_set or [], task_id=task_id)
 
 

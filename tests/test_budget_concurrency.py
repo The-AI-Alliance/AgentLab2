@@ -1,7 +1,7 @@
 """Regression: Budget counters under concurrent bumps from parallel
 tool-call workers.
 
-GennyParallel fans out N tool calls via asyncio.gather over an
+Genny[parallel_actions=True] fans out N tool calls via asyncio.gather over an
 `_SyncToolAsAsync` adapter. The adapter hops into a real OS thread via
 `asyncio.to_thread`, so N MonitoredTool workers run on N threads —
 each calling `_record_tool_call` → `budget.bump_tool_calls()`. Without

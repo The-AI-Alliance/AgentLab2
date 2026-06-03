@@ -1,16 +1,18 @@
 """Agent abstraction."""
 
+import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from cube.core import ActionSchema, Observation, StepError, ValidatedConfig
+from cube.tool import AbstractAsyncTool
 from pydantic import Field
 
 from cube_harness.core import AgentOutput
 
 if TYPE_CHECKING:
-    from cube.tool import AbstractAsyncTool
+    from cube.tool import AbstractTool
 
     from cube_harness.streamer import EventStreamer
 
@@ -47,6 +49,19 @@ class AgentConfig(ValidatedConfig, ABC):
             "before the tool schema is built — a toggleable knob for testing better "
             "wording without editing the tool. A proven override graduates into the "
             "tool's docstring at the source via a PR."
+        ),
+    )
+
+    parallel_actions: bool = Field(
+        default=False,
+        description=(
+            "If True, `Agent.run` dispatches to `_arun` (async body, fans out the "
+            "N actions per step via `asyncio.gather` over `MonitoredTool.async_execute_action`). "
+            "If False (default), dispatches to `_run` (sync body, sequential dispatch via "
+            "`MonitoredTool.execute_action` — no `await`, single-stack pdb). Pair with "
+            "`LLMConfig.parallel_tool_calls=True` so the model emits multiple tool calls "
+            "per turn; otherwise parallel dispatch fans out over a one-element list and "
+            "wins nothing."
         ),
     )
 
@@ -132,29 +147,69 @@ class Agent(ABC):
     async def run(
         self,
         initial_obs: Observation,
-        env_tool: "AbstractAsyncTool",
+        env_tool: "AbstractTool | AbstractAsyncTool",
     ) -> None:
-        """Default gym-style loop on top of `self.step` — Episode's canonical entry point.
+        """Episode's canonical entry point — dispatches to one of two loop bodies.
 
-        Sync `step()` agents get this for free. Override `run` directly
-        for parallel tool dispatch, async LLM, or streaming (see
-        `GennyParallel`).
+        Selection is by `self.config.parallel_actions`:
 
-        `env_tool` is uniformly `AbstractAsyncTool`: Episode adapts sync
-        tools at the boundary. The recorder is attached out-of-band via
-        `attach_recorder()` before `run` is called; LLM/tool events
-        auto-emit. `self._recorder.budget` is available for self-stop.
+          * `False` (default) → `_run` (sync body). Fully synchronous
+            action dispatch with NO `await` on tool calls. Single-stack
+            pdb; what you `step` is what you debug. env_tool must be a
+            sync container (a `Toolbox`, a sync `MonitoredTool`, or any
+            `AbstractTool` subclass).
 
-        Termination:
+          * `True` → `_arun` (async body). N actions per step fan out
+            via `asyncio.gather` for real parallelism. env_tool must
+            be an async container (auto-wrapped from sync if needed).
+
+        The recorder is attached out-of-band via `attach_recorder()`
+        before `run` is called; LLM/tool events auto-emit.
+        `self._recorder.budget` is available for self-stop.
+
+        Override `_run` / `_arun` to customize loop behavior; override
+        `run` only when you need a fundamentally different dispatch
+        (streaming LLM, custom backoff, …).
+
+        Termination (shared by both bodies):
           * Graceful: `step` returns empty actions with no error.
           * `TaskDone` from a MonitoredTool (task `finished()` or
             STOP_ACTION) — propagates; do NOT catch BaseException.
           * `BudgetExceeded` from a MonitoredTool — propagates.
         """
+        if self.config.parallel_actions:
+            # _arun needs an async-shaped env_tool. Convert sync → async.
+            from cube_harness.tool import as_async  # local import: avoid cycle
+
+            async_env = env_tool if isinstance(env_tool, AbstractAsyncTool) else as_async(env_tool)
+            await self._arun(initial_obs, async_env)
+        else:
+            if isinstance(env_tool, AbstractAsyncTool):
+                raise TypeError(
+                    f"Agent._run (sync default) requires a sync env_tool; got "
+                    f"{type(env_tool).__name__}. Either set "
+                    f"`AgentConfig.parallel_actions=True` to use the async `_arun` body, "
+                    f"or override `run` to customize dispatch for async-only tools."
+                )
+            self._run(initial_obs, env_tool)
+
+    def _run(
+        self,
+        initial_obs: Observation,
+        env_tool: "AbstractTool",
+    ) -> None:
+        """Sync gym-style loop — sequential, single-threaded, no `await`.
+
+        Use for sync `step()` agents driving sync tools (the 99% case).
+        `env_tool.execute_action(action)` runs the inner sync tool
+        directly on the calling thread — pdb lands in the tool body
+        with a single stack, no thread-pool worker, no async hop.
+
+        Override to customize sync loop behavior. For parallel tool
+        dispatch, see `_arun` + `AgentConfig.parallel_actions=True`.
+        """
         obs = initial_obs
         while True:
-            # Sync body under async signature — debugable on the main
-            # thread. Override `run` for true async/concurrent work.
             agent_output = self.step(obs)
             # Bump the step counter AFTER step() (so its LLM calls emit)
             # and BEFORE dispatch (so a step that crosses the cap can't
@@ -165,16 +220,73 @@ class Agent(ABC):
                 raise RuntimeError(f"Agent step returned error: {agent_output.error.exception_str}")
             if not agent_output.actions:
                 return
-            # Sequential dispatch. Multi-action agents needing fan-out
-            # / result merging override `run` (see GennyParallel).
             last_obs: Observation | None = None
             for action in agent_output.actions:
-                result = await env_tool.execute_action(action)
+                # Sync call — no `await`, no thread hop. Debuggable.
+                result = env_tool.execute_action(action)
                 if isinstance(result, StepError):
                     raise RuntimeError(f"Tool dispatch returned StepError: {result.exception_str}")
                 last_obs = result
             if last_obs is not None:
                 obs = last_obs
+
+    async def _arun(
+        self,
+        initial_obs: Observation,
+        env_tool: "AbstractAsyncTool",
+    ) -> None:
+        """Async gym-style loop — N actions per step fan out via
+        `asyncio.gather`. Tool calls run in real parallel (sync tools
+        via `asyncio.to_thread` inside `async_execute_action`).
+
+        The default observation-merge concatenates results in original
+        action order (`Observation.__iadd__`). Subclasses with bespoke
+        merge logic (Genny's `_merge_results`) override this method.
+
+        Override to customize async loop behavior. For sync default,
+        see `_run` + `AgentConfig.parallel_actions=False`.
+        """
+        obs = initial_obs
+        while True:
+            # Step is sync. To exploit a truly async LLM (rare today —
+            # LiteLLM's sync `completion()` is the canonical path),
+            # override and use `asyncio.to_thread` or an async step.
+            agent_output = self.step(obs)
+            if self._recorder is not None:
+                self._recorder.on_step()
+            if agent_output.error is not None:
+                raise RuntimeError(f"Agent step returned error: {agent_output.error.exception_str}")
+            if not agent_output.actions:
+                return
+            # Parallel fan-out. AsyncToolbox routes through
+            # MonitoredTool.async_execute_action, which uses to_thread
+            # for sync inners — real OS-thread parallelism.
+            results = await asyncio.gather(*(env_tool.execute_action(a) for a in agent_output.actions))
+            merged = self._merge_results(results)
+            if merged is None:
+                return
+            obs = merged
+
+    @staticmethod
+    def _merge_results(results: list["Observation | StepError"]) -> "Observation | None":
+        """Merge N parallel tool results into one observation. StepError
+        results surface as text inside the merged obs so the LLM sees the
+        failure. Returns None when every result is an error and no
+        useful observation was produced — the agent treats this as a
+        graceful stop. Subclasses can override for bespoke merging."""
+        merged: Observation | None = None
+        any_observation = False
+        for r in results:
+            if isinstance(r, Observation):
+                any_observation = True
+                merged = r if merged is None else merged + r
+            else:
+                msg = f"[tool error: {r.error_type}: {r.exception_str}]"
+                fragment = Observation.from_text(msg)
+                merged = fragment if merged is None else merged + fragment
+        if not any_observation and merged is None:
+            return None
+        return merged
 
     def __repr__(self) -> str:
         return self.config.model_dump_json(indent=2, serialize_as_any=True)

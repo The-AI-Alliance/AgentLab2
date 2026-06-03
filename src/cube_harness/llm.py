@@ -113,7 +113,7 @@ class LLMConfig(ValidatedConfig):
     #      the model to emit multiple `tool_calls` in one assistant
     #      message when it wants to.
     #   2. The cube-harness dispatch contract: when True, the framework
-    #      (specifically `GennyParallel.run`) fans the emitted tool
+    #      (specifically `Genny[parallel_actions=True]._arun`) fans the emitted tool
     #      calls out via `asyncio.gather` — they execute concurrently,
     #      results are merged into the next obs.
     #

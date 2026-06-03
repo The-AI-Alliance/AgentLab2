@@ -1,7 +1,7 @@
 """Regression: EventStreamer's stats counters under concurrent emits
 from parallel tool-call workers.
 
-GennyParallel dispatches N tool calls via asyncio.gather +
+Genny[parallel_actions=True] dispatches N tool calls via asyncio.gather +
 asyncio.to_thread. Each worker thread calls
 MonitoredTool.execute_action → _record_tool_call → streamer.emit on
 the SAME EventStreamer. Without the lock, the read-modify-write of
