@@ -1,6 +1,5 @@
 """Agent abstraction."""
 
-import asyncio
 import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
@@ -168,7 +167,18 @@ class Agent(ABC):
         """
         obs = initial_obs
         while True:
-            agent_output = await asyncio.to_thread(self.step, obs)
+            # The signature is async for symmetry with agents that need
+            # true async (Genny streaming, GennyParallel's asyncio.gather
+            # over MonitoredTool calls). The default body, however, runs
+            # `step()` directly on the event loop — no `asyncio.to_thread`
+            # wrap. In a one-episode-per-process world (Ray) nothing else
+            # is scheduled on the loop during `step()`, so the wrap would
+            # buy nothing and cost debugability: pdb would land in a
+            # thread-pool worker and tracebacks would cross thread
+            # boundaries. Agents that genuinely need a non-blocking step
+            # (because they co-schedule episodes, or run truly concurrent
+            # work mid-step) override `run` directly.
+            agent_output = self.step(obs)
             # Bump `budget.turns` (one agent step) and enforce caps —
             # AFTER step() so LLM calls inside step() emit first, but
             # BEFORE dispatching any actions so a turn that crosses
