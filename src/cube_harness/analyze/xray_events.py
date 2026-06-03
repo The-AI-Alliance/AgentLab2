@@ -94,6 +94,25 @@ class EventCard:
     accompanying: list[int] = field(default_factory=list)
 
 
+@dataclass
+class EventGroup:
+    """One logical group — the connected component of the dependency graph
+    rooted at an LLM call (or the reset observation), with its events bucketed
+    by role so the detail panes can render the whole step at once.
+
+    `selected` is the card the user clicked (active); `members` minus it are
+    the accompanying cards. The role buckets are stream-ordered indices.
+    """
+
+    root: int
+    selected: int
+    members: list[int]
+    llm_index: int | None
+    observation_indices: list[int]
+    evaluation_indices: list[int]
+    error_indices: list[int]
+
+
 class EpisodeEvents:
     """Flat, ordered event stream for one episode, with parent-link pairing.
 
@@ -116,6 +135,46 @@ class EpisodeEvents:
                 self._id_to_index[ev_id] = i
             if isinstance(out, ToolCallEvent):
                 self._children.setdefault(out.parent_event_id, []).append(i)
+        # Logical grouping: the connected component of the parent_event_id
+        # dependency graph each event belongs to. A group is rooted at an LLM
+        # call (or the reset observation) and gathers the tool call(s) it
+        # produced, their step-wise evaluations, and any error in the chain —
+        # so selecting any card surfaces the whole "why did the agent do this,
+        # what did it observe, what reward, any error" story.
+        self._root_of = self._compute_roots()
+        self._group_members: dict[int, list[int]] = {}
+        for i, root in enumerate(self._root_of):
+            self._group_members.setdefault(root, []).append(i)
+
+    def _compute_roots(self) -> list[int]:
+        """Map each event index to its group-root index (one pass, in order).
+
+        Roots are LLM calls and the reset observation. Tool calls and step-wise
+        evaluations resolve to their parent's root. Terminal evaluations and
+        agent errors — which currently lack a parent link upstream — attach to
+        the most recent root by stream position (a heuristic that becomes exact
+        once the producers stamp `parent_event_id` on them).
+        """
+        root_of = [0] * len(self.events)
+        last_root: int | None = None
+        for i, ev in enumerate(self.events):
+            out = ev.output
+            root = i
+            if isinstance(out, LLMCallEvent):
+                root = i
+            elif isinstance(out, ToolCallEvent):
+                if out.parent_event_id != RESET_PARENT:
+                    p = self._id_to_index.get(out.parent_event_id)
+                    root = root_of[p] if p is not None else i
+            elif isinstance(out, EvaluationEvent):
+                p = self._id_to_index.get(out.parent_event_id) if out.parent_event_id else None
+                root = root_of[p] if p is not None else (last_root if last_root is not None else i)
+            elif isinstance(out, AgentErrorEvent):
+                root = last_root if last_root is not None else i
+            root_of[i] = root
+            if root == i:  # this event opens a new group
+                last_root = i
+        return root_of
 
     @classmethod
     def from_view(cls, view: TrajectoryView) -> "EpisodeEvents":
@@ -161,37 +220,52 @@ class EpisodeEvents:
             return []
         return list(self._children.get(out.id, []))
 
+    # --- dependency-graph grouping ----------------------------------------
+
+    def group_members(self, i: int) -> list[int]:
+        """All event indices in the logical group containing `i`, in order."""
+        return list(self._group_members.get(self._root_of[i], [i]))
+
     def accompanying_indices(self, i: int) -> list[int]:
-        """The event(s) paired with `i` for joint display.
+        """Other members of `i`'s group — the cards the UI highlights as
+        accompanying (muted) when `i` is the active selection."""
+        return [m for m in self.group_members(i) if m != i]
 
-        Observation -> its parent LLM call. LLM call -> its child
-        observation(s). Everything else -> nothing.
+    def group_for(self, i: int) -> "EventGroup":
+        """The logical group containing event `i`, bucketed by role.
+
+        Gives the detail panes everything to render at once: the LLM
+        interaction, the observation(s) it produced, the reward(s), and any
+        error — regardless of which card in the group the user selected.
         """
-        out = self.events[i].output
-        if isinstance(out, ToolCallEvent):
-            parent = self.parent_index(i)
-            return [parent] if parent is not None else []
-        if isinstance(out, LLMCallEvent):
-            return self.child_indices(i)
-        return []
-
-    def resolve_pair(self, i: int) -> tuple[int | None, list[int]]:
-        """Return `(llm_index, observation_indices)` for the selection at `i`.
-
-        Normalizes either side of a selection into the same shape so the UI
-        can always render an "LLM response" panel beside an "observation"
-        panel regardless of which card the user clicked:
-
-          - select an LLM call  -> (i, [its children])
-          - select an observation -> (its parent, [i])
-          - select anything else  -> (None, [])  (eval / error render alone)
-        """
-        out = self.events[i].output
-        if isinstance(out, LLMCallEvent):
-            return i, self.child_indices(i)
-        if isinstance(out, ToolCallEvent):
-            return self.parent_index(i), [i]
-        return None, []
+        members = self.group_members(i)
+        llm_index: int | None = None
+        observations: list[int] = []
+        evaluations: list[int] = []
+        errors: list[int] = []
+        for m in members:
+            out = self.events[m].output
+            if isinstance(out, LLMCallEvent):
+                llm_index = m
+                if out.error is not None:
+                    errors.append(m)
+            elif isinstance(out, ToolCallEvent):
+                observations.append(m)
+                if out.error is not None:
+                    errors.append(m)
+            elif isinstance(out, EvaluationEvent):
+                evaluations.append(m)
+            elif isinstance(out, AgentErrorEvent):
+                errors.append(m)
+        return EventGroup(
+            root=self._root_of[i],
+            selected=i,
+            members=members,
+            llm_index=llm_index,
+            observation_indices=observations,
+            evaluation_indices=evaluations,
+            error_indices=errors,
+        )
 
     # --- typed payload extractors (None-safe) -----------------------------
 
