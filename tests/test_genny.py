@@ -765,10 +765,9 @@ class TestFlatHistory:
 # BudgetConfig.check / TestCostLimit / TestTokenLimit deleted:
 # - BudgetConfig is gone — caps live on the framework `cube_harness.tool.Budget`
 #   constructed by Episode from `Experiment.max_steps` / `Experiment.max_cost_usd`.
-# - Cost & token tracking is in `EventStreamer._flush_agent_event` (covered by
-#   `tests/test_recorder_dual_api.py::test_recorder_accumulates_cost_into_budget`
-#   and `::test_recorder_triggers_budget_exceeded_on_cost`).
-# - Genny's soft-stop via `recorder.budget.exhausted` is covered by
+# - Cost & token tracking lives in `EventStreamer.on_llm_call` (bumps
+#   `Budget.bump_llm_usage` per LLM call from `LLMCall.usage`).
+# - Genny's soft-stop via `streamer.budget.exhausted` is covered by
 #   `test_step_issues_stop_action_when_budget_exhausted` above.
 
 

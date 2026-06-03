@@ -1336,7 +1336,7 @@ def _compute_token_stats_for_trajectory(traj: Trajectory) -> dict[str, int | flo
             # AgentOutput post-agent-owns-loop has no `llm_calls` field.
             # New trajectories source token stats from LLMCallEvent in the
             # event stream — already aggregated into `summary_stats` by
-            # `SummaryProcessor`. This walk is only hit on legacy V1 reads
+            # `EventStreamer`. This walk is only hit on legacy V1 reads
             # where llm_calls was bundled into AgentOutput.
             llm_calls = getattr(traj_step.output, "llm_calls", None) or []
             for llm_call in llm_calls:
@@ -1371,7 +1371,7 @@ def compute_trajectory_stats(traj: Trajectory) -> dict[str, Any]:
             total_actions += len(traj_step.output.actions)
             # AgentOutput.llm_calls is gone post-agent-owns-loop; fall
             # back to 0 (new trajectories carry token stats in
-            # `summary_stats` already, via SummaryProcessor).
+            # `summary_stats` already, via EventStreamer).
             total_llm_calls += len(getattr(traj_step.output, "llm_calls", None) or [])
 
     duration = None

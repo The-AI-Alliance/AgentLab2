@@ -56,6 +56,9 @@ class LLMCallEvent(TypedBaseModel):
     id: str                            # turn_id for child ToolCallEvents
     call: LLMCall | None               # full prompt/response/usage (None on legacy decode only)
     profiling: dict[str, tuple[float, float]]
+    metadata: dict                     # free-form bag — producers attach sink-specific data
+                                       # (e.g. RL: prompt_token_ids, logprobs, trainable_call_index)
+                                       # without coupling the core event model to a consumer.
     error: StepError | None
 
 class ToolCallEvent(TypedBaseModel):
@@ -250,7 +253,14 @@ class EventStreamer:
         trajectory_id: str,
         storage: Storage | None,
         budget: Budget | None,
+        metadata_updates: dict | None = None,        # back-channel merged into TrajectoryMetadata.metadata
     ): ...
+
+    # Sinks list — `storage` registers as sink-0 in __init__; additional
+    # sinks (OTel emitter, RL HTTP pump, ...) append post-construction
+    # via `streamer._sinks.append(sink)`. Sinks implement EventSink
+    # (Protocol with one method: `save_event(te, trajectory_id) -> None`).
+    _sinks: list[EventSink]
 
     # Sole fan-out entry point. Folds per-episode stats counters and
     # forwards to sinks. All producers (LLM, MonitoredTool, the
@@ -302,6 +312,22 @@ empty `EventStreamerConfig` — `FileStorage` is the sole sink
 (per-episode stats are folded directly inside the streamer; no
 separate sink for them). Future fields like `enable_otel: bool` and
 `rl_http_endpoint: str | None` plug in additively.
+
+#### `EventSink` Protocol
+
+```python
+@runtime_checkable
+class EventSink(Protocol):
+    def save_event(self, te: TrajectoryEvent, trajectory_id: str) -> None: ...
+```
+
+Structural shape every sink implements. Matches `FileStorage.save_event`
+exactly — the first sink conformed by accident; the Protocol declaration
+makes future sinks self-documenting. `EventStreamer.emit()` iterates
+`self._sinks` and catches per-sink exceptions so a misbehaving
+downstream (slow HTTP, full disk) cannot kill the trajectory. Sinks
+**must** be cheap and non-blocking — `emit()` runs on the agent loop's
+hot path under the stats lock; for I/O, queue inside the sink.
 
 #### Connector path (Phase 2)
 

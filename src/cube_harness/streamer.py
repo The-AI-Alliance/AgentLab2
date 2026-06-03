@@ -112,26 +112,26 @@ class EventStreamer:
         storage: object | None = None,
         budget: object | None = None,
         metadata_updates: dict | None = None,
-        extra_sinks: list[EventSink] | None = None,
     ) -> None:
         self.trajectory_id = trajectory_id
         self.storage = storage
         # `cube_harness.tool.Budget`; loose-typed to avoid circular import.
         self.budget = budget
         # Mutable side-channel dict passed from Episode; merged into
-        # TrajectoryMetadata.metadata at finalize. Connectors that need
-        # a back-channel write here.
+        # TrajectoryMetadata.metadata at finalize. Writes from inside a
+        # parallel-dispatch worker (e.g. an asyncio.to_thread tool call
+        # via GennyParallel) MUST hold `self._lock` — the dict itself
+        # has no internal synchronization. Single-threaded callers can
+        # write directly.
         self.metadata_updates = metadata_updates if metadata_updates is not None else {}
         # Sinks list — storage is the canonical sink-0, additional sinks
-        # (OTel emitter, RL HTTP pump, ...) append. `emit()` iterates
-        # this list; sink-registration is just `streamer._sinks.append(s)`.
-        # Tests pass duck-typed objects with `save_event`; the Protocol
-        # check is structural, not nominal.
+        # (OTel emitter, RL HTTP pump, ...) register post-construction
+        # via `streamer._sinks.append(sink)`. Tests pass duck-typed
+        # objects with `save_event`; the Protocol check is structural,
+        # not nominal.
         self._sinks: list[EventSink] = []
         if storage is not None and hasattr(storage, "save_event"):
             self._sinks.append(storage)
-        if extra_sinks:
-            self._sinks.extend(extra_sinks)
         self._current_parent_event_id: str | None = None
         # Stats counters folded as events flow through. Lock guards the
         # multi-counter read-modify-write under parallel dispatch.

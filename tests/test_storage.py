@@ -791,7 +791,7 @@ class TestSummaryStats:
     def test_experiment_summary_marks_error_via_summary_stats(self, tmp_dir: Path) -> None:
         """Post-stream refactor, ``trajectory.steps`` is empty when the runner calls into
         ``update_experiment_summary``. Error detection must read
-        ``summary_stats['error_type']`` (captured incrementally by SummaryProcessor) —
+        ``summary_stats['error_type']`` (captured incrementally by EventStreamer) —
         walking the in-memory step list would silently always report no error."""
         storage = FileStorage(tmp_dir)
         errored = Trajectory(

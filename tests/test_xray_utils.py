@@ -722,7 +722,7 @@ class TestTrajectoryStatusFromEpisodeStatus:
 @pytest.mark.skip(
     reason="Tests token-aggregation from AgentOutput.llm_calls — gone "
     "(auto-recorder collapse). Token totals now live in summary_stats "
-    "written by SummaryProcessor.on_event from LLMCallEvent."
+    "folded by EventStreamer.emit from LLMCallEvent."
 )
 class TestComputeTrajectoryStats:
     def test_empty_trajectory(self) -> None:

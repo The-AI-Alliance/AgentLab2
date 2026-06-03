@@ -329,7 +329,7 @@ class TrajectoryView:
 
     @property
     def summary_stats(self) -> dict | None:
-        """Aggregate per-episode stats produced by SummaryProcessor."""
+        """Aggregate per-episode stats produced by EventStreamer."""
         return self._meta.summary_stats
 
     @property
@@ -1211,7 +1211,7 @@ class FileStorage:
 
                 stats = meta.summary_stats or {}
                 # trajectory.steps is empty post-stream refactor; the first step-level
-                # error_type is captured incrementally by SummaryProcessor and lives in
+                # error_type is captured incrementally by EventStreamer and lives in
                 # summary_stats. Walking the (empty) step list here would have silently
                 # always reported no error.
                 has_error = bool(stats.get("error_type"))

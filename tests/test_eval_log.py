@@ -170,7 +170,7 @@ def test_extract_tool_names_skips_tools_without_name() -> None:
 
 
 # ---------------------------------------------------------------------------
-# error_type (sourced from summary_stats, populated by the streaming SummaryProcessor)
+# error_type (sourced from summary_stats, populated by the streaming EventStreamer)
 # ---------------------------------------------------------------------------
 
 
