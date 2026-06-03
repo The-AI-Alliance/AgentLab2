@@ -172,6 +172,8 @@ class Episode:
         trajectory: Trajectory | None = None
         summary_proc: SummaryProcessor | None = None
         step_idx = 0
+        finalized = False
+        last_env_output: EnvironmentOutput | None = None
         try:
             with tracer.episode(task_id, experiment=self.config.exp_name) as episode_span:
                 start_time = ep_status.started_at
@@ -207,6 +209,7 @@ class Episode:
                     step_idx += 1
 
                 _record(TrajectoryStep(output=env_output, start_time=start_time, end_time=time.time()))
+                last_env_output = env_output
                 logger.info(colored(f"Episode started — done={env_output.done} reward={env_output.reward}", "blue"))
                 turns = 0
                 while not env_output.done and turns < self.config.max_steps:
@@ -256,6 +259,7 @@ class Episode:
                             )
                         )
                         _record(TrajectoryStep(output=env_output, start_time=env_ts, end_time=time.time()))
+                        last_env_output = env_output
                         if env_output.error is not None:
                             ep_status.had_step_errors = True
                         span.set_attribute("done", env_output.done)
@@ -281,6 +285,21 @@ class Episode:
                         _record(TrajectoryStep(output=env_output, start_time=eval_ts, end_time=time.time()))
                     except Exception:
                         logger.exception("Final evaluate() raised; trajectory keeps last step's reward")
+                last_env_output = env_output
+
+                # Agent.finalize(reward) — give the agent the final outcome and a chance
+                # to record an end-of-episode AgentOutput (typically a reflection LLMCall).
+                # See openspec/changes/multi-episode-rollouts/ for the design.
+                finalize_ts = time.time()
+                try:
+                    finalize_output = agent.finalize(env_output.reward)
+                except Exception:
+                    logger.exception("agent.finalize() raised; continuing without synthetic step")
+                    finalize_output = None
+                finalized = True
+                if finalize_output is not None:
+                    _record(TrajectoryStep(output=finalize_output, start_time=finalize_ts, end_time=time.time()))
+
                 trajectory.end_time = time.time()
                 trajectory.reward_info = {"reward": env_output.reward, "done": env_output.done, **env_output.info}
                 trajectory.summary_stats = summary_proc.summary_stats(
@@ -315,6 +334,17 @@ class Episode:
             ep_status.error_message = str(e)[:500]
             raise e
         finally:
+            # Ensure agent.finalize() runs even on exception — agents that persist
+            # memory or flush state need this. We discard the return value here
+            # (the trajectory is unsalvageable on the exception path) but still
+            # give the agent a chance to do its cleanup. Skip if we already
+            # finalized on the success path, or if we never produced an env_output
+            # (e.g. setup_fn raised).
+            if not finalized and last_env_output is not None:
+                try:
+                    agent.finalize(last_env_output.reward)
+                except Exception:
+                    logger.exception("agent.finalize() during cleanup raised")
             # Persist summary_stats on terminal failure paths too (the success path sets it
             # above). With it on the metadata stub, the XRay tables render correct
             # step/token/cost stats without loading any steps — which is what makes the

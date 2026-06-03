@@ -151,3 +151,103 @@ class TestAgent:
 
         output = mock_agent.step(obs)
         assert isinstance(output, AgentOutput)
+
+
+class TestAgentFinalize:
+    """Tests for the Agent.finalize() end-of-episode hook.
+
+    Spec: ``openspec/changes/multi-episode-rollouts/`` — additive default-no-op
+    method on the base Agent ABC. Default returns None. Subclasses may override
+    to return an AgentOutput; Episode appends non-None returns as synthetic
+    trajectory steps.
+    """
+
+    def test_default_finalize_returns_none(self, mock_agent) -> None:
+        """Default Agent.finalize() implementation returns None — backwards compatible."""
+        result = mock_agent.finalize(reward=1.0)
+        assert result is None
+
+    def test_default_finalize_with_zero_reward(self, mock_agent) -> None:
+        """Default no-op shape doesn't depend on reward sign."""
+        assert mock_agent.finalize(reward=0.0) is None
+        assert mock_agent.finalize(reward=-0.5) is None
+        assert mock_agent.finalize(reward=1.5) is None
+
+    def test_subclass_finalize_can_return_agent_output(self) -> None:
+        """A subclass that overrides finalize can return an AgentOutput."""
+        from litellm import Message
+
+        from cube_harness.llm import LLMCall, LLMConfig, Prompt, Usage
+
+        class _FinalizingAgent(Agent):
+            name = "finalizing"
+            description = "test"
+            input_content_types = ["text"]
+            output_content_types = ["action"]
+
+            def step(self, obs: Observation) -> AgentOutput:
+                _ = obs
+                return AgentOutput()
+
+            def finalize(self, reward: float) -> AgentOutput | None:
+                # Construct a real LLMCall so this also exercises the tag plumbing
+                # that XRay and cost stats rely on.
+                call = LLMCall(
+                    tag="reflection",
+                    llm_config=LLMConfig(model_name="openai/gpt-4o"),
+                    prompt=Prompt(messages=[{"role": "user", "content": f"reward={reward}"}]),
+                    output=Message(role="assistant", content=f"got {reward}"),
+                    usage=Usage(
+                        prompt_tokens=10,
+                        completion_tokens=5,
+                        total_tokens=15,
+                        cached_tokens=0,
+                        cache_creation_tokens=0,
+                        cost=0.001,
+                    ),
+                )
+                return AgentOutput(actions=[], llm_calls=[call], thoughts=f"reward={reward}")
+
+        class _DummyConfig(AgentConfig):
+            def make(self, action_set=None, **kwargs):
+                _ = action_set, kwargs
+                return _FinalizingAgent(config=self)
+
+        agent = _DummyConfig().make()
+        result = agent.finalize(reward=1.0)
+        assert isinstance(result, AgentOutput)
+        assert result.actions == []
+        assert len(result.llm_calls) == 1
+        assert result.llm_calls[0].tag == "reflection"
+        assert result.thoughts == "reward=1.0"
+
+    def test_subclass_finalize_can_still_return_none(self) -> None:
+        """A subclass that overrides finalize for pure side-effects can return None."""
+
+        class _SideEffectAgent(Agent):
+            name = "se"
+            description = "test"
+            input_content_types = ["text"]
+            output_content_types = ["action"]
+            persisted_rewards: list[float] = []
+
+            def step(self, obs: Observation) -> AgentOutput:
+                _ = obs
+                return AgentOutput()
+
+            def finalize(self, reward: float) -> None:
+                # Pure side-effect: record the reward, don't return an AgentOutput.
+                # This is what file-based-memory agents do — flush to disk in
+                # finalize(), no LLM call, return None.
+                _SideEffectAgent.persisted_rewards.append(reward)
+                return None
+
+        class _Cfg(AgentConfig):
+            def make(self, action_set=None, **kwargs):
+                _ = action_set, kwargs
+                return _SideEffectAgent(config=self)
+
+        _SideEffectAgent.persisted_rewards = []  # reset class-level state
+        agent = _Cfg().make()
+        assert agent.finalize(reward=0.7) is None
+        assert _SideEffectAgent.persisted_rewards == [0.7]

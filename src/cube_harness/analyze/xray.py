@@ -34,9 +34,15 @@ from cube_harness.storage import FileStorage
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+@dataclass(eq=False)
 class StepId:
-    """Identifies a UI step (env-step index) within the currently loaded trajectory."""
+    """Identifies a UI step (env-step index) within the currently loaded trajectory.
+
+    ``eq=False`` so every freshly-constructed instance compares unequal — Gradio's
+    ``gr.State.change`` fires on value-inequality, and we rely on row-click handlers
+    returning a new StepId to trigger the dependent render chain even when the
+    numeric ``step`` is unchanged (e.g. selecting a different trajectory at step 0).
+    """
 
     step: int = 0
 
