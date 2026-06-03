@@ -223,7 +223,7 @@ class Episode:
                 # EventStreamerConfig). Event numbering is owned by
                 # storage.save_event (per-trajectory `itertools.count`).
                 budget = Budget(
-                    max_turns=self.config.max_steps,
+                    max_agent_steps=self.config.max_steps,
                     max_cost_usd=self.config.max_cost_usd,
                 )
                 metadata_updates: dict = {}

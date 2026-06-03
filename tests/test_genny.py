@@ -24,7 +24,7 @@ def _attach_recorder(agent: Genny, budget: Budget | None = None) -> None:
     """Mimic what the base `Agent.run` does on entry — stash a
     EventStreamer (with a Budget) on the agent so step()'s budget
     checks have something to read."""
-    agent._recorder = EventStreamer(trajectory_id="t", budget=budget or Budget(max_turns=100))
+    agent._recorder = EventStreamer(trajectory_id="t", budget=budget or Budget(max_agent_steps=100))
 
 
 # ---------------------------------------------------------------------------
@@ -295,10 +295,10 @@ class TestChooseContext:
         agent.goal = [{"role": "user", "content": "goal"}]
         agent._latest_obs = [{"role": "user", "content": "obs"}]
         # Mimic Genny.step()'s message construction at the display tick
-        # (turns=5, max_turns=50).
-        budget = Budget(max_turns=50, turns=5)
+        # (agent_steps=5, max_agent_steps=50).
+        budget = Budget(max_agent_steps=50, agent_steps=5)
         messages = agent._choose_context(str(budget))
-        assert "budget used: turns 5/50" in messages[-1]["content"]
+        assert "budget used: agent_steps 5/50" in messages[-1]["content"]
 
     def test_budget_status_absent_between_display_steps(self) -> None:
         """No message means no injection — Genny just doesn't pass one."""
@@ -544,8 +544,8 @@ class TestStep:
         framework Budget reports `exhausted=True`. This is the soft-stop
         path; MonitoredTool's hard `BudgetExceeded` is the safety net."""
         agent = _make_agent()
-        # Budget with max_turns=0 is born exhausted.
-        _attach_recorder(agent, Budget(max_turns=0))
+        # Budget with max_agent_steps=0 is born exhausted.
+        _attach_recorder(agent, Budget(max_agent_steps=0))
         result = agent.step(Observation.from_text("obs"))
         assert len(result.actions) == 1
         assert result.actions[0].name == "final_step"

@@ -145,7 +145,7 @@ def test_parallel_dispatch_records_sibling_tool_calls() -> None:
     sibling ToolCallEvents sharing the parent LLMCallEvent's id as
     turn_id — the back-reference invariant the RFC asks for."""
     task = _FakeTask()
-    budget = Budget(max_turns=10)
+    budget = Budget(max_agent_steps=10)
     recorder, storage = _build_recorder_and_storage(budget, task)
 
     agent = _ScriptedParallel(n_actions=4, sleep_ms=20)
@@ -167,7 +167,7 @@ def test_parallel_dispatch_is_faster_than_serial() -> None:
     under 200ms (their serial sum). 130ms gives a safe margin for
     thread-pool startup variance on slower CI runners."""
     task = _FakeTask()
-    budget = Budget(max_turns=10)
+    budget = Budget(max_agent_steps=10)
     recorder, _ = _build_recorder_and_storage(budget, task)
 
     agent = _ScriptedParallel(n_actions=4, sleep_ms=50)
@@ -191,7 +191,7 @@ def test_budget_still_fires_across_parallel_calls() -> None:
     task = _FakeTask()
     # max_tool_calls=2 — the agent fires 4 in one turn; the 3rd should
     # raise BudgetExceeded.
-    budget = Budget(max_turns=10, max_tool_calls=2)
+    budget = Budget(max_agent_steps=10, max_tool_calls=2)
     recorder, _ = _build_recorder_and_storage(budget, task)
 
     agent = _ScriptedParallel(n_actions=4, sleep_ms=10)

@@ -30,7 +30,7 @@ agent = GENNY_CONFIGS["swe"]
 agent.llm_config = LLMConfig(model_name="gpt-5.4-mini", temperature=1.0)
 
 # Budget caps moved from GennyConfig to Experiment under the
-# agent-owns-loop refactor: max_steps → Budget.max_turns,
+# agent-owns-loop refactor: max_steps → Budget.max_agent_steps,
 # max_cost_usd → Budget.max_cost_usd.
 exp = Experiment(
     name="genny-swebench-verified",

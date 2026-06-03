@@ -123,27 +123,27 @@ def _make_monitored(
 
 
 def test_sync_monitored_tool_exposes_inner_action_set() -> None:
-    budget = Budget(max_turns=5)
+    budget = Budget(max_agent_steps=5)
     tool = _make_monitored(_SyncEchoTool(), budget)
     assert [s.name for s in tool.action_set] == ["sync_echo"]
 
 
 def test_sync_monitored_tool_returns_observation_unchanged() -> None:
-    budget = Budget(max_turns=5)
+    budget = Budget(max_agent_steps=5)
     tool = _make_monitored(_SyncEchoTool(), budget)
     result = tool.execute_action(_action("sync_echo", msg="hi"))
     assert isinstance(result, Observation)
 
 
 def test_async_monitored_tool_returns_observation_unchanged() -> None:
-    budget = Budget(max_turns=5)
+    budget = Budget(max_agent_steps=5)
     tool = _make_monitored(_AsyncEchoTool(), budget)
     result = asyncio.run(tool.execute_action(_action("async_echo", msg="hi")))
     assert isinstance(result, Observation)
 
 
 def test_monitored_tool_records_event_per_call() -> None:
-    budget = Budget(max_turns=5)
+    budget = Budget(max_agent_steps=5)
     storage = _FakeStorage()
     tool = _make_monitored(_SyncEchoTool(), budget, storage=storage)
     tool.execute_action(_action("sync_echo", msg="hi"))
@@ -154,7 +154,7 @@ def test_monitored_tool_records_event_per_call() -> None:
 
 
 def test_wrong_inner_type_raises() -> None:
-    budget = Budget(max_turns=5)
+    budget = Budget(max_agent_steps=5)
     with pytest.raises(TypeError):
         MonitoredTool(_AsyncEchoTool(), trajectory_id="t", budget=budget)  # type: ignore[arg-type]
     with pytest.raises(TypeError):
@@ -167,14 +167,14 @@ def test_wrong_inner_type_raises() -> None:
 
 
 def test_monitored_tool_budget_exhaustion_raises() -> None:
-    budget = Budget(max_turns=0)
+    budget = Budget(max_agent_steps=0)
     tool = _make_monitored(_SyncEchoTool(), budget)
     with pytest.raises(BudgetExceeded):
         tool.execute_action(_action("sync_echo"))
 
 
 def test_budget_exhaustion_via_max_tool_calls() -> None:
-    budget = Budget(max_turns=100, max_tool_calls=2)
+    budget = Budget(max_agent_steps=100, max_tool_calls=2)
     tool = _make_monitored(_SyncEchoTool(), budget)
     tool.execute_action(_action("sync_echo"))
     tool.execute_action(_action("sync_echo"))
@@ -204,7 +204,7 @@ def test_sync_toolbox_with_mixed_monitored_and_unmonitored() -> None:
     Validates the RFC design goal: MonitoredTool is API-identical to any
     AbstractTool from the caller's perspective. The agent doesn't know
     or care which tools are monitored."""
-    budget = Budget(max_turns=10)
+    budget = Budget(max_agent_steps=10)
     storage = _FakeStorage()
     monitored = _make_monitored(_SyncEchoTool(), budget, storage=storage)
     bare = _SyncOtherTool()
@@ -230,7 +230,7 @@ def test_async_toolbox_with_mixed_monitored_and_unmonitored() -> None:
         async def execute_action(self, action: Action) -> Observation | StepError:
             return Observation.from_text("other")
 
-    budget = Budget(max_turns=10)
+    budget = Budget(max_agent_steps=10)
     storage = _FakeStorage()
     monitored = _make_monitored(_AsyncEchoTool(), budget, storage=storage)
     bare = _AsyncOther()
@@ -265,7 +265,7 @@ def test_monitored_tool_forwards_direct_method_calls_to_inner() -> None:
         def bash(self, cmd: str, timeout: int = 0) -> str:
             return f"bash:{cmd}:t{timeout}"
 
-    budget = Budget(max_turns=5)
+    budget = Budget(max_agent_steps=5)
     storage = _FakeStorage()
     wrapped = _make_monitored(_BashLikeTool(), budget, storage=storage)
     # The direct method call must reach the inner tool unchanged.
@@ -280,7 +280,7 @@ def _noop_emit(te: TrajectoryEvent) -> str:
 
 
 def test_wrap_tool_picks_sync_or_async_by_inner_type() -> None:
-    budget = Budget(max_turns=5)
+    budget = Budget(max_agent_steps=5)
     sync_wrapped = wrap_tool(_SyncEchoTool(), emit=_noop_emit, budget=budget)
     async_wrapped = wrap_tool(_AsyncEchoTool(), emit=_noop_emit, budget=budget)
     assert isinstance(sync_wrapped, MonitoredTool)
@@ -288,7 +288,7 @@ def test_wrap_tool_picks_sync_or_async_by_inner_type() -> None:
 
 
 def test_wrap_tool_is_idempotent() -> None:
-    budget = Budget(max_turns=5)
+    budget = Budget(max_agent_steps=5)
     once = wrap_tool(_SyncEchoTool(), emit=_noop_emit, budget=budget)
     twice = wrap_tool(once, emit=_noop_emit, budget=budget)
     assert twice is once
@@ -333,14 +333,14 @@ def _make_streamer(
 
 def test_install_monitoring_wraps_each_member_in_place() -> None:
     task = _FakeTask([_SyncEchoTool()])
-    install_monitoring(task, _make_streamer(Budget(max_turns=5)))
+    install_monitoring(task, _make_streamer(Budget(max_agent_steps=5)))
     assert all(isinstance(t, MonitoredTool) for t in task.toolbox.tools)
     assert "sync_echo" in task.toolbox._action_name_to_tool
 
 
 def test_install_monitoring_is_idempotent() -> None:
     task = _FakeTask([_SyncEchoTool()])
-    budget = Budget(max_turns=5)
+    budget = Budget(max_agent_steps=5)
     install_monitoring(task, _make_streamer(budget))
     install_monitoring(task, _make_streamer(budget))
     assert len(task.toolbox.tools) == 1
@@ -353,7 +353,7 @@ def test_install_monitoring_dispatch_records_event() -> None:
     transitively writes a ToolCallEvent."""
     task = _FakeTask([_SyncEchoTool()])
     storage = _FakeStorage()
-    install_monitoring(task, _make_streamer(Budget(max_turns=5), storage=storage))
+    install_monitoring(task, _make_streamer(Budget(max_agent_steps=5), storage=storage))
     task.toolbox.execute_action(_action("sync_echo", msg="hi"))
     assert len(storage.tool_call_events()) == 1
 
@@ -367,7 +367,7 @@ def test_install_monitoring_recurses_into_nested_toolboxes() -> None:
             self.toolbox = outer_box
 
     task = _Task()
-    install_monitoring(task, _make_streamer(Budget(max_turns=5)))
+    install_monitoring(task, _make_streamer(Budget(max_agent_steps=5)))
     # Every leaf is wrapped; toolboxes stay as toolboxes.
     assert isinstance(outer_box.tools[0], Toolbox)
     assert isinstance(outer_box.tools[0].tools[0], MonitoredTool)
@@ -382,7 +382,7 @@ def test_install_monitoring_with_parent_event_id_getter() -> None:
     current_turn = {"v": "agent-001"}
     install_monitoring(
         task,
-        _make_streamer(Budget(max_turns=5), storage=storage, parent_event_id_getter=lambda: current_turn["v"]),
+        _make_streamer(Budget(max_agent_steps=5), storage=storage, parent_event_id_getter=lambda: current_turn["v"]),
     )
     task.toolbox.execute_action(_action("sync_echo"))
     current_turn["v"] = "agent-002"

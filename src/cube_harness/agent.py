@@ -109,9 +109,9 @@ class Agent(ABC):
                        return AgentOutput(actions=[STOP_ACTION])
                    # Inject budget summary into the prompt every K turns
                    # so the LLM can plan against remaining budget:
-                   budget_msg = str(budget) if budget.turns % 10 == 0 else None
+                   budget_msg = str(budget) if budget.agent_steps % 10 == 0 else None
 
-           Read-only fields available on Budget: `turns`, `tool_calls`,
+           Read-only fields available on Budget: `agent_steps`, `tool_calls`,
            `cost_usd`, `prompt_tokens`, `completion_tokens`, plus the
            `exhausted` property and `__str__` (concise human-readable
            summary of all configured caps and current usage).

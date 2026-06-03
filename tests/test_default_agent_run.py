@@ -129,7 +129,7 @@ def test_default_run_completes_when_task_signals_done() -> None:
     no Episode to drive."""
 
     task = _MockTask(done_after_n=3)
-    budget = Budget(max_turns=100)
+    budget = Budget(max_agent_steps=100)
     recorder, storage = _setup(task, budget)
 
     agent = _CounterAgent(_CounterAgentConfig())
@@ -162,7 +162,7 @@ def test_default_run_terminates_on_empty_actions() -> None:
             return AgentOutput(actions=[])
 
     task = _MockTask(done_after_n=100)
-    budget = Budget(max_turns=10)
+    budget = Budget(max_agent_steps=10)
     recorder, storage = _setup(task, budget)
     agent = _NoopAgent(_CounterAgentConfig())
     agent.attach_recorder(recorder)
@@ -180,7 +180,7 @@ def test_default_run_records_parent_event_id_on_tool_calls() -> None:
     (LLM-less paths) or a preceding LLMCallEvent."""
 
     task = _MockTask(done_after_n=2)
-    budget = Budget(max_turns=10)
+    budget = Budget(max_agent_steps=10)
     recorder, storage = _setup(task, budget)
     agent = _CounterAgent(_CounterAgentConfig())
     agent.attach_recorder(recorder)
@@ -204,7 +204,7 @@ def test_default_run_propagates_budget_exceeded() -> None:
     agent.run for Episode to capture."""
 
     task = _MockTask(done_after_n=100)
-    budget = Budget(max_turns=100, max_tool_calls=1)
+    budget = Budget(max_agent_steps=100, max_tool_calls=1)
     recorder, storage = _setup(task, budget)
 
     agent = _CounterAgent(_CounterAgentConfig())

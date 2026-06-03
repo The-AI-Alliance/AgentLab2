@@ -133,8 +133,8 @@ class TestEpisode:
 
         trajectory = episode.run()
 
-        # RFC agent-owns-loop: max_steps translates to Budget.max_turns.
-        # Budget.exhausted fires when turns >= max_turns. The agent
+        # RFC agent-owns-loop: max_steps translates to Budget.max_agent_steps.
+        # Budget.exhausted fires when turns >= max_agent_steps. The agent
         # records 3 normal turns; BudgetExceeded surfaces; the failure
         # LLMCallEvent (recorder.record_failure) is metadata, not a
         # "turn", so the total agent-event count is at most 4

@@ -216,7 +216,7 @@ class EventStreamer:
         (cost + tokens), enforce caps. Returns the event id (also
         stashed as the active parent_event_id for subsequent tool calls).
 
-        Does NOT bump `budget.turns` — turn-counting is per agent step,
+        Does NOT bump `budget.agent_steps` — turn-counting is per agent step,
         not per LLM call (one step may make 0..N calls). The agent loop
         calls `on_step` per iteration instead.
         """
@@ -238,15 +238,15 @@ class EventStreamer:
         return event.id
 
     def on_step(self) -> None:
-        """Bump `budget.turns` and enforce. Called by the agent loop
+        """Bump `budget.agent_steps` and enforce. Called by the agent loop
         once per `self.step(obs)` iteration. Turn-counting is per-step,
         NOT per-LLM-call — a step that makes 3 LLM calls (Genny:
-        compact + summarize + act) bumps `turns` by exactly 1.
+        compact + summarize + act) bumps `agent_steps` by exactly 1.
 
-        Enforcement happens here so a `max_turns` cap kicks in cleanly
+        Enforcement happens here so a `max_agent_steps` cap kicks in cleanly
         at the agent-step boundary."""
         if self.budget is not None:
-            self.budget.bump_turn()
+            self.budget.bump_agent_step()
             if self.budget.exhausted:
                 raise BudgetExceeded()
 

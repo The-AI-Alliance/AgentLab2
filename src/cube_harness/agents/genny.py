@@ -191,9 +191,9 @@ class GennyConfig(AgentConfig):
     # Misc
     max_obs_chars: int | None = None  # None = no truncation
     # How often to inject the framework `Budget` summary into the prompt
-    # ("budget used: turns 34/150 (23%), cost $1.20/$5.00 (24%), …").
-    # The actual limits live on `cube_harness.tool.Budget` constructed by
-    # Episode (max_turns, max_cost_usd, max_prompt_tokens, …); Genny just
+    # ("budget used: agent_steps 34/150 (23%), cost $1.20/$5.00 (24%), …").
+    # The actual limits live on `cube_harness.budget.Budget` constructed by
+    # Episode (max_agent_steps, max_cost_usd, max_prompt_tokens, …); Genny just
     # decides when to display the summary so the LLM can plan against
     # what's left. 0 disables injection entirely.
     display_budget_every_k: int = 5
@@ -322,7 +322,7 @@ class Genny(Agent):
         # are set or when `display_budget_every_k=0`.
         budget_msg: str | None = None
         every_k = self.config.display_budget_every_k
-        if budget is not None and every_k > 0 and budget.turns > 0 and budget.turns % every_k == 0:
+        if budget is not None and every_k > 0 and budget.agent_steps > 0 and budget.agent_steps % every_k == 0:
             budget_msg = str(budget)
 
         obs_messages = self._obs_to_messages(obs)
