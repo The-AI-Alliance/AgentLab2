@@ -32,6 +32,7 @@ from cube_harness.reproducibility import (
     JOURNAL_SCHEMA_VERSION,
     build_journal_record,
     sanitize_filename,
+    submissions,
 )
 
 CUBE_REGISTRY_REPO = "The-AI-Alliance/cube-registry"
@@ -230,6 +231,14 @@ def main(
             help="Clone cube-registry, commit the record on a fresh branch, push, and open the PR via gh.",
         ),
     ] = False,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Re-submit even when submissions.json already records a 'journal' decision "
+            "(default: refuse to avoid duplicate submissions).",
+        ),
+    ] = False,
     i_understand_this_is_not_a_leaderboard: Annotated[
         bool,
         typer.Option(
@@ -240,6 +249,19 @@ def main(
     ] = False,
 ) -> None:
     """Build a cube-registry community-journal record and (optionally) open a PR."""
+    # Idempotency check first — refuse early before showing the framing wall
+    # or building the record. Use --force to override (e.g. for re-submission
+    # after a correction).
+    if not force and submissions.has_decision(experiment_dir, "journal"):
+        prior = submissions.read(experiment_dir).get("journal", {})
+        typer.echo(
+            f"experiment_dir already has a 'journal' decision: {prior.get('status')} "
+            f"({prior.get('reason') or prior.get('evaluation_id')}).",
+            err=True,
+        )
+        typer.echo("Pass --force to override.", err=True)
+        raise typer.Exit(code=2)
+
     _confirm_not_a_leaderboard(acknowledged=i_understand_this_is_not_a_leaderboard)
     submitter = submitter or _git_user_handle()
     typer.echo(f"submitter: {submitter}")
@@ -267,6 +289,18 @@ def main(
     branch = f"results/{record['benchmark_name']}/{sanitize_filename(record['evaluation_id'])}"
     pr_url = _open_pr(target_path, record, branch)
     typer.echo(f"PR opened: {pr_url}")
+    # Stamp idempotency so a repeat invocation (or the scan script) sees that
+    # this experiment has already been submitted to the journal.
+    submissions.record_submitted(
+        experiment_dir,
+        "journal",
+        evaluation_id=record["evaluation_id"],
+        schema_version=record["schema_version"],
+        submitted_by=submitter,
+        pr_url=pr_url,
+        local_path=str(target_path),
+    )
+    typer.echo(f"recorded in {experiment_dir / submissions.SUBMISSIONS_FILENAME}")
 
 
 if __name__ == "__main__":

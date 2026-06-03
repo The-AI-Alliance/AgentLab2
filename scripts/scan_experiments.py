@@ -1,0 +1,226 @@
+#!/usr/bin/env python3
+"""scan_experiments.py — survey ``~/cube_harness_results/`` for journal-
+eligible experiments.
+
+For each direct child directory that contains an ``experiment_record.json``,
+the script classifies it into one of:
+
+  • already_submitted  — ``submissions.json`` already has a 'journal' decision
+  • broken             — cannot produce a meaningful submission (silent
+                          rejection persisted into ``submissions.json``)
+  • unfinished         — still running; state may change, re-scan later
+  • subset_review      — passed integrity but not a "complete named subset";
+                          requires ``--yes`` to submit
+  • submittable        — clean run of a full benchmark or a complete named
+                          subset; queue for submission
+
+Output: a markdown table + a one-line summary. With ``--submit`` it
+invokes ``submit_to_journal.py --auto-pr`` on each submittable run.
+"""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+from typing import Annotated
+
+import typer
+
+from cube_harness.reproducibility import submissions
+from cube_harness.reproducibility.scan import (
+    DEFAULT_SYSTEM_ERROR_THRESHOLD,
+    ScanCategory,
+    ScanResult,
+    walk,
+)
+
+DEFAULT_RESULTS_DIR = Path.home() / "cube_harness_results"
+
+_CATEGORY_ICON = {
+    ScanCategory.already_submitted: "✓",
+    ScanCategory.submittable: "→",
+    ScanCategory.subset_review: "?",
+    ScanCategory.unfinished: "…",
+    ScanCategory.broken: "✗",
+}
+
+
+def _format_table(results: list[ScanResult]) -> str:
+    """Compact markdown summary, one row per experiment."""
+    if not results:
+        return "(no experiment directories found)"
+    rows = [
+        ["", "experiment", "category", "subset", "n_tasks", "errors", "diagnosis"],
+        ["---"] * 7,
+    ]
+    for r in results:
+        subset = r.benchmark_subset_name
+        if r.benchmark_subset_filter:
+            subset += f" / {r.benchmark_subset_filter}"
+        if r.has_explicit_task_list:
+            subset += " [list]"
+        n_tasks_cell = ""
+        if r.n_tasks is not None:
+            n_tasks_cell = f"{r.n_terminal}/{r.n_tasks}"
+        err_cell = f"{r.n_system_error}" if r.n_terminal else ""
+        diagnosis = "; ".join(r.reasons) if r.reasons else "—"
+        rows.append(
+            [
+                _CATEGORY_ICON[r.category],
+                r.experiment_dir.name,
+                r.category.value,
+                subset or "—",
+                n_tasks_cell,
+                err_cell,
+                diagnosis,
+            ]
+        )
+    # Pad columns to align.
+    widths = [max(len(row[c]) for row in rows) for c in range(len(rows[0]))]
+    return "\n".join("| " + " | ".join(cell.ljust(w) for cell, w in zip(row, widths)) + " |" for row in rows)
+
+
+def _persist_broken_decisions(results: list[ScanResult]) -> int:
+    """Write submissions.json rejection entries for every broken experiment.
+
+    Returns the number of dirs newly stamped (those that already had a
+    decision are left alone)."""
+    n = 0
+    for r in results:
+        if r.category is not ScanCategory.broken:
+            continue
+        if submissions.has_decision(r.experiment_dir, "journal"):
+            continue
+        reason = r.reasons[0] if r.reasons else "unclassified"
+        submissions.record_rejected(r.experiment_dir, "journal", reason=f"broken: {reason}")
+        n += 1
+    return n
+
+
+def _invoke_submitter(
+    submit_to_journal: Path,
+    experiment_dir: Path,
+    *,
+    auto_pr: bool,
+    yes: bool,
+) -> int:
+    """Spawn ``submit_to_journal.py`` for one experiment dir. Returns its rc."""
+    cmd = [
+        sys.executable,
+        str(submit_to_journal),
+        str(experiment_dir),
+        "--i-understand-this-is-not-a-leaderboard",
+    ]
+    if auto_pr:
+        cmd.append("--auto-pr")
+    # `--yes` doesn't exist on submit_to_journal yet — for now the scan
+    # script's --yes only governs whether subset_review entries are forwarded.
+    _ = yes
+    typer.echo(f"  invoking: {' '.join(cmd)}")
+    return subprocess.run(cmd, check=False).returncode
+
+
+def main(
+    root: Annotated[
+        Path,
+        typer.Argument(help="Experiments root (default: ~/cube_harness_results)."),
+    ] = DEFAULT_RESULTS_DIR,
+    system_error_threshold: Annotated[
+        float,
+        typer.Option(
+            "--system-error-threshold",
+            help="Fraction of episodes that must hit FAILED/STALE/INVALID_CONFIG "
+            "before an experiment is marked broken. Default 0.10 (10%).",
+            min=0.0,
+            max=1.0,
+        ),
+    ] = DEFAULT_SYSTEM_ERROR_THRESHOLD,
+    submit: Annotated[
+        bool,
+        typer.Option(
+            "--submit",
+            help="Invoke submit_to_journal.py for each submittable experiment "
+            "(default: dry-run, just print the table).",
+        ),
+    ] = False,
+    auto_pr: Annotated[
+        bool,
+        typer.Option(
+            "--auto-pr",
+            help="When invoking submit_to_journal, pass --auto-pr through "
+            "(forks cube-registry and opens the PR via gh).",
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            help="Also submit experiments classified as subset_review (debug "
+            "runs / hand-picked task lists). Default: skip them.",
+        ),
+    ] = False,
+    persist_broken: Annotated[
+        bool,
+        typer.Option(
+            "--persist-broken/--no-persist-broken",
+            help="Write rejection entries to submissions.json for broken "
+            "experiments so future scans skip them. On by default.",
+        ),
+    ] = True,
+) -> None:
+    """Survey *root* and either report or hand off to the submitter."""
+    results = walk(root, system_error_threshold=system_error_threshold)
+    typer.echo(_format_table(results))
+
+    # Summary counts
+    counts: dict[ScanCategory, int] = {c: 0 for c in ScanCategory}
+    for r in results:
+        counts[r.category] += 1
+    typer.echo("")
+    typer.echo(" · ".join(f"{c.value}: {counts[c]}" for c in ScanCategory if counts[c] > 0) or "(nothing classifiable)")
+
+    if persist_broken:
+        n_stamped = _persist_broken_decisions(results)
+        if n_stamped:
+            typer.echo(f"persisted {n_stamped} broken decision(s) into submissions.json")
+
+    if not submit:
+        if counts[ScanCategory.submittable] or (yes and counts[ScanCategory.subset_review]):
+            typer.echo("")
+            typer.echo("Re-run with --submit to hand off to submit_to_journal.py.")
+        return
+
+    submit_to_journal = Path(__file__).with_name("submit_to_journal.py")
+    if not submit_to_journal.exists():
+        typer.echo(f"submit_to_journal.py not found at {submit_to_journal}", err=True)
+        raise typer.Exit(code=1)
+
+    eligible = [r for r in results if r.category is ScanCategory.submittable]
+    if yes:
+        eligible.extend(r for r in results if r.category is ScanCategory.subset_review)
+
+    if not eligible:
+        typer.echo("Nothing eligible to submit.")
+        return
+
+    typer.echo("")
+    typer.echo(f"Submitting {len(eligible)} experiment(s) …")
+    n_failed = 0
+    for r in eligible:
+        rc = _invoke_submitter(submit_to_journal, r.experiment_dir, auto_pr=auto_pr, yes=yes)
+        if rc != 0:
+            n_failed += 1
+            typer.echo(f"  ✗ {r.experiment_dir.name} (exit {rc})", err=True)
+    if n_failed:
+        raise typer.Exit(code=1)
+
+
+# `gh` and `shutil` are imported for the doc string + future expansion, keep
+# the linter happy until we wire them through.
+_ = shutil
+
+
+if __name__ == "__main__":
+    typer.run(main)

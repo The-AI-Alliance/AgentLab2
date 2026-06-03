@@ -1,0 +1,251 @@
+"""Classify experiment directories by reproducibility-journal eligibility.
+
+Used by ``scripts/scan_experiments.py``. Lives in the package so it can be
+unit-tested without subprocess invocation.
+
+Categories (more restrictive than the original sketch — the philosophy is
+"refuse rather than ship a borderline submission"):
+
+  • ``already_submitted``  — ``submissions.json`` has a ``journal`` decision
+    (either ``submitted`` or ``rejected``). Either way, skip — re-decision
+    is an explicit ``--force`` operation handled by ``submit_to_journal.py``.
+  • ``broken``             — the experiment cannot produce a meaningful score.
+    Missing/corrupt ``experiment_record.json``, OR > N% system errors, OR
+    every episode missing. Permanently marked via ``record_rejected``.
+  • ``unfinished``         — some episode is still ``QUEUED`` / ``RUNNING``,
+    OR no terminal-status episodes exist yet. State will change; don't
+    write to ``submissions.json``.
+  • ``subset_review``      — passed the integrity checks but the subset shape
+    isn't a "complete named subset" (debug_limit applied, hand-picked task
+    list via ``subset_from_list``, or filter set but n_missing > 0). The
+    operator can submit with ``--yes`` after eyeballing the diagnosis.
+  • ``submittable``        — clean run of a complete named subset or the full
+    benchmark. Hand off to ``submit_to_journal.py``.
+"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+from enum import Enum
+from pathlib import Path
+
+from cube_harness.episode_status import IN_FLIGHT_STATUSES
+from cube_harness.eval_log import EXPERIMENT_RECORD_FILENAME, ExperimentRecord
+from cube_harness.reproducibility import submissions
+from cube_harness.results import ExperimentResult
+
+DEFAULT_SYSTEM_ERROR_THRESHOLD = 0.10
+"""Episodes that hit FAILED / STALE / INVALID_CONFIG count as system errors.
+
+Above this fraction the recorded ``avg_score`` says more about your infra
+than about the model — the run is marked BROKEN. 10% is intentionally tight
+("be restrictive about what gets pushed"). Tunable per scan invocation.
+"""
+
+
+class ScanCategory(str, Enum):
+    already_submitted = "already_submitted"
+    broken = "broken"
+    unfinished = "unfinished"
+    subset_review = "subset_review"
+    submittable = "submittable"
+
+
+@dataclass(frozen=True)
+class ScanResult:
+    """One experiment dir + its eligibility classification.
+
+    *reasons* explains the classification — empty when ``submittable``; one
+    or more diagnoses otherwise. For ``broken``, the first reason is also
+    persisted into ``submissions.json`` as the rejection note.
+    """
+
+    experiment_dir: Path
+    category: ScanCategory
+    reasons: tuple[str, ...] = ()
+    # Diagnostics for the operator. Always populated when possible so a
+    # `--verbose` listing shows the underlying numbers.
+    n_tasks: int | None = None
+    n_terminal: int = 0
+    n_in_flight: int = 0
+    n_system_error: int = 0
+    n_missing: int = 0
+    debug_limit: int | None = None
+    benchmark_subset_name: str = ""
+    benchmark_subset_filter: str | None = None
+    has_explicit_task_list: bool = False
+
+
+def _load_experiment_record(experiment_dir: Path) -> ExperimentRecord | None:
+    """Parse ``experiment_record.json`` or return None on missing/corrupt."""
+    record_path = experiment_dir / EXPERIMENT_RECORD_FILENAME
+    if not record_path.exists():
+        return None
+    try:
+        return ExperimentRecord.model_validate_json(record_path.read_text())
+    except Exception:
+        return None
+
+
+def _read_debug_limit_fallback(experiment_dir: Path) -> int | None:
+    """Old experiment records predate ExperimentRecord.debug_limit; fall back to
+    experiment_config.json so the scan classifier still has the signal."""
+    config_path = experiment_dir / "experiment_config.json"
+    if not config_path.exists():
+        return None
+    try:
+        value = json.loads(config_path.read_text()).get("debug_limit")
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, int) else None
+
+
+def classify(
+    experiment_dir: Path,
+    *,
+    system_error_threshold: float = DEFAULT_SYSTEM_ERROR_THRESHOLD,
+) -> ScanResult:
+    """Decide which bucket *experiment_dir* falls into.
+
+    Pure — no writes to disk. Caller decides whether to persist the verdict
+    into ``submissions.json`` (typically only for ``broken``).
+    """
+    experiment_dir = Path(experiment_dir)
+
+    # ── Already-decided takes priority over every other signal ────────────
+    if submissions.has_decision(experiment_dir, "journal"):
+        prior = submissions.read(experiment_dir).get("journal", {})
+        return ScanResult(
+            experiment_dir,
+            ScanCategory.already_submitted,
+            (f"prior journal decision: {prior.get('status')} — {prior.get('reason') or prior.get('evaluation_id')}",),
+        )
+
+    # ── Integrity: must have a parseable ExperimentRecord ─────────────────
+    record = _load_experiment_record(experiment_dir)
+    if record is None:
+        return ScanResult(
+            experiment_dir,
+            ScanCategory.broken,
+            (f"missing or unparseable {EXPERIMENT_RECORD_FILENAME}",),
+        )
+
+    bench_subset = record.benchmark_subset
+    n_tasks = bench_subset.n_tasks
+    debug_limit = record.debug_limit
+    if debug_limit is None:
+        debug_limit = _read_debug_limit_fallback(experiment_dir)
+
+    # ── Outcome breakdown from the per-episode status files ──────────────
+    n_terminal = 0
+    n_in_flight = 0
+    n_system_error = 0
+    seen_task_ids: set[str] = set()
+    try:
+        for status in ExperimentResult(experiment_dir).iter_episode_statuses():
+            seen_task_ids.add(status.task_id)
+            if status.status in IN_FLIGHT_STATUSES:
+                n_in_flight += 1
+                continue
+            n_terminal += 1
+            if status.status in {"FAILED", "STALE", "INVALID_CONFIG"}:
+                n_system_error += 1
+    except Exception as e:
+        return ScanResult(
+            experiment_dir,
+            ScanCategory.broken,
+            (f"failed to read episode statuses: {e}",),
+            n_tasks=n_tasks,
+        )
+
+    n_missing = max(0, n_tasks - len(seen_task_ids))
+    has_explicit_task_list = bool(bench_subset.task_ids)
+
+    base = dict(
+        experiment_dir=experiment_dir,
+        n_tasks=n_tasks,
+        n_terminal=n_terminal,
+        n_in_flight=n_in_flight,
+        n_system_error=n_system_error,
+        n_missing=n_missing,
+        debug_limit=debug_limit,
+        benchmark_subset_name=bench_subset.name,
+        benchmark_subset_filter=bench_subset.filter,
+        has_explicit_task_list=has_explicit_task_list,
+    )
+
+    # ── In-flight episodes mean the experiment is still running ──────────
+    if n_in_flight > 0:
+        return ScanResult(
+            **base,
+            category=ScanCategory.unfinished,
+            reasons=(f"{n_in_flight} episode(s) still QUEUED/RUNNING",),
+        )
+
+    # ── No terminal episodes at all ⇒ nothing to submit ─────────────────
+    if n_terminal == 0:
+        return ScanResult(
+            **base,
+            category=ScanCategory.broken,
+            reasons=("no terminal-status episodes recorded — experiment never produced any data",),
+        )
+
+    # ── System-error rate is permanent broken-ness ──────────────────────
+    err_rate = n_system_error / n_terminal if n_terminal else 0.0
+    if err_rate > system_error_threshold:
+        return ScanResult(
+            **base,
+            category=ScanCategory.broken,
+            reasons=(
+                f"{n_system_error}/{n_terminal} episodes errored "
+                f"({err_rate * 100:.0f}%, threshold {system_error_threshold * 100:.0f}%)",
+            ),
+        )
+
+    # ── Missing tasks ⇒ unfinished (could resume) ───────────────────────
+    if n_missing > 0:
+        return ScanResult(
+            **base,
+            category=ScanCategory.unfinished,
+            reasons=(f"{n_missing}/{n_tasks} task(s) have no status file — experiment may have stopped early",),
+        )
+
+    # ── Subset-shape gate: more restrictive than the original sketch ─────
+    review_reasons: list[str] = []
+    if debug_limit:
+        review_reasons.append(f"debug_limit={debug_limit} was applied — not a full subset")
+    if has_explicit_task_list:
+        # subset_from_list submissions are not reproducibility-reference-able
+        # without external documentation of why those specific tasks were
+        # chosen. Default to requiring operator acknowledgement.
+        review_reasons.append(
+            f"benchmark_subset.task_ids is set ({len(bench_subset.task_ids or [])} explicit tasks) — "
+            "hand-picked subsets need --yes to submit"
+        )
+
+    if review_reasons:
+        return ScanResult(**base, category=ScanCategory.subset_review, reasons=tuple(review_reasons))
+
+    return ScanResult(**base, category=ScanCategory.submittable)
+
+
+def walk(
+    root: Path,
+    *,
+    system_error_threshold: float = DEFAULT_SYSTEM_ERROR_THRESHOLD,
+) -> list[ScanResult]:
+    """Classify every direct subdirectory of *root* that contains an
+    ``experiment_record.json``. Dirs without that file are silently skipped
+    (they're not experiment dirs at all)."""
+    root = Path(root)
+    results: list[ScanResult] = []
+    if not root.is_dir():
+        return results
+    for entry in sorted(root.iterdir()):
+        if not entry.is_dir():
+            continue
+        if not (entry / EXPERIMENT_RECORD_FILENAME).exists():
+            continue
+        results.append(classify(entry, system_error_threshold=system_error_threshold))
+    return results

@@ -21,7 +21,8 @@ from typing import Annotated
 
 import typer
 
-from cube_harness.reproducibility.eee import build_eee_record
+from cube_harness.reproducibility import submissions
+from cube_harness.reproducibility.eee import EEE_SCHEMA_VERSION, build_eee_record
 
 
 def _eee_path(out_dir: Path, record: dict) -> Path:
@@ -55,8 +56,25 @@ def main(
             help="Root for the EEE-expected on-disk layout (data/<benchmark>/<dev>/<model>/<uuid>.json).",
         ),
     ] = Path("./eee-out"),
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force",
+            help="Re-emit even when submissions.json already records an 'eee' decision.",
+        ),
+    ] = False,
 ) -> None:
     """Build an EEE record from a completed experiment and write it under <out-dir>/data/."""
+    if not force and submissions.has_decision(experiment_dir, "eee"):
+        prior = submissions.read(experiment_dir).get("eee", {})
+        typer.echo(
+            f"experiment_dir already has an 'eee' decision: {prior.get('status')} "
+            f"({prior.get('reason') or prior.get('evaluation_id')}).",
+            err=True,
+        )
+        typer.echo("Pass --force to override.", err=True)
+        raise typer.Exit(code=2)
+
     record = build_eee_record(
         experiment_dir,
         source_organization_name=submitter_org,
@@ -73,6 +91,13 @@ def main(
     typer.echo("")
     typer.echo("To submit upstream:")
     typer.echo(f"  huggingface-cli upload <hf-dataset-id> {target} {target.relative_to(out_dir)} --repo-type dataset")
+    submissions.record_submitted(
+        experiment_dir,
+        "eee",
+        evaluation_id=record["evaluation_id"],
+        schema_version=EEE_SCHEMA_VERSION,
+        local_path=str(target),
+    )
 
 
 if __name__ == "__main__":

@@ -68,6 +68,16 @@ class Experiment(TypedBaseModel):
     max_steps: int = MAX_STEPS
     max_retries: int = 3
     git_cwd: str | None = None
+    debug_limit: int | None = None
+    """If set, the runner truncates the task list to the first N entries.
+
+    Surfaced into ExperimentRecord so the reproducibility-journal scan script
+    can distinguish debug runs from real evaluations without re-reading the
+    full ExperimentConfig. Recipes that set this on the Experiment object get
+    it captured automatically; recipes that pass it directly to
+    ``run_sequentially`` / ``run_with_ray`` need the runner to propagate it
+    here before ``save_config()`` if they want the same coverage.
+    """
 
     @model_validator(mode="after")
     def _ensure_unique_output_dir(self) -> "Experiment":
@@ -199,6 +209,7 @@ class Experiment(TypedBaseModel):
             agent_config=self.agent_config,
             benchmark_config=self.benchmark_config,
             git_cwd=self.git_cwd,
+            debug_limit=self.debug_limit,
         )
         exp_record.write(output_path)
 

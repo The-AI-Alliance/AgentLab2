@@ -425,6 +425,15 @@ class BenchmarkSubset(TypedBaseModel):
         default=None,
         description="Glob expression if the subset was created via subset_from_glob.",
     )
+    task_ids: list[str] | None = Field(
+        default=None,
+        description=(
+            "Explicit task list when the subset was constructed via subset_from_list. "
+            "Hand-picked subsets without a natural name don't make good reproducibility "
+            "reference points — the journal-eligibility scan flags them as subset_review. "
+            "None when the subset was built from a filter or is the full benchmark."
+        ),
+    )
 
     @classmethod
     def from_benchmark_config(cls, benchmark_config: BenchmarkConfig) -> "BenchmarkSubset":
@@ -577,6 +586,16 @@ class ExperimentRecord(TypedBaseModel):
     benchmark_name: str = Field(description="Benchmark name from benchmark_metadata.name.")
     benchmark_version: str | None = Field(default=None, description="Benchmark version string.")
     benchmark_subset: BenchmarkSubset = Field(description="Subset descriptor for MNAR propensity correction.")
+    debug_limit: int | None = Field(
+        default=None,
+        description=(
+            "If set, the runner truncated the task list to the first N entries at run time. "
+            "Surfaced for downstream tooling — the reproducibility-journal scan script uses "
+            "this signal to flag debug runs as non-submittable without re-reading the full "
+            "ExperimentConfig. None means: no truncation was applied (or the recipe used a "
+            "code path that didn't propagate the value into the record)."
+        ),
+    )
     investigator_llm_config: InvestigatorLLMConfig | None = Field(
         default=None,
         description="Investigator configuration if a post-hoc LLM investigator was run on these episodes.",
@@ -590,6 +609,7 @@ class ExperimentRecord(TypedBaseModel):
         agent_config: Any,
         benchmark_config: BenchmarkConfig,
         git_cwd: str | None = None,
+        debug_limit: int | None = None,
     ) -> "ExperimentRecord":
         """Build ExperimentRecord from experiment parameters."""
         harness_version = _get_package_version("cube-harness") or "unknown"
@@ -607,6 +627,7 @@ class ExperimentRecord(TypedBaseModel):
             benchmark_name=bm_name,
             benchmark_version=bm_version,
             benchmark_subset=BenchmarkSubset.from_benchmark_config(benchmark_config),
+            debug_limit=debug_limit,
         )
 
     def write(self, output_dir: Path) -> None:

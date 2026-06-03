@@ -12,6 +12,7 @@ Both read the same :class:`cube_harness.eval_log.EvalLog` + per-episode
 ``status.json`` files; neither depends on the other.
 """
 
+from cube_harness.reproducibility import submissions
 from cube_harness.reproducibility.eee import EEE_SCHEMA_VERSION, build_eee_record
 from cube_harness.reproducibility.journal import (
     JOURNAL_SCHEMA_VERSION,
@@ -27,4 +28,5 @@ __all__ = [
     "build_eee_record",
     "build_journal_record",
     "sanitize_filename",
+    "submissions",
 ]
