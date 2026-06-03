@@ -20,7 +20,12 @@ from cube_harness.core import Trajectory
 from cube_harness.episode import Episode
 from cube_harness.episode_logs import LOG_FORMAT, get_log_path, redirect_output_to_log, trajectory_log_id
 from cube_harness.episode_status import RETRIABLE_STATUSES, TERMINAL_STATUSES, EpisodeStatus, next_retry_count
-from cube_harness.experiment import Experiment, ExpResult, sweep_stale_statuses
+from cube_harness.experiment import (
+    DEFAULT_ORPHAN_THRESHOLD_S,
+    Experiment,
+    ExpResult,
+    sweep_stale_statuses,
+)
 from cube_harness.experiment_status import EXPERIMENT_STATUS_FILENAME, ExperimentStatus
 from cube_harness.metrics.tracer import get_trace_env_vars, get_tracer
 from cube_harness.storage import FileStorage, Storage
@@ -285,7 +290,7 @@ def run_with_ray(
     step_timeout_s: float = DEFAULT_STEP_TIMEOUT_S,
     setup_timeout_s: float = DEFAULT_SETUP_TIMEOUT_S,
     cancel_grace_s: float = DEFAULT_CANCEL_GRACE_S,
-    orphan_threshold_s: float = 3600.0,
+    orphan_threshold_s: float = DEFAULT_ORPHAN_THRESHOLD_S,
     max_retry_rounds: int = 3,
     otlp_endpoint: str | None = None,
     model: str | None = None,
@@ -479,7 +484,7 @@ def _poll_ray(
     step_timeout_s: float,
     setup_timeout_s: float,
     cancel_grace_s: float,
-    orphan_threshold_s: float = 3600.0,
+    orphan_threshold_s: float = DEFAULT_ORPHAN_THRESHOLD_S,
     exp_status: ExperimentStatus,
     exp_status_path: Path,
 ) -> ExpResult:
@@ -570,7 +575,7 @@ def _kill_stale_workers(
     step_timeout_s: float,
     setup_timeout_s: float,
     cancel_grace_s: float,
-    orphan_threshold_s: float = 3600.0,
+    orphan_threshold_s: float = DEFAULT_ORPHAN_THRESHOLD_S,
     idle_capacity_since: float | None = None,
 ) -> None:
     """Read each active episode's status.json; force-kill stalled or orphaned workers.
@@ -668,7 +673,7 @@ def run_sequentially(
     *,
     step_timeout_s: float = DEFAULT_STEP_TIMEOUT_S,
     cancel_grace_s: float = DEFAULT_CANCEL_GRACE_S,
-    orphan_threshold_s: float = 3600.0,
+    orphan_threshold_s: float = DEFAULT_ORPHAN_THRESHOLD_S,
     max_retry_rounds: int = 3,
     otlp_endpoint: str | None = None,
     model: str | None = None,

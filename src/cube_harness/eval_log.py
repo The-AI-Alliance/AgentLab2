@@ -99,6 +99,13 @@ _PRIMARY_DEPENDENCIES: frozenset[str] = frozenset(
 # of 80 — and so manual readers can find the deps that actually matter. Each
 # category-comment justifies why dropping is safe; revisit if a future
 # reproducibility failure points back at one of these.
+#
+# Public alias `AUTO_DROP_DEPENDENCIES` is exported below so cube authors can
+# guard their critical deps in a smoke test, e.g.:
+#
+#     from cube_harness.eval_log import AUTO_DROP_DEPENDENCIES
+#     assert "filelock" not in AUTO_DROP_DEPENDENCIES, "my cube needs filelock"
+#
 _AUTO_DROP_DEPENDENCIES: frozenset[str] = frozenset(
     {
         # typing & data-structure helpers — API stable, no runtime behavior
@@ -144,6 +151,11 @@ _AUTO_DROP_DEPENDENCIES: frozenset[str] = frozenset(
         "python-dotenv",
     }
 )
+
+# Public alias for cube-author introspection. Keep the underscore-prefixed
+# name as the load-bearing identifier inside this module (every existing
+# call site uses it); the public name is a thin re-export.
+AUTO_DROP_DEPENDENCIES = _AUTO_DROP_DEPENDENCIES
 
 
 # ---------------------------------------------------------------------------
@@ -327,8 +339,14 @@ class AgentInfo(TypedBaseModel):
         default_factory=dict,
         description=(
             "Installed versions of every distribution imported into the experiment's process "
-            "at eval time, minus a curated drop-list of behaviorally-inert plumbing. See "
-            "_AUTO_DROP_DEPENDENCIES + _PRIMARY_DEPENDENCIES in eval_log.py for the rationale."
+            "at eval time, minus a curated drop-list of behaviorally-inert plumbing. "
+            "Captured at ExperimentRecord build time (Experiment.save_config), which runs "
+            "BEFORE any episode — so distributions only imported lazily during run-time "
+            "(e.g. `import torch` inside a tool's execute()) won't be in sys.modules yet "
+            "and are silently missed. Cube authors who rely on lazy imports should either "
+            "promote them to module-level or add the distribution to "
+            "_ALWAYS_INCLUDE_DEPENDENCIES in cube_harness.eval_log. See _AUTO_DROP_DEPENDENCIES "
+            "+ _PRIMARY_DEPENDENCIES in the same module for the curated allow/deny lists."
         ),
     )
     primary_dependencies: list[str] = Field(

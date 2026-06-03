@@ -20,7 +20,6 @@ invokes ``submit_to_journal.py --auto-pr`` on each submittable run.
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -105,9 +104,15 @@ def _invoke_submitter(
     experiment_dir: Path,
     *,
     auto_pr: bool,
-    yes: bool,
 ) -> int:
-    """Spawn ``submit_to_journal.py`` for one experiment dir. Returns its rc."""
+    """Spawn ``submit_to_journal.py`` for one experiment dir. Returns its rc.
+
+    The scan script's ``--yes`` controls eligibility upstream (whether
+    ``subset_review`` rows make it into the ``eligible`` list); the per-row
+    submission itself doesn't need to re-ask. submit_to_journal trusts the
+    classification that produced its argv and skips its own framing wall
+    via ``--i-understand-this-is-not-a-leaderboard``.
+    """
     cmd = [
         sys.executable,
         str(submit_to_journal),
@@ -116,9 +121,6 @@ def _invoke_submitter(
     ]
     if auto_pr:
         cmd.append("--auto-pr")
-    # `--yes` doesn't exist on submit_to_journal yet — for now the scan
-    # script's --yes only governs whether subset_review entries are forwarded.
-    _ = yes
     typer.echo(f"  invoking: {' '.join(cmd)}")
     return subprocess.run(cmd, check=False).returncode
 
@@ -259,7 +261,7 @@ def main(
     typer.echo(f"Submitting {len(eligible)} experiment(s) …")
     n_failed = 0
     for r in eligible:
-        rc = _invoke_submitter(submit_to_journal, r.experiment_dir, auto_pr=auto_pr, yes=yes)
+        rc = _invoke_submitter(submit_to_journal, r.experiment_dir, auto_pr=auto_pr)
         if rc != 0:
             n_failed += 1
             typer.echo(f"  ✗ {r.experiment_dir.name} (exit {rc})", err=True)
@@ -270,11 +272,6 @@ def main(
         _archive_pass()
     if n_failed:
         raise typer.Exit(code=1)
-
-
-# `gh` and `shutil` are imported for the doc string + future expansion, keep
-# the linter happy until we wire them through.
-_ = shutil
 
 
 if __name__ == "__main__":

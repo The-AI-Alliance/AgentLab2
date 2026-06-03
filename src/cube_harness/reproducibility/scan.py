@@ -35,7 +35,7 @@ from pathlib import Path
 from cube_harness.episode_status import IN_FLIGHT_STATUSES
 from cube_harness.eval_log import EXPERIMENT_RECORD_FILENAME, ExperimentRecord
 from cube_harness.exp_runner import DEFAULT_CANCEL_GRACE_S, DEFAULT_STEP_TIMEOUT_S
-from cube_harness.experiment import sweep_stale_statuses
+from cube_harness.experiment import DEFAULT_ORPHAN_THRESHOLD_S, sweep_stale_statuses
 from cube_harness.reproducibility import submissions
 from cube_harness.results import ExperimentResult
 from cube_harness.storage import ARCHIVED_MARKER, FileStorage
@@ -51,17 +51,14 @@ than about the model — the run is marked BROKEN. 10% is intentionally tight
 """
 
 
-# Stale-sweep defaults match the runner's defaults so the same heartbeat
-# semantics apply whether sweep is invoked online (during run_with_ray) or
-# offline (by this script). See cube_harness.exp_runner.
-_DEFAULT_ORPHAN_THRESHOLD_S: float = 3600.0
-
-
 def sweep_stale_in_dir(experiment_dir: Path) -> list[str]:
     """Mark dead RUNNING/QUEUED episodes as STALE in *experiment_dir*.
 
     Pure delegation to :func:`cube_harness.experiment.sweep_stale_statuses` —
-    the same code path the runner uses online. Returns the list of swept
+    the same code path the runner uses online. Reuses the runner's defaults
+    (``DEFAULT_STEP_TIMEOUT_S`` / ``DEFAULT_CANCEL_GRACE_S`` /
+    ``DEFAULT_ORPHAN_THRESHOLD_S``) so heartbeat semantics stay identical
+    whether sweep is invoked online or offline. Returns the list of swept
     trajectory_ids. Non-fatal: any storage error is logged and swallowed so
     the scan can proceed with whatever statuses are currently on disk.
     """
@@ -71,7 +68,7 @@ def sweep_stale_in_dir(experiment_dir: Path) -> list[str]:
             storage,
             step_timeout_s=DEFAULT_STEP_TIMEOUT_S,
             cancel_grace_s=DEFAULT_CANCEL_GRACE_S,
-            orphan_threshold_s=_DEFAULT_ORPHAN_THRESHOLD_S,
+            orphan_threshold_s=DEFAULT_ORPHAN_THRESHOLD_S,
         )
     except Exception as e:
         logger.warning("stale-status sweep failed for %s: %s", experiment_dir, e)
