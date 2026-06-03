@@ -156,8 +156,9 @@ class Agent(ABC):
             # Sync body under async signature — debugable on the main
             # thread. Override `run` for true async/concurrent work.
             agent_output = self.step(obs)
-            # Bump turns AFTER step() (so its LLM calls emit) and BEFORE
-            # dispatch (so a turn that crosses max_turns can't dispatch).
+            # Bump the step counter AFTER step() (so its LLM calls emit)
+            # and BEFORE dispatch (so a step that crosses the cap can't
+            # dispatch).
             if self._recorder is not None:
                 self._recorder.on_step()
             if agent_output.error is not None:
