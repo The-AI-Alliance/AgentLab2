@@ -127,13 +127,19 @@ class MathToolUseBenchmarkConfig(BenchmarkConfig[MathToolUseTaskMetadata]):
         super().install()
         cache_dir = cls.task_config_class.task_execution_cache_dir()
         cache_dir.mkdir(parents=True, exist_ok=True)
-        n = 0
+        written = skipped = 0
         for t in _iter_tasks():
-            (cache_dir / f"{t['id']}.json").write_text(
-                json.dumps({"question": t["question"], "expected": t["expected"]})
-            )
-            n += 1
-        logger.info("math-tool-use: wrote %d execution-info cache files to %s", n, cache_dir)
+            dest = cache_dir / f"{t['id']}.json"
+            if dest.exists():  # idempotent; another worker already wrote it
+                skipped += 1
+                continue
+            # Atomic write (temp + os.replace) so concurrent install() across Ray workers
+            # never exposes a partially-written file to a reader in make().
+            tmp = cache_dir / f".{t['id']}.{os.getpid()}.tmp"
+            tmp.write_text(json.dumps({"question": t["question"], "expected": t["expected"]}))
+            os.replace(tmp, dest)
+            written += 1
+        logger.info("math-tool-use: execution cache at %s (wrote %d, skipped %d existing)", cache_dir, written, skipped)
 
     # cube_rl drives the instantiated config object directly through
     # install() + setup() + get_task_configs() + close(); math needs no runtime infra.
