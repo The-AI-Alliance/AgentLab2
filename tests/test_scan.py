@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from cube_harness.episode_status import Status
+from cube_harness.episode_status import EpisodeStatus, Status
 from cube_harness.eval_log import EvalLog
 from cube_harness.reproducibility import submissions
 from cube_harness.reproducibility.scan import (
@@ -230,3 +230,90 @@ class TestWalk:
 
     def test_walk_returns_empty_for_missing_root(self, tmp_path: Path) -> None:
         assert walk(tmp_path / "does_not_exist") == []
+
+
+class TestSweepIntegration:
+    def _write_dead_worker_episode(self, exp_dir: Path, task_id: str = "t3") -> str:
+        """Plant a RUNNING episode whose heartbeat is way past the sweep threshold.
+
+        FileStorage.list_episode_statuses only surfaces episode dirs that
+        carry an episode_config.json (planned-or-run marker), so the stub
+        below mirrors what Experiment.prepare_episodes writes at startup.
+        """
+        traj_id = f"{task_id}_ep0"
+        ep_dir = exp_dir / "episodes" / traj_id
+        ep_dir.mkdir(parents=True, exist_ok=True)
+        (ep_dir / "episode_config.json").write_text("{}")
+        EpisodeStatus(
+            status="RUNNING",
+            task_id=task_id,
+            episode_id=0,
+            started_at=0.0,
+            last_heartbeat_at=0.0,  # ancient — well past step_timeout
+        ).write(ep_dir / "status.json")
+        return traj_id
+
+    def test_sweep_converts_dead_running_to_stale(self, tmp_path: Path) -> None:
+        """A RUNNING episode with a stale heartbeat must roll into n_system_error."""
+        from cube_harness.reproducibility.scan import sweep_stale_in_dir
+
+        exp_dir = tmp_path / "sweep"
+        _populate_clean_run(exp_dir, n_tasks=3, n_success=3)
+        _set_subset_field(exp_dir, n_tasks=4)
+        traj_id = self._write_dead_worker_episode(exp_dir)
+
+        swept = sweep_stale_in_dir(exp_dir)
+        assert traj_id in swept, f"sweep should have caught the dead worker: {swept}"
+
+    def test_classify_with_sweep_disabled_keeps_in_flight_signal(self, tmp_path: Path) -> None:
+        """--no-sweep-stale leaves the on-disk status as-is."""
+        exp_dir = tmp_path / "no_sweep"
+        _populate_clean_run(exp_dir, n_tasks=3, n_success=3)
+        _set_subset_field(exp_dir, n_tasks=4)
+        _add_status(exp_dir, "t3", "RUNNING")  # stays RUNNING when sweep skipped
+        result = classify(exp_dir, sweep_stale=False)
+        assert result.category is ScanCategory.unfinished
+
+    def test_classify_with_sweep_promotes_dead_to_broken(self, tmp_path: Path) -> None:
+        """With sweep on, a dead RUNNING episode becomes STALE and (when its rate
+        crosses the threshold) the experiment goes BROKEN."""
+        exp_dir = tmp_path / "swept"
+        _populate_clean_run(exp_dir, n_tasks=3, n_success=3)
+        _set_subset_field(exp_dir, n_tasks=4)
+        self._write_dead_worker_episode(exp_dir)
+        # With 1 swept STALE among 4 terminal = 25% system error → > 10% threshold.
+        result = classify(exp_dir, sweep_stale=True, system_error_threshold=0.10)
+        assert result.category is ScanCategory.broken
+        assert result.n_system_error >= 1
+
+
+class TestArchive:
+    def test_archive_renames_with_marker(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility.scan import archive_experiment_dir
+        from cube_harness.storage import ARCHIVED_MARKER
+
+        exp_dir = tmp_path / "to_archive"
+        exp_dir.mkdir()
+        new_path = archive_experiment_dir(exp_dir)
+        assert ARCHIVED_MARKER in new_path.name
+        assert new_path.exists()
+        assert not exp_dir.exists()
+
+    def test_archive_is_idempotent_on_already_archived(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility.scan import archive_experiment_dir
+        from cube_harness.storage import ARCHIVED_MARKER
+
+        archived = tmp_path / f"already{ARCHIVED_MARKER}1234.5"
+        archived.mkdir()
+        new_path = archive_experiment_dir(archived)
+        # No double-archive: returned path is the same.
+        assert new_path == archived
+
+    def test_walk_skips_archived_dirs(self, tmp_path: Path) -> None:
+        from cube_harness.storage import ARCHIVED_MARKER
+
+        _populate_clean_run(tmp_path / "live")
+        _populate_clean_run(tmp_path / f"old{ARCHIVED_MARKER}9999.0")
+        results = walk(tmp_path)
+        names = {r.experiment_dir.name for r in results}
+        assert names == {"live"}, f"archived dir should be skipped: {names}"

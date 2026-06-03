@@ -33,6 +33,7 @@ from cube_harness.reproducibility.scan import (
     DEFAULT_SYSTEM_ERROR_THRESHOLD,
     ScanCategory,
     ScanResult,
+    archive_experiment_dir,
     walk,
 )
 
@@ -169,9 +170,41 @@ def main(
             "experiments so future scans skip them. On by default.",
         ),
     ] = True,
+    sweep_stale: Annotated[
+        bool,
+        typer.Option(
+            "--sweep-stale/--no-sweep-stale",
+            help="Before classifying, reuse cube_harness.experiment.sweep_stale_statuses "
+            "to mark dead RUNNING/QUEUED episodes as STALE based on heartbeat age. "
+            "Catches experiments where Ray crashed mid-run. On by default — pass "
+            "--no-sweep-stale for a strictly read-only scan.",
+        ),
+    ] = True,
+    archive_broken: Annotated[
+        bool,
+        typer.Option(
+            "--archive-broken",
+            help="After scanning, rename every broken experiment dir to "
+            "<name>.archived_<ts> so future scans skip them and the results "
+            "root stays uncluttered. Uses the same ARCHIVED_MARKER convention "
+            "as FileStorage's per-episode archive.",
+        ),
+    ] = False,
+    archive_debug: Annotated[
+        bool,
+        typer.Option(
+            "--archive-debug",
+            help="Also archive experiments classified as subset_review (debug "
+            "runs / hand-picked task lists). Implies --archive-broken=True.",
+        ),
+    ] = False,
 ) -> None:
     """Survey *root* and either report or hand off to the submitter."""
-    results = walk(root, system_error_threshold=system_error_threshold)
+    results = walk(
+        root,
+        system_error_threshold=system_error_threshold,
+        sweep_stale=sweep_stale,
+    )
     typer.echo(_format_table(results))
 
     # Summary counts
@@ -186,7 +219,24 @@ def main(
         if n_stamped:
             typer.echo(f"persisted {n_stamped} broken decision(s) into submissions.json")
 
+    def _archive_pass() -> None:
+        """Rename broken (and optionally subset_review) dirs to .archived_<ts>."""
+        targets = [r for r in results if r.category is ScanCategory.broken]
+        if archive_debug:
+            targets.extend(r for r in results if r.category is ScanCategory.subset_review)
+        for r in targets:
+            try:
+                new_path = archive_experiment_dir(r.experiment_dir)
+                typer.echo(f"archived: {r.experiment_dir.name} -> {new_path.name}")
+            except Exception as e:
+                typer.echo(f"  ✗ archive failed for {r.experiment_dir.name}: {e}", err=True)
+
     if not submit:
+        # Archive only if we're not also submitting from this invocation —
+        # otherwise we'd rename dirs that submit_to_journal still has to
+        # touch. Re-run with --submit to actually push.
+        if archive_broken or archive_debug:
+            _archive_pass()
         if counts[ScanCategory.submittable] or (yes and counts[ScanCategory.subset_review]):
             typer.echo("")
             typer.echo("Re-run with --submit to hand off to submit_to_journal.py.")
@@ -213,6 +263,11 @@ def main(
         if rc != 0:
             n_failed += 1
             typer.echo(f"  ✗ {r.experiment_dir.name} (exit {rc})", err=True)
+    # Now safe to archive — submit_to_journal already read everything it needed
+    # from the broken/debug dirs (only broken get persisted-rejected; the
+    # submittable ones were eligible and won't be archived here).
+    if archive_broken or archive_debug:
+        _archive_pass()
     if n_failed:
         raise typer.Exit(code=1)
 

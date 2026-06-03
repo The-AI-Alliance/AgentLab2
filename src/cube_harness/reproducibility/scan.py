@@ -26,14 +26,21 @@ Categories (more restrictive than the original sketch — the philosophy is
 from __future__ import annotations
 
 import json
+import logging
+import time
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
 from cube_harness.episode_status import IN_FLIGHT_STATUSES
 from cube_harness.eval_log import EXPERIMENT_RECORD_FILENAME, ExperimentRecord
+from cube_harness.exp_runner import DEFAULT_CANCEL_GRACE_S, DEFAULT_STEP_TIMEOUT_S
+from cube_harness.experiment import sweep_stale_statuses
 from cube_harness.reproducibility import submissions
 from cube_harness.results import ExperimentResult
+from cube_harness.storage import ARCHIVED_MARKER, FileStorage
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_SYSTEM_ERROR_THRESHOLD = 0.10
 """Episodes that hit FAILED / STALE / INVALID_CONFIG count as system errors.
@@ -42,6 +49,49 @@ Above this fraction the recorded ``avg_score`` says more about your infra
 than about the model — the run is marked BROKEN. 10% is intentionally tight
 ("be restrictive about what gets pushed"). Tunable per scan invocation.
 """
+
+
+# Stale-sweep defaults match the runner's defaults so the same heartbeat
+# semantics apply whether sweep is invoked online (during run_with_ray) or
+# offline (by this script). See cube_harness.exp_runner.
+_DEFAULT_ORPHAN_THRESHOLD_S: float = 3600.0
+
+
+def sweep_stale_in_dir(experiment_dir: Path) -> list[str]:
+    """Mark dead RUNNING/QUEUED episodes as STALE in *experiment_dir*.
+
+    Pure delegation to :func:`cube_harness.experiment.sweep_stale_statuses` —
+    the same code path the runner uses online. Returns the list of swept
+    trajectory_ids. Non-fatal: any storage error is logged and swallowed so
+    the scan can proceed with whatever statuses are currently on disk.
+    """
+    try:
+        storage = FileStorage(experiment_dir)
+        return sweep_stale_statuses(
+            storage,
+            step_timeout_s=DEFAULT_STEP_TIMEOUT_S,
+            cancel_grace_s=DEFAULT_CANCEL_GRACE_S,
+            orphan_threshold_s=_DEFAULT_ORPHAN_THRESHOLD_S,
+        )
+    except Exception as e:
+        logger.warning("stale-status sweep failed for %s: %s", experiment_dir, e)
+        return []
+
+
+def archive_experiment_dir(experiment_dir: Path) -> Path:
+    """Rename *experiment_dir* to ``<name>.archived_<ts>`` so :func:`walk` skips it.
+
+    Mirrors the per-episode archive convention used by FileStorage — same
+    ``ARCHIVED_MARKER`` constant + timestamp suffix, just applied one level up.
+    Returns the new path. No-op if the dir is already archived.
+    """
+    experiment_dir = Path(experiment_dir)
+    if ARCHIVED_MARKER in experiment_dir.name:
+        return experiment_dir
+    target = experiment_dir.parent / f"{experiment_dir.name}{ARCHIVED_MARKER}{time.time()}"
+    experiment_dir.rename(target)
+    logger.info("archived %s -> %s", experiment_dir.name, target.name)
+    return target
 
 
 class ScanCategory(str, Enum):
@@ -105,13 +155,21 @@ def classify(
     experiment_dir: Path,
     *,
     system_error_threshold: float = DEFAULT_SYSTEM_ERROR_THRESHOLD,
+    sweep_stale: bool = True,
 ) -> ScanResult:
     """Decide which bucket *experiment_dir* falls into.
 
-    Pure — no writes to disk. Caller decides whether to persist the verdict
-    into ``submissions.json`` (typically only for ``broken``).
+    Pure with respect to ``submissions.json`` and the result classification.
+    When *sweep_stale* is True (the default), runs
+    :func:`sweep_stale_in_dir` first so dead RUNNING/QUEUED episodes (from a
+    crashed Ray driver or killed worker) are reclassified as STALE before the
+    eligibility logic runs. Without the sweep, those experiments would be
+    permanently flagged as ``unfinished`` even when no worker is alive to
+    finish them. Pass ``sweep_stale=False`` for a strictly read-only scan.
     """
     experiment_dir = Path(experiment_dir)
+    if sweep_stale:
+        sweep_stale_in_dir(experiment_dir)
 
     # ── Already-decided takes priority over every other signal ────────────
     if submissions.has_decision(experiment_dir, "journal"):
@@ -234,10 +292,13 @@ def walk(
     root: Path,
     *,
     system_error_threshold: float = DEFAULT_SYSTEM_ERROR_THRESHOLD,
+    sweep_stale: bool = True,
 ) -> list[ScanResult]:
     """Classify every direct subdirectory of *root* that contains an
     ``experiment_record.json``. Dirs without that file are silently skipped
-    (they're not experiment dirs at all)."""
+    (they're not experiment dirs at all). Archived dirs — those carrying the
+    standard ``ARCHIVED_MARKER`` suffix — are also skipped, so re-scanning a
+    root after ``--archive-broken`` doesn't re-surface what was just moved."""
     root = Path(root)
     results: list[ScanResult] = []
     if not root.is_dir():
@@ -245,7 +306,15 @@ def walk(
     for entry in sorted(root.iterdir()):
         if not entry.is_dir():
             continue
+        if ARCHIVED_MARKER in entry.name:
+            continue
         if not (entry / EXPERIMENT_RECORD_FILENAME).exists():
             continue
-        results.append(classify(entry, system_error_threshold=system_error_threshold))
+        results.append(
+            classify(
+                entry,
+                system_error_threshold=system_error_threshold,
+                sweep_stale=sweep_stale,
+            )
+        )
     return results
