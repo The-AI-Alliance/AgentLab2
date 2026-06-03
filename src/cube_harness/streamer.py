@@ -31,6 +31,7 @@ config fields without changing this surface.
 import logging
 import threading
 import time
+from typing import Protocol, runtime_checkable
 
 from cube.core import Action, EnvironmentOutput, StepError, TypedBaseModel
 
@@ -49,6 +50,29 @@ logger = logging.getLogger(__name__)
 # A sentinel parent_event_id we attach to events emitted before any
 # agent turn (the synthetic reset event recorded by Episode).
 RESET_PARENT_EVENT_ID = "reset"
+
+
+@runtime_checkable
+class EventSink(Protocol):
+    """The forward seam for trajectory event consumers.
+
+    Anything that receives `TrajectoryEvent`s as the agent runs (today:
+    `FileStorage`; tomorrow: an OTel span emitter, an RL trainer HTTP
+    pump, a Kafka publisher) implements this Protocol. `EventStreamer`
+    fans every event out to its registered sinks; sinks read what they
+    understand and ignore the rest.
+
+    Sinks MUST be cheap and non-blocking. `emit()` is called on the agent
+    loop's hot path under the streamer's stats-lock; a slow sink stalls
+    every parallel tool dispatch in `GennyParallel`. If a sink needs I/O
+    (HTTP, disk-fsync), do it in a background queue.
+
+    The structural typing here matches `FileStorage.save_event` exactly,
+    which is why the streamer didn't need an interface to ship the first
+    sink. Declaring the Protocol makes future sinks self-documenting.
+    """
+
+    def save_event(self, te: TrajectoryEvent, trajectory_id: str) -> None: ...
 
 
 class EventStreamerConfig(TypedBaseModel):
@@ -88,6 +112,7 @@ class EventStreamer:
         storage: object | None = None,
         budget: object | None = None,
         metadata_updates: dict | None = None,
+        extra_sinks: list[EventSink] | None = None,
     ) -> None:
         self.trajectory_id = trajectory_id
         self.storage = storage
@@ -97,6 +122,16 @@ class EventStreamer:
         # TrajectoryMetadata.metadata at finalize. Connectors that need
         # a back-channel write here.
         self.metadata_updates = metadata_updates if metadata_updates is not None else {}
+        # Sinks list — storage is the canonical sink-0, additional sinks
+        # (OTel emitter, RL HTTP pump, ...) append. `emit()` iterates
+        # this list; sink-registration is just `streamer._sinks.append(s)`.
+        # Tests pass duck-typed objects with `save_event`; the Protocol
+        # check is structural, not nominal.
+        self._sinks: list[EventSink] = []
+        if storage is not None and hasattr(storage, "save_event"):
+            self._sinks.append(storage)
+        if extra_sinks:
+            self._sinks.extend(extra_sinks)
         self._current_parent_event_id: str | None = None
         # Stats counters folded as events flow through. Lock guards the
         # multi-counter read-modify-write under parallel dispatch.
@@ -122,15 +157,19 @@ class EventStreamer:
         Sole event-flow entry point. LLM producers, MonitoredTool, and
         the Episode-only boundary helpers all funnel through here so
         every event flows through the same stats fold + sink fan-out.
+
+        Sink fan-out is sequential and best-effort: a sink that raises
+        is logged and skipped so a misbehaving downstream consumer
+        (slow HTTP, full disk) can't kill the trajectory. Sinks SHOULD
+        be cheap; for blocking I/O, queue inside the sink.
         """
         with self._lock:
             self._fold_stats(te.output)
-        # Sinks: today just FileStorage. Multi-sink fan-out lands when
-        # EventStreamerConfig grows OTel / RL HTTP fields.
-        if self.storage is not None:
-            save_event = getattr(self.storage, "save_event", None)
-            if save_event is not None:
-                save_event(te, self.trajectory_id)
+        for sink in self._sinks:
+            try:
+                sink.save_event(te, self.trajectory_id)
+            except Exception:
+                logger.exception("EventStreamer sink %r raised; continuing.", sink)
         # EvaluationEvent doesn't carry an `id` field (parent_event_id
         # links it to a ToolCallEvent or it's terminal). Return empty
         # string for those so producers that don't need the id don't

@@ -87,6 +87,13 @@ class LLMCallEvent(TypedBaseModel):
     call: LLMCall | None = None
     # Maps label → (start_time, end_time) as absolute Unix timestamps.
     profiling: dict[str, tuple[float, float]] = Field(default_factory=dict)
+    # Free-form metadata bag that producers can populate with sink-specific
+    # data without coupling the event model to a particular consumer.
+    # Example: an RL-aware LLM wrapper can attach `prompt_token_ids`,
+    # `completion_token_ids`, `logprobs`, `trainable_call_index` here for
+    # downstream RL training, leaving the core event shape stable for
+    # everything else. Sinks read what they understand and ignore the rest.
+    metadata: dict = Field(default_factory=dict)
     error: StepError | None = None
 
 
