@@ -98,7 +98,6 @@ def _record_tool_call(
         action=action,
         obs=Observation() if is_error else result,
         error=result if is_error else None,
-        turn_id=parent_event_id,
     )
     emit(TrajectoryEvent(output=event, start_time=start, end_time=end))
     budget.bump_tool_calls()

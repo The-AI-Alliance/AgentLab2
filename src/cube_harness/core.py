@@ -8,8 +8,9 @@ from cube_harness.llm import LLMCall
 
 
 def _new_event_id() -> str:
-    """Allocate a fresh per-event id used as the AgentEvent.id and the
-    `turn_id` of its child ToolCallEvent siblings."""
+    """Allocate a fresh per-event id. LLM-call ids double as the
+    `parent_event_id` of their child ToolCallEvent siblings (parallel
+    tool calls in one turn share the same parent)."""
     return uuid4().hex
 
 
@@ -56,11 +57,18 @@ class AgentErrorEvent(TypedBaseModel):
     Used by Episode + EventStreamer.record_failure to capture exceptions
     that don't naturally belong on an LLMCallEvent or ToolCallEvent
     (BudgetExceeded, agent-side crashes outside an LLM/tool call, etc).
-    Carries just the StepError payload — no need for a turn id since the
-    failure terminates the trajectory.
+
+    `parent_event_id` (when set) is the id of the most recent
+    `LLMCallEvent` or `ToolCallEvent` at the moment of failure — the
+    event whose execution most likely caused or was interrupted by the
+    exception. Lets the failure attach exactly to its group (the agent
+    turn that crashed) instead of by trailing-position heuristic.
+    `None` only when the failure fires before any LLM/tool event has
+    been recorded.
     """
 
     id: str = Field(default_factory=_new_event_id)
+    parent_event_id: str | None = None
     error: StepError
 
 
@@ -73,11 +81,12 @@ class LLMCallEvent(TypedBaseModel):
 
     Back-references:
 
-    - `id` becomes the `turn_id` of any `ToolCallEvent` dispatched as a
-      direct consequence of this LLM call. The recorder stashes the most
-      recent `LLMCallEvent.id` as the current turn id; subsequent
-      `MonitoredTool.execute_action` calls inherit it via the recorder's
-      `parent_event_id_getter`.
+    - `id` becomes the `parent_event_id` of any `ToolCallEvent` dispatched
+      as a direct consequence of this LLM call. The recorder stashes the
+      most recent `LLMCallEvent.id`; subsequent `MonitoredTool.execute_action`
+      calls inherit it via the recorder's `parent_event_id_getter`. Parallel
+      tool calls in one turn share the same `parent_event_id` — that's how
+      a UI groups them exactly (no separate `turn_id` field needed).
     """
 
     id: str = Field(default_factory=_new_event_id)
@@ -113,10 +122,10 @@ class ToolCallEvent(TypedBaseModel):
     Back-references:
 
     - `parent_event_id` references the originating `LLMCallEvent.id`.
+      Sibling parallel tool calls share the same `parent_event_id` —
+      that's how a UI groups them as one turn (no separate `turn_id`
+      field is needed; the grouping is exact, not heuristic).
     - `action_id` echoes the `Action.id` emitted by the LLM.
-    - `turn_id` groups parallel siblings of a single LLM turn (it equals
-      the parent `LLMCallEvent.id` by default — agents emitting N parallel
-      tool calls in one turn share that `turn_id`).
     - `action` carries the full `Action` payload so the on-disk trajectory
       is self-contained — no need to cross-reference back to an
       `LLMCallEvent` to know what was dispatched.
@@ -128,7 +137,6 @@ class ToolCallEvent(TypedBaseModel):
     action: Action | None = None  # full action payload (nullable for legacy decode)
     obs: Observation = Field(default_factory=Observation)  # empty when error is set
     error: StepError | None = None
-    turn_id: str
 
 
 class EvaluationEvent(TypedBaseModel):
@@ -136,9 +144,11 @@ class EvaluationEvent(TypedBaseModel):
 
     Emitted in two flavors:
 
-    - **Terminal** (`is_terminal=True`, `parent_event_id=None`): Episode
-      emits exactly one of these in `finally`, regardless of how
-      `agent.run` returned.
+    - **Terminal** (`is_terminal=True`): Episode emits exactly one of
+      these in `finally`. `parent_event_id` is the id of the most
+      recent `ToolCallEvent` (the agent's last action) so the final
+      reward attaches to its agent turn; `None` only when no tool call
+      ran at all (e.g. agent crashed during the first LLM call).
     - **Step-wise** (`is_terminal=False`, `parent_event_id=<ToolCallEvent.id>`):
       `MonitoredTool` emits one after each tool call when
       `task.validate_per_step=True`. Carries the per-step reward / info
@@ -180,7 +190,7 @@ class Trajectory(TypedBaseModel):
         is steps-only for legacy consumers).
       - `streaming` flag removed (events ALWAYS stream now; the flag was
         a transition artefact).
-      - `last_env_step` / `last_env_output` / `events_of_turn` /
+      - `last_env_step` / `last_env_output` /
         `n_agent_events` / `n_tool_calls` / `n_evaluations` methods removed
         (live on TrajectoryView; this class only carries what XRay needs).
       - `n_agent_steps` / `n_env_steps` properties stay because XRay's

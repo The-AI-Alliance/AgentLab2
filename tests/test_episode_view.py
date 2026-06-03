@@ -29,7 +29,7 @@ def _agent_event(turn_index: int = 0) -> TrajectoryEvent:
 def _tool_call_event(parent_id: str, env_output: EnvironmentOutput | None = None) -> TrajectoryEvent:
     env = env_output or EnvironmentOutput(obs=Observation.from_text("ok"), reward=0.0)
     return TrajectoryEvent(
-        output=ToolCallEvent(parent_event_id=parent_id, obs=env.obs, error=env.error, turn_id=parent_id),
+        output=ToolCallEvent(parent_event_id=parent_id, obs=env.obs, error=env.error),
         start_time=2.0,
         end_time=2.5,
     )
@@ -148,7 +148,9 @@ class TestTrajectoryViewIteration:
         # No decoding happened just to count.
         assert view._cache == {}
 
-    def test_events_of_turn(self, tmp_path) -> None:
+    def test_tool_calls_share_parent_event_id(self, tmp_path) -> None:
+        """Sibling tool calls in one turn share `parent_event_id`. With
+        `turn_id` dropped, that field IS the grouping primitive."""
         storage = FileStorage(tmp_path)
         meta = TrajectoryMetadata(id="t1")
         storage.save_metadata(meta)
@@ -157,12 +159,14 @@ class TestTrajectoryViewIteration:
             _tool_call_event("agent_0"),
             _tool_call_event("agent_0"),
         ]
-        for i, ev in enumerate(siblings):
+        for ev in siblings:
             storage.save_event(ev, "t1")
 
         view = storage.load_episode("t1")
-        turn = view.events_of_turn("agent_0")
-        assert len(turn) == 2
+        siblings_of_agent_0 = [
+            e for e in view if isinstance(e.output, ToolCallEvent) and e.output.parent_event_id == "agent_0"
+        ]
+        assert len(siblings_of_agent_0) == 2
 
     def test_last_env_output(self, tmp_path) -> None:
         storage = FileStorage(tmp_path)

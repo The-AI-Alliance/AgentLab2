@@ -42,7 +42,6 @@ def _tool_call_event(parent_id: str) -> ToolCallEvent:
         parent_event_id=parent_id,
         action_id="a-1",
         obs=Observation(),
-        turn_id=parent_id,
     )
 
 

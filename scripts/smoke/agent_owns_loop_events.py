@@ -11,7 +11,7 @@ Episode (RFC `agent-owns-loop`, Phase E) and verifies:
     complete (reset ToolCallEvent + per-turn LLMCallEvent / ToolCallEvent
     pairs + final EvaluationEvent);
   - ToolCallEvents reference their parent LLMCallEvent.id via
-    parent_event_id and share the same turn_id;
+    parent_event_id (sibling parallel tool calls share that id);
   - summary_stats carries the agent-owns-loop counters (n_agent_events,
     n_tool_calls, n_evaluations folded into n_agent_steps / n_env_steps
     for backward compatibility).

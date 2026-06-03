@@ -33,7 +33,6 @@ def _tool_call_event() -> TrajectoryEvent:
             parent_event_id="p",
             action_id="a-1",
             obs=Observation.from_text("ok"),
-            turn_id="p",
         ),
         start_time=0.0,
         end_time=0.0,

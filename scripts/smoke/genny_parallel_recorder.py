@@ -7,7 +7,7 @@ Episode body (Phase E), but bypasses the LLM by injecting a scripted
 
   - The Episode finalizes cleanly.
   - The trajectory's event stream has one AgentEvent followed by N
-    sibling ToolCallEvents sharing the same turn_id (the back-reference
+    sibling ToolCallEvents sharing the same parent_event_id (the back-reference
     invariant the RFC asks for).
 
 Run:
@@ -174,9 +174,7 @@ def main() -> int:
 
         parent_id = fanout[0].output.parent_event_id
         if not all(t.output.parent_event_id == parent_id for t in fanout):
-            return _fail("ToolCallEvents have differing parent_event_id — not all siblings")
-        if not all(t.output.turn_id == parent_id for t in fanout):
-            return _fail("ToolCallEvents have differing turn_id — not all in one turn")
+            return _fail("ToolCallEvents have differing parent_event_id — not all siblings of one turn")
 
         llm_event_ids = {e.output.id for e in view if isinstance(e.output, LLMCallEvent)}
         # parent must be a real LLMCallEvent.id OR the RESET sentinel
@@ -189,7 +187,7 @@ def main() -> int:
             return _fail(f"unexpected action_ids: {names}")
         _ = non_reset_tool_calls
 
-        print(f"  ✓ {traj_id}: 3 sibling tool_calls (turn_id={parent_id[:8]}…), eval=1")
+        print(f"  ✓ {traj_id}: 3 sibling tool_calls (parent_event_id={parent_id[:8]}…), eval=1")
         print(f"SMOKE OK: {NAME}")
         return 0
     finally:

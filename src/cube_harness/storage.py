@@ -358,10 +358,6 @@ class TrajectoryView:
         """Alias for `iter(view)` — explicit-method form for readability."""
         return iter(self)
 
-    def events_of_turn(self, turn_id: str) -> list[TrajectoryEvent]:
-        """All `ToolCallEvent`s sharing a `turn_id`. Decodes one pass."""
-        return [e for e in self if isinstance(e.output, ToolCallEvent) and e.output.turn_id == turn_id]
-
     def last_env_output(self) -> EnvironmentOutput | None:
         """Most recent `ToolCallEvent` as an `EnvironmentOutput`-shaped
         record, or None if no tool call ran.
@@ -421,7 +417,7 @@ class TrajectoryView:
                 _legacy_agent_id(entry.legacy_parent_num) if entry.legacy_parent_num is not None else "__reset__"
             )
             # ToolCallEvent's fields are (id, parent_event_id, action_id,
-            # obs, error, turn_id) — extract obs + error from the legacy
+            # obs, error) — extract obs + error from the legacy
             # EnvironmentOutput. The old `output=step.output` form was
             # dropped silently by pydantic's extra="ignore" (default on
             # TypedBaseModel), zeroing every legacy ToolCallEvent's
@@ -430,7 +426,6 @@ class TrajectoryView:
                 parent_event_id=parent_id,
                 obs=step.output.obs,
                 error=step.output.error,
-                turn_id=parent_id,
             )
             return TrajectoryEvent(output=tool_event, start_time=step.start_time, end_time=step.end_time)
         raise TypeError(f"Unexpected legacy step output type: {type(step.output).__name__}")

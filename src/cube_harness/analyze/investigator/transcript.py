@@ -85,7 +85,7 @@ def _format_tool_call(idx: int, te: TrajectoryEvent) -> str:
     """
     out = te.output
     assert isinstance(out, ToolCallEvent)
-    lines = [f"### Event {idx:03d} TOOL_CALL  (turn_id={out.turn_id[:8]}…)"]
+    lines = [f"### Event {idx:03d} TOOL_CALL  (parent_event_id={out.parent_event_id[:8]}…)"]
     if out.action is not None:
         name = out.action.name
         try:
