@@ -16,12 +16,13 @@ from pathlib import Path
 from typing import Any
 
 from cube.benchmark import BenchmarkConfig
-from cube.core import EnvironmentOutput
+from cube.core import EnvironmentOutput, Observation
 from PIL import Image
 from pydantic import BaseModel
 
 from cube_harness.agent import AgentConfig
 from cube_harness.analyze.stats import reward_mean_stderr
+from cube_harness.analyze.xray_events import EpisodeEvents, EventGroup
 from cube_harness.core import AgentOutput, Trajectory, TrajectoryStep
 from cube_harness.episode_status import STATUS_FILENAME, EpisodeStatus, should_sweep_running_to_stale
 from cube_harness.episode_status import TERMINAL_STATUSES as _EPISODE_TERMINAL_STATUSES
@@ -1949,3 +1950,260 @@ def generate_timeline_html(trajectory: Trajectory | None, current_step: int) -> 
         f"{''.join(steps_html)}"
         f"</div></div>"
     )
+
+
+# ===========================================================================
+# Event-stream rendering (agent-owns-loop XRay rewrite)
+#
+# Everything below consumes the flat `EpisodeEvents` view model (Observation /
+# LLMCall / EvaluationEvent payloads) — never EnvironmentOutput / AgentOutput /
+# Trajectory.steps. The card rail replaces the horizontal timeline; the detail
+# panes render a resolved `EventGroup` instead of a lone step.
+# ===========================================================================
+
+
+# --- Observation extractors ------------------------------------------------
+
+
+def screenshot_from_obs(obs: Observation | None) -> Image.Image | None:
+    """First PIL image in an Observation's contents, or None."""
+    if obs is None:
+        return None
+    for content in obs.contents:
+        if isinstance(content.data, Image.Image):
+            return content.data
+    return None
+
+
+def text_content_from_obs(obs: Observation | None, name_pattern: str) -> str | None:
+    """First text content whose name contains `name_pattern` (case-insensitive)."""
+    if obs is None:
+        return None
+    needle = name_pattern.lower()
+    for content in obs.contents:
+        if isinstance(content.data, str) and needle in (content.name or "").lower():
+            return content.data
+    return None
+
+
+def goal_from_events(events: EpisodeEvents | None) -> str:
+    """Task goal text — the first non-empty text content of the first observation."""
+    if events is None or len(events) == 0:
+        return "*No trajectory loaded*"
+    for i in range(len(events)):
+        obs = events.observation(i)
+        if obs is None:
+            continue
+        for content in obs.contents:
+            if isinstance(content.data, str) and content.data.strip():
+                return content.data
+    return "*No goal text found*"
+
+
+# --- Card rail -------------------------------------------------------------
+
+_RAIL_MIN_H = 44  # px — shortest card
+_RAIL_MAX_H = 140  # px — tallest card
+
+
+def _card_height(duration: float | None, min_dur: float, max_dur: float) -> int:
+    """Map an event duration to a clamped card height in pixels."""
+    if duration is None or max_dur <= min_dur:
+        return _RAIL_MIN_H
+    frac = (duration - min_dur) / (max_dur - min_dur)
+    return int(_RAIL_MIN_H + frac * (_RAIL_MAX_H - _RAIL_MIN_H))
+
+
+def _card_onclick(index: int) -> str:
+    """JS that writes `index` into the hidden #timeline_click_input Number.
+
+    Reuses the native-setter pattern the old timeline used so Gradio's change
+    detection fires on every click (even when re-selecting the same value).
+    """
+    return (
+        "const inp = document.querySelector('#timeline_click_input input, #timeline_click_input textarea');"
+        " if(inp) {"
+        " const s = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;"
+        f" s.call(inp, {index});"
+        " inp.dispatchEvent(new Event('input', {bubbles: true}));"
+        " inp.dispatchEvent(new Event('change', {bubbles: true}));"
+        " }"
+    )
+
+
+def _event_profiling(events: EpisodeEvents, index: int) -> dict | None:
+    """`profiling` dict of an event's payload, if it carries one (LLM calls)."""
+    return getattr(events.output(index), "profiling", None) or None
+
+
+def render_event_rail_html(events: EpisodeEvents | None, selected: int) -> str:
+    """Vertical, scrollable column of `.xray-event-card` divs — one per event.
+
+    The active card (index == selected) gets a solid border in its kind colour;
+    its group-mates get a muted (dashed) border. Card height scales with the
+    event's wall-clock duration. A left-edge stripe marks profiled events.
+    """
+    if events is None or len(events) == 0:
+        return "<div style='padding:10px;color:#666;'>No events to display</div>"
+
+    durations: list[float | None] = []
+    for ev in events.events:
+        d = ev.end_time - ev.start_time if (ev.start_time is not None and ev.end_time is not None) else None
+        durations.append(d)
+    valid = [d for d in durations if d is not None and d > 0]
+    min_dur, max_dur = (min(valid), max(valid)) if valid else (0.0, 1.0)
+
+    accompanying: set[int] = set(events.accompanying_indices(selected)) if 0 <= selected < len(events) else set()
+
+    cards_html: list[str] = []
+    for card in events.cards():
+        i = card.index
+        is_active = i == selected
+        is_accomp = i in accompanying
+        if is_active:
+            border = f"2px solid {card.color}"
+            shadow = f"box-shadow:0 0 0 2px {card.color}33;"
+        elif is_accomp:
+            border = f"2px dashed {card.color}99"
+            shadow = ""
+        else:
+            border = "1px solid #e2e8f0"
+            shadow = ""
+        height = _card_height(durations[i], min_dur, max_dur)
+        stripe = ""
+        if _event_profiling(events, i):
+            stripe = (
+                "<div style='position:absolute;left:0;top:0;bottom:0;width:4px;"
+                f"background:{card.color};border-radius:6px 0 0 6px;'></div>"
+            )
+        dur_label = format_duration(durations[i]) if durations[i] is not None else ""
+        title = html_lib.escape(card.title)
+        subtitle = html_lib.escape(card.subtitle)
+        cards_html.append(
+            f"<div class='xray-event-card' data-index='{i}' onclick=\"{_card_onclick(i)}\" "
+            f"style='position:relative;display:flex;flex-direction:column;justify-content:center;"
+            f"min-height:{height}px;margin:4px 0;padding:6px 10px 6px 14px;border:{border};{shadow}"
+            f"border-radius:6px;background:{card.color}0d;cursor:pointer;overflow:hidden;'>"
+            f"{stripe}"
+            f"<div style='display:flex;align-items:center;gap:6px;font-weight:600;font-size:13px;color:#1f2937;'>"
+            f"<span style='font-size:15px;'>{card.icon}</span>"
+            f"<span style='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'>{title}</span>"
+            f"<span style='margin-left:auto;font-size:10px;color:#9ca3af;font-weight:400;'>#{i}{(' · ' + dur_label) if dur_label else ''}</span>"
+            f"</div>"
+            f"<div style='font-size:11px;color:#6b7280;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;'>{subtitle}</div>"
+            f"</div>"
+        )
+
+    return (
+        "<div id='xray-event-rail' style='max-height:640px;overflow-y:auto;padding:4px;"
+        "background:#f8f9fa;border-radius:8px;border:1px solid #e2e8f0;'>"
+        + "".join(cards_html)
+        + "</div>"
+    )
+
+
+# --- Grouped detail panes --------------------------------------------------
+
+
+def render_group_chat_html(events: EpisodeEvents, group: EventGroup) -> str:
+    """Chat pane: the group's LLM call rendered with the existing helper."""
+    call = events.llm_call(group.llm_index)
+    if call is None:
+        return "<em>No LLM call in this group (e.g. the reset observation).</em>"
+    return _render_llm_call_html(call)
+
+
+def render_group_observation_html(events: EpisodeEvents, group: EventGroup) -> tuple[list[Image.Image], str]:
+    """Observation pane: screenshots + text contents for every observation in
+    the group. Parallel siblings are stacked with per-observation labels.
+
+    Returns `(images, html)` — the gallery images and the text/labels HTML.
+    """
+    images: list[Image.Image] = []
+    blocks: list[str] = []
+    obs_indices = group.observation_indices
+    multiple = len(obs_indices) > 1
+    for n, idx in enumerate(obs_indices):
+        obs = events.observation(idx)
+        action = events.action(idx)
+        label = action.name if action is not None else f"observation #{idx}"
+        if multiple:
+            blocks.append(f"<h4 style='margin:8px 0 4px;'>🖥️ Sibling {n + 1}/{len(obs_indices)} — {html_lib.escape(label)}</h4>")
+        else:
+            blocks.append(f"<h4 style='margin:8px 0 4px;'>🖥️ {html_lib.escape(label)}</h4>")
+        img = screenshot_from_obs(obs)
+        if img is not None:
+            images.append(img)
+            blocks.append(f"<div style='font-size:12px;color:#6b7280;'>screenshot {img.size[0]}×{img.size[1]} → see gallery</div>")
+        if obs is not None:
+            for content in obs.contents:
+                if isinstance(content.data, str) and content.data.strip():
+                    name = html_lib.escape(content.name or "text")
+                    blocks.append(_details_block(name, content.data))
+    if not blocks:
+        return [], "<em>No observation in this group.</em>"
+    return images, "".join(blocks)
+
+
+def render_group_axtree(events: EpisodeEvents, group: EventGroup) -> str:
+    """AXTree pane: axtree text of the group's first observation."""
+    if not group.observation_indices:
+        return "No observation in this group."
+    obs = events.observation(group.observation_indices[0])
+    content = text_content_from_obs(obs, "axtree")
+    return content if content is not None else "No AXTree content in this observation."
+
+
+def render_group_evaluation_md(events: EpisodeEvents, group: EventGroup) -> str:
+    """Evaluation pane: reward + info for every EvaluationEvent in the group."""
+    if not group.evaluation_indices:
+        return "*No evaluation recorded for this group.*"
+    parts: list[str] = []
+    for idx in group.evaluation_indices:
+        out = events.output(idx)
+        scope = "Terminal" if getattr(out, "is_terminal", False) else "Step-wise"
+        reward = getattr(out, "reward", 0.0)
+        info = getattr(out, "info", {}) or {}
+        parts.append(f"### 🏁 {scope} evaluation\n\n**Reward:** {reward:g}\n")
+        if info:
+            parts.append("```json\n" + json.dumps(info, indent=2, default=str) + "\n```")
+    return "\n".join(parts)
+
+
+def render_group_error_md(events: EpisodeEvents, group: EventGroup) -> str:
+    """Error pane: every error in the group (LLM, tool, or agent error)."""
+    if not group.error_indices:
+        return "No errors in this group."
+    parts: list[str] = []
+    for idx in group.error_indices:
+        err = events.error(idx)
+        if err is None:
+            continue
+        parts.append(
+            f"### ⚠️ {err.error_type}\n"
+            f"**Message:** {err.exception_str}\n\n"
+            f"**Stack Trace:**\n```\n{err.stack_trace}\n```"
+        )
+    return "\n\n---\n\n".join(parts) if parts else "No errors in this group."
+
+
+def render_group_debug_json(events: EpisodeEvents, group: EventGroup) -> str:
+    """Debug pane: raw JSON dump of every event in the group."""
+    dump = []
+    for idx in group.members:
+        ev = events[idx]
+        dump.append({"index": idx, "event": ev.model_dump(mode="json")})
+    return json.dumps(dump, indent=2, default=str)
+
+
+def render_group_action_html(events: EpisodeEvents, group: EventGroup) -> str:
+    """Always-visible action panel: the action(s) the group's LLM dispatched."""
+    actions = [events.action(i) for i in group.observation_indices]
+    actions = [a for a in actions if a is not None]
+    if not actions:
+        return "<em>No action — observation-only or terminal group.</em>"
+    lines: list[str] = []
+    for action in actions:
+        args = ", ".join(f"{k}={json.dumps(v, default=str)}" for k, v in (action.arguments or {}).items())
+        lines.append(f"<code>{html_lib.escape(action.name)}({html_lib.escape(args)})</code>")
+    return "<br>".join(lines)
