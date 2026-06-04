@@ -476,6 +476,17 @@ html {
     margin-bottom: 2px !important;
     min-height: 0 !important;
 }
+/* Experiments toolbar: tight row; the 🎯 auto-select buttons hug their action. */
+.xray-exp-toolbar {
+    gap: 4px !important;
+    align-items: center;
+}
+#exp_pick_archivable_btn, #exp_pick_submittable_btn, #exp_refresh_btn {
+    min-width: 32px !important;
+    max-width: 38px;
+    padding: 2px 6px !important;
+    flex: 0 0 auto;
+}
 .compact-header {
     padding: 8px 16px;
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -635,10 +646,21 @@ _INIT_JS = """
     document.body.classList.remove('dark');
     if (window.__xrayInit) return;
     window.__xrayInit = true;
+    const TIPS = {
+        '#xray_prev_btn': 'Previous event (← or ↑)',
+        '#xray_next_btn': 'Next event (→ or ↓)',
+        '#exp_browse_btn': 'Pick a different results directory',
+        '#exp_refresh_btn': 'Re-scan the results directory (cached — fast)',
+        '#exp_archive_btn': 'Archive all checked experiments (moves them to _archive/)',
+        '#exp_pick_archivable_btn': 'Auto-select broken / un-scorable experiments to archive',
+        '#exp_submit_btn': 'Submit checked experiments to the cube-registry — opens a PR that auto-validates + merges',
+        '#exp_pick_submittable_btn': 'Auto-select submittable, not-yet-submitted experiments',
+    };
     const setTip = () => {
-        const pb = document.querySelector('#xray_prev_btn'), nb = document.querySelector('#xray_next_btn');
-        if (pb) pb.title = 'Previous event (← or ↑)';
-        if (nb) nb.title = 'Next event (→ or ↓)';
+        for (const [sel, tip] of Object.entries(TIPS)) {
+            const el = document.querySelector(sel);
+            if (el) el.title = tip;
+        }
     };
     setTip();
     setTimeout(setTip, 1000);
@@ -1231,21 +1253,26 @@ def run_xray(
                     elem_classes="help-content",
                 )
             with gr.Tab("Experiments"):
-                with gr.Row():
-                    exp_browse_btn = gr.Button("📁 Browse…", scale=0, size="sm", variant="secondary")
-                    exp_refresh_btn = gr.Button("↺ Refresh", scale=0, size="sm")
-                    exp_archive_btn = gr.Button("🗃 Archive selected", scale=0, size="sm", variant="secondary")
-                with gr.Row():
-                    # Clean + submit workflow. The two Submit buttons stay hidden
-                    # until "Check submittable" selects clean runs, to keep the
-                    # default toolbar uncluttered.
-                    exp_gc_btn = gr.Button("🧹 Garbage-collect", scale=0, size="sm", variant="secondary")
-                    exp_checksubmit_btn = gr.Button("📤 Check submittable", scale=0, size="sm", variant="secondary")
-                    exp_submit_eee_btn = gr.Button(
-                        "⬆️ Submit → EEE", scale=0, size="sm", variant="primary", visible=False
+                # Single toolbar row. Each action (Archive / Submit) has a small
+                # attached 🎯 auto-select button that ticks the rows it applies to;
+                # the user reviews the selection, then clicks the action. Tooltips
+                # (set in _INIT_JS) describe each button.
+                with gr.Row(elem_classes="xray-exp-toolbar"):
+                    exp_browse_btn = gr.Button(
+                        "📁 Browse…", scale=0, size="sm", variant="secondary", elem_id="exp_browse_btn"
                     )
-                    exp_submit_registry_btn = gr.Button(
-                        "⬆️ Submit → Registry", scale=0, size="sm", variant="primary", visible=False
+                    exp_refresh_btn = gr.Button("↺", scale=0, size="sm", elem_id="exp_refresh_btn", min_width=0)
+                    exp_archive_btn = gr.Button(
+                        "🗃 Archive", scale=0, size="sm", variant="secondary", elem_id="exp_archive_btn"
+                    )
+                    exp_pick_archivable_btn = gr.Button(
+                        "🎯", scale=0, size="sm", elem_id="exp_pick_archivable_btn", min_width=0
+                    )
+                    exp_submit_btn = gr.Button(
+                        "⬆️ Submit", scale=0, size="sm", variant="primary", elem_id="exp_submit_btn"
+                    )
+                    exp_pick_submittable_btn = gr.Button(
+                        "🎯", scale=0, size="sm", elem_id="exp_pick_submittable_btn", min_width=0
                     )
                 results_dir_md = gr.Markdown(f"📂 `{state.results_dir}`")
                 exp_action_status = gr.Markdown("", visible=False)
@@ -1410,38 +1437,26 @@ def run_xray(
         def _exp_table_value() -> list[list[Any]]:
             return _exp_table_rows(auto_select_first=False)
 
-        def on_garbage_collect() -> list[list[Any]]:
-            """Reclassify every experiment (sweeping dead RUNNING/QUEUED → stale)
-            and auto-check the broken ones for the user to review and Archive."""
-            rows = xray_utils.get_experiments_table_rows(state.results_dir)
-            for r in rows:
-                exp_dir = state.results_dir / r["experiment"]
-                category = xray_utils.scan_category(exp_dir, sweep_stale=True)
-                r["_category"] = category
-                r["eligibility"] = xray_utils.eligibility_badge(exp_dir, category)
-                r["selected"] = category == "broken"
-            return _to_exp_table(rows)
-
-        def on_check_submit() -> tuple[list[list[Any]], Any, Any, Any]:
-            """Auto-check the submittable experiments and reveal the Submit buttons."""
+        def _select_rows(category_match: Callable[[str], bool], label: str) -> tuple[list[list[Any]], Any]:
+            """Tick rows whose cached scan category matches. Routes through the
+            same cached `get_experiments_table_rows` as Refresh (status + ghost
+            heartbeat + eligibility, all cached), so it is as fast as a refresh."""
             rows = xray_utils.get_experiments_table_rows(state.results_dir)
             n = 0
             for r in rows:
-                is_submittable = r.get("_category") == "submittable"
-                r["selected"] = is_submittable
-                n += int(is_submittable)
-            msg = (
-                f"📤 Selected **{n}** submittable experiment(s). Review the selection, then "
-                "**Submit → EEE** or **Submit → Registry**."
-                if n
-                else "No submittable experiments found (need a clean, complete run with an experiment record)."
-            )
-            return (
-                _to_exp_table(rows),
-                gr.update(visible=n > 0),
-                gr.update(visible=n > 0),
-                gr.update(value=msg, visible=True),
-            )
+                hit = category_match(r.get("_category", "broken"))
+                r["selected"] = hit
+                n += int(hit)
+            msg = f"🎯 Selected **{n}** {label} experiment(s). Review the ticks, then click the action button."
+            return _to_exp_table(rows), gr.update(value=msg, visible=True)
+
+        def on_pick_archivable() -> tuple[list[list[Any]], Any]:
+            """Auto-tick broken / un-scorable experiments for Archive."""
+            return _select_rows(lambda c: c == "broken", "broken / archivable")
+
+        def on_pick_submittable() -> tuple[list[list[Any]], Any]:
+            """Auto-tick submittable, not-yet-submitted experiments for Submit."""
+            return _select_rows(lambda c: c == "submittable", "submittable")
 
         def _selected_exp_dirs(table: Any) -> list[Path]:
             """Experiment dirs whose checkbox is ticked in the current table value."""
@@ -1494,15 +1509,9 @@ def run_xray(
         exp_table.change(fn=on_experiments_change, inputs=exp_table, outputs=_hierarchy_outputs)
         exp_browse_btn.click(fn=on_browse_dir, outputs=[exp_table, results_dir_md])
         exp_refresh_btn.click(fn=_exp_table_value, outputs=exp_table)
-        exp_gc_btn.click(fn=on_garbage_collect, outputs=exp_table)
-        exp_checksubmit_btn.click(
-            fn=on_check_submit,
-            outputs=[exp_table, exp_submit_eee_btn, exp_submit_registry_btn, exp_action_status],
-        )
-        exp_submit_eee_btn.click(
-            fn=lambda t: on_submit(t, "eee"), inputs=exp_table, outputs=[exp_table, exp_action_status]
-        )
-        exp_submit_registry_btn.click(
+        exp_pick_archivable_btn.click(fn=on_pick_archivable, outputs=[exp_table, exp_action_status])
+        exp_pick_submittable_btn.click(fn=on_pick_submittable, outputs=[exp_table, exp_action_status])
+        exp_submit_btn.click(
             fn=lambda t: on_submit(t, "journal"), inputs=exp_table, outputs=[exp_table, exp_action_status]
         )
         exp_archive_btn.click(fn=on_archive_selected, outputs=[exp_table, *_hierarchy_outputs])
