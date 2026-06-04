@@ -461,12 +461,18 @@ html {
     border-radius: 8px;
     border: 1px solid #e2e8f0;
 }
-/* Tiny, tight prev/next nav buttons hugging the rail. */
+/* Tiny, tight prev/next nav buttons, centred and hugging the rail. */
 #xray_prev_btn, #xray_next_btn {
     min-width: 28px !important;
     max-width: 34px;
     padding: 2px 6px !important;
     flex: 0 0 auto;
+}
+.xray-nav-row {
+    justify-content: center !important;
+    gap: 6px !important;
+    margin-bottom: 2px !important;
+    min-height: 0 !important;
 }
 .compact-header {
     padding: 8px 16px;
@@ -912,17 +918,20 @@ def run_xray(
         return exp_stats, agent_table_data, traj_table_data, progress_html, timer_update, *tab_labels
 
     def navigate_prev() -> StepId:
-        """Select the previous event; reads state.selected from closure so the JS
-        keyboard shortcut button.click() works without losing the gr.State value."""
-        sel = max(0, state.selected - 1)
-        state.selected = sel
-        return StepId(step=sel)
+        """Select the previous logical group (not the previous raw event), so a
+        single press moves a whole step. Reads state.selected from closure so the
+        JS keyboard shortcut button.click() works without losing the gr.State."""
+        if state.current_events is None:
+            return StepId(step=state.selected)
+        state.selected = state.current_events.prev_group_root(state.selected)
+        return StepId(step=state.selected)
 
     def navigate_next() -> StepId:
-        """Select the next event."""
-        sel = min(state.n_events() - 1, state.selected + 1)
-        state.selected = sel
-        return StepId(step=sel)
+        """Select the next logical group."""
+        if state.current_events is None:
+            return StepId(step=state.selected)
+        state.selected = state.current_events.next_group_root(state.selected)
+        return StepId(step=state.selected)
 
     def handle_timeline_click(clicked_index: int | None) -> StepId:
         """Card-rail click: select the clicked event index (clamped)."""
@@ -1306,7 +1315,7 @@ def run_xray(
         # Right: the grouped detail tabs for the selected event's group.
         with gr.Row(equal_height=False):
             with gr.Column(scale=1, min_width=240):
-                with gr.Row():
+                with gr.Row(elem_classes="xray-nav-row"):
                     prev_btn = gr.Button("◀", size="sm", elem_id="xray_prev_btn", min_width=0, scale=0)
                     next_btn = gr.Button("▶", size="sm", elem_id="xray_next_btn", min_width=0, scale=0)
                 timeline_html = gr.HTML(elem_id="xray_rail")
@@ -1525,9 +1534,10 @@ def run_xray(
             hierarchy = _load_and_build_hierarchy()
             return (*hierarchy, gr.Timer(active=state.should_poll()))
 
-        # Two independent demo.load calls: one populates the exp table,
-        # the other pre-loads the first experiment so the viewer is immediately usable.
-        demo.load(fn=_exp_table_value, outputs=exp_table)
+        # Two independent demo.load calls: one populates the exp table with the
+        # first experiment row already checked (so the selection is visible), the
+        # other pre-loads that experiment so the viewer is immediately usable.
+        demo.load(fn=lambda: _exp_table_rows(auto_select_first=True), outputs=exp_table)
         demo.load(fn=_auto_load_first_experiment, outputs=_hierarchy_outputs)
 
     demo.queue()
