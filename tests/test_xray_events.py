@@ -28,7 +28,6 @@ def _tool(event_id: str, parent: str, action_name: str = "click") -> TrajectoryE
         output=ToolCallEvent(
             id=event_id,
             parent_event_id=parent,
-            turn_id=parent,
             action=Action(name=action_name, arguments={"element_id": "btn1"}),
             obs=Observation.from_text(f"after {action_name}"),
         )

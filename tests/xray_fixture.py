@@ -111,7 +111,6 @@ def build_demo_experiment(exp_dir: Path, traj_id: str = DEMO_TRAJ_ID) -> str:
     ev(
         ToolCallEvent(
             parent_event_id="__reset__",
-            turn_id="__reset__",
             obs=_obs("Goal: search for shoes and add them to the cart", "#1e3a8a", "root\n  button 'Search'"),
         ),
         1000.0,
@@ -124,7 +123,6 @@ def build_demo_experiment(exp_dir: Path, traj_id: str = DEMO_TRAJ_ID) -> str:
     ev(
         ToolCallEvent(
             parent_event_id=l1.id,
-            turn_id=l1.id,
             action=Action(name="click", arguments={"element_id": "search"}),
             obs=_obs("search box focused", "#075985", "textbox 'Search' focused"),
         ),
@@ -139,7 +137,6 @@ def build_demo_experiment(exp_dir: Path, traj_id: str = DEMO_TRAJ_ID) -> str:
     ev(l2, 1002.3, 1010.0)
     t2a = ToolCallEvent(
         parent_event_id=l2.id,
-        turn_id=l2.id,
         action=Action(name="type", arguments={"text": "shoes"}),
         obs=_obs("typed 'shoes'", "#047857", "textbox value=shoes"),
     )
@@ -147,7 +144,6 @@ def build_demo_experiment(exp_dir: Path, traj_id: str = DEMO_TRAJ_ID) -> str:
     ev(
         ToolCallEvent(
             parent_event_id=l2.id,
-            turn_id=l2.id,
             action=Action(name="read_page", arguments={}),
             obs=_obs("3 results for shoes", "#047857", "list\n  3 results"),
         ),
@@ -168,7 +164,6 @@ def build_demo_experiment(exp_dir: Path, traj_id: str = DEMO_TRAJ_ID) -> str:
     ev(
         ToolCallEvent(
             parent_event_id=l3.id,
-            turn_id=l3.id,
             action=Action(name="final_step", arguments={}),
             obs=_obs("added to cart — task complete", "#065f46", "button 'Checkout'"),
         ),

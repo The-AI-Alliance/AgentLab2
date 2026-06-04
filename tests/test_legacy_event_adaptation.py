@@ -107,9 +107,7 @@ def test_old_agent_event_format_loads(tmp_path: Path) -> None:
     events.mkdir(parents=True, exist_ok=True)
 
     # 000 reset observation (valid ToolCallEvent)
-    reset = TrajectoryEvent(
-        output=ToolCallEvent(parent_event_id="__reset__", turn_id="__reset__", obs=Observation.from_text("goal"))
-    )
+    reset = TrajectoryEvent(output=ToolCallEvent(parent_event_id="__reset__", obs=Observation.from_text("goal")))
     (events / "000_tool_call.msgpack.zst").write_bytes(_serialize_event(reset))
     # 001 old batched AgentEvent — _type refers to a class that no longer exists
     agent_payload = {
@@ -127,9 +125,7 @@ def test_old_agent_event_format_loads(tmp_path: Path) -> None:
     }
     _write_event_bytes(events / "001_agent.msgpack.zst", agent_payload)
     # 002 result observation, parented on the agent event id
-    obs = TrajectoryEvent(
-        output=ToolCallEvent(parent_event_id="agent-1", turn_id="agent-1", obs=Observation.from_text("done"))
-    )
+    obs = TrajectoryEvent(output=ToolCallEvent(parent_event_id="agent-1", obs=Observation.from_text("done")))
     (events / "002_tool_call.msgpack.zst").write_bytes(_serialize_event(obs))
 
     ep = EpisodeEvents.from_view(storage.load_episode(traj_id))
