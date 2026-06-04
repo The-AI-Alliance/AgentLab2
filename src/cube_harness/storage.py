@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import msgpack
 import zstandard
-from cube.core import EnvironmentOutput
+from cube.core import Action, EnvironmentOutput
 from pydantic import BaseModel
 
 from cube_harness.core import (
@@ -28,6 +28,7 @@ from cube_harness.core import (
 from cube_harness.episode_logs import get_log_path as get_episode_log_path
 from cube_harness.episode_logs import trajectory_log_id
 from cube_harness.episode_status import STATUS_FILENAME, EpisodeStatus
+from cube_harness.llm import LLMCall
 
 if TYPE_CHECKING:
     from cube_harness.episode import EpisodeConfig
@@ -266,6 +267,10 @@ class TrajectoryView:
         self._meta = meta
         self._index = index
         self._cache: dict[int, TrajectoryEvent] = {}
+        # Legacy-only: act-step num -> file path, so a synthesized observation
+        # ToolCallEvent can recover the action from its producing `_act` step.
+        self._legacy_act_paths = {e.num: e.path for e in index if e.legacy and e.kind == "agent"}
+        self._legacy_act_action_cache: dict[int, Action | None] = {}
 
     # --- Metadata shortcuts. The accessors below mirror the legacy
     # `Trajectory.<field>` API so existing call sites that did
@@ -387,28 +392,28 @@ class TrajectoryView:
         if entry.legacy:
             step_data = _deserialize_step(entry.path.read_bytes())
             step = TrajectoryStep.model_validate(step_data)
-            return self._step_to_event(step, entry)
+            return self._step_to_event(step, entry, step_data)
         data = _deserialize_event(entry.path.read_bytes())
         return TrajectoryEvent.model_validate(data)
 
-    @staticmethod
-    def _step_to_event(step: TrajectoryStep, entry: _EventIndexEntry) -> TrajectoryEvent:
+    def _step_to_event(self, step: TrajectoryStep, entry: _EventIndexEntry, step_data: dict) -> TrajectoryEvent:
         """Synthesize a TrajectoryEvent from a legacy step file.
 
-        Used by V2-steps and V1-jsonl layouts. Parent / turn ids are
-        derived from the step number (deterministic, so siblings line
-        up across decodes).
+        Used by V2-steps and V1-jsonl layouts. Parent / turn ids are derived
+        from the step number (deterministic, so siblings line up across
+        decodes). The validated `step` has lost the legacy `llm_calls` /
+        `actions` (AgentOutput was shrunk to `actions + error`), so those are
+        recovered from the raw `step_data` dict and reattached — otherwise XRay
+        renders empty cards for every legacy trajectory.
         """
         if isinstance(step.output, AgentOutput):
-            # Legacy V1/V2-steps: synthesize an LLMCallEvent placeholder
-            # so legacy episodes still produce a turn-id-able event for
-            # ToolCallEvents to reference. The on-disk step doesn't
-            # carry an LLMCall in the new shape (auto-recorder shrank
-            # AgentOutput to just `actions + error`); we emit a
-            # call-less event with a deterministic id.
+            # `_act` step → LLMCallEvent carrying the legacy LLM call so the
+            # chat / token panels render. Multi-call steps (e.g. Genny's
+            # summary+act) surface their action-producing call; see
+            # `_legacy_primary_call`.
             llm_event = LLMCallEvent(
                 id=_legacy_agent_id(entry.num),
-                call=None,
+                call=_legacy_primary_call(step_data),
                 error=step.output.error,
             )
             return TrajectoryEvent(output=llm_event, start_time=step.start_time, end_time=step.end_time)
@@ -416,19 +421,56 @@ class TrajectoryView:
             parent_id = (
                 _legacy_agent_id(entry.legacy_parent_num) if entry.legacy_parent_num is not None else "__reset__"
             )
-            # ToolCallEvent's fields are (id, parent_event_id, action_id,
-            # obs, error) — extract obs + error from the legacy
-            # EnvironmentOutput. The old `output=step.output` form was
-            # dropped silently by pydantic's extra="ignore" (default on
-            # TypedBaseModel), zeroing every legacy ToolCallEvent's
-            # observation on read.
+            # `_obs` step → ToolCallEvent. The action lives on the producing
+            # `_act` step, so recover it from there (cached) to populate the
+            # card subtitle and action panel. (turn_id was dropped upstream in
+            # the agent-owns-loop event model; obs + error come from the legacy
+            # EnvironmentOutput.)
+            action = self._legacy_act_action(entry.legacy_parent_num) if entry.legacy_parent_num is not None else None
             tool_event = ToolCallEvent(
                 parent_event_id=parent_id,
+                action=action,
+                action_id=action.id if action is not None else None,
                 obs=step.output.obs,
                 error=step.output.error,
             )
             return TrajectoryEvent(output=tool_event, start_time=step.start_time, end_time=step.end_time)
         raise TypeError(f"Unexpected legacy step output type: {type(step.output).__name__}")
+
+    def _legacy_act_action(self, act_num: int) -> Action | None:
+        """First action of the legacy `_act` step `act_num` (cached).
+
+        Lets a synthesized observation ToolCallEvent show the action that
+        produced it. Returns None if the step is missing or unparseable."""
+        if act_num not in self._legacy_act_action_cache:
+            action: Action | None = None
+            path = self._legacy_act_paths.get(act_num)
+            if path is not None:
+                try:
+                    data = _deserialize_step(path.read_bytes())
+                    actions = (data.get("output") or {}).get("actions") or []
+                    if actions:
+                        action = Action.model_validate(actions[0])
+                except Exception:
+                    action = None
+            self._legacy_act_action_cache[act_num] = action
+        return self._legacy_act_action_cache[act_num]
+
+
+def _legacy_primary_call(step_data: dict) -> LLMCall | None:
+    """Recover an `LLMCall` from a legacy `_act` step's raw `llm_calls`.
+
+    Prefers the action-producing call (tag `act`) over auxiliary calls
+    (e.g. Genny's rolling `summary`); falls back to the last call. Returns
+    None when the step carried no LLM call or the payload won't parse."""
+    calls = (step_data.get("output") or {}).get("llm_calls") or []
+    if not calls:
+        return None
+    raw = next((c for c in calls if c.get("tag") == "act"), calls[-1])
+    try:
+        return LLMCall.model_validate(raw)
+    except Exception:
+        return None
 
 
 def _legacy_agent_id(num: int) -> str:
@@ -883,7 +925,7 @@ class FileStorage:
         # dict on the storage (one-shot for this view).
         view = TrajectoryView(self, trajectory_id, meta, [])
         if steps_path.exists():
-            v1_steps: list[TrajectoryStep] = []
+            v1_steps: list[tuple[TrajectoryStep, dict]] = []
             with open(steps_path) as f:
                 for i, line in enumerate(f):
                     if line.strip():
@@ -891,9 +933,9 @@ class FileStorage:
                         step_data = self._v1_resolve_llm_call_refs(step_data, trajectory_id, i)
                         if "output" not in step_data and ("obs" in step_data or "actions" in step_data):
                             step_data = {"output": step_data}
-                        v1_steps.append(TrajectoryStep.model_validate(step_data))
+                        v1_steps.append((TrajectoryStep.model_validate(step_data), step_data))
             last_agent_num: int | None = None
-            for i, step in enumerate(v1_steps):
+            for i, (step, raw) in enumerate(v1_steps):
                 if isinstance(step.output, AgentOutput):
                     entry = _EventIndexEntry(num=i, kind="agent", path=steps_path, legacy=True)
                     last_agent_num = i
@@ -908,8 +950,10 @@ class FileStorage:
                 else:
                     continue
                 view._index.append(entry)
-                # Pre-populate the cache since V1 has no per-event files.
-                view._cache[len(view._index) - 1] = TrajectoryView._step_to_event(step, entry)
+                # Pre-populate the cache since V1 has no per-event files. The raw
+                # dict still carries llm_calls/actions, so the LLM call survives;
+                # V1 obs actions stay None (act entries aren't in the path map).
+                view._cache[len(view._index) - 1] = view._step_to_event(step, entry, raw)
         return view
 
     def list_episodes(self) -> list[TrajectoryMetadata]:
