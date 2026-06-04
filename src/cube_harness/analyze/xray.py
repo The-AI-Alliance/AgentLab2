@@ -924,33 +924,39 @@ def run_xray(
         return xray_utils.render_event_rail_html(state.current_events, state.selected)
 
     def update_trajectory_stats() -> str:
+        """Structured, multi-line stats block for the header's left column."""
         if not state.current_trajectory:
             return ""
         stats = xray_utils.compute_trajectory_stats(state.current_trajectory)
-
-        parts: list[str] = []
-        if stats["duration"] is not None:
-            parts.append(f"⏱️ **{xray_utils.format_duration(stats['duration'])}**")
-
         prompt_tokens = int(stats["prompt_tokens"])
         completion_tokens = int(stats["completion_tokens"])
         cached_tokens = int(stats["cached_tokens"])
         cache_creation_tokens = int(stats["cache_creation_tokens"])
         cost = float(stats["cost"])
 
-        if prompt_tokens > 0:
-            parts.append(f"📊 prompt: **{prompt_tokens:,}**")
-            parts.append(f"completion: **{completion_tokens:,}**")
-            parts.append(f"total: **{prompt_tokens + completion_tokens:,}**")
-            if cached_tokens > 0:
-                cache_pct = cached_tokens / prompt_tokens * 100
-                parts.append(f"cached: **{cached_tokens:,}** ({cache_pct:.0f}%)")
-            if cache_creation_tokens > 0:
-                parts.append(f"cache_created: **{cache_creation_tokens:,}**")
+        lines: list[str] = []
+        top = []
+        if stats["duration"] is not None:
+            top.append(f"⏱️ **{xray_utils.format_duration(stats['duration'])}**")
         if cost > 0:
-            parts.append(f"💰 **${cost:.4f}**")
+            top.append(f"💰 **${cost:.4f}**")
+        if top:
+            lines.append(" &nbsp;&nbsp;&nbsp; ".join(top))
 
-        return " │ ".join(parts)
+        if prompt_tokens > 0:
+            total = prompt_tokens + completion_tokens
+            lines.append(
+                f"📥 prompt **{prompt_tokens:,}** &nbsp; 📤 completion **{completion_tokens:,}** &nbsp; Σ **{total:,}**"
+            )
+            cache_bits = []
+            if cached_tokens > 0:
+                cache_bits.append(f"⚡ cached **{cached_tokens:,}** ({cached_tokens / prompt_tokens * 100:.0f}%)")
+            if cache_creation_tokens > 0:
+                cache_bits.append(f"cache_created **{cache_creation_tokens:,}**")
+            if cache_bits:
+                lines.append(" &nbsp; ".join(cache_bits))
+
+        return "<br>".join(lines)
 
     def get_task_goal() -> str:
         """Return the task goal as a rendered HTML panel."""
@@ -1247,19 +1253,18 @@ def run_xray(
         # Starts inactive; activated on experiment select; deactivates when experiment is complete.
         bg_timer = gr.Timer(value=1.0, active=False)
 
-        with gr.Row(variant="panel", elem_classes="compact-header"):
-            with gr.Column(scale=1, min_width=200):
+        # Header: episode identity + structured stats on the left, the task
+        # goal beside it on the right (instead of two stacked full-width bars).
+        with gr.Row(equal_height=False):
+            with gr.Column(scale=2, min_width=300, variant="panel", elem_classes="compact-header"):
                 header_info = gr.Markdown("**Select a trajectory**")
-            with gr.Column(scale=3):
                 stats_display = gr.Markdown("")
+            with gr.Column(scale=3):
+                task_goal_md = gr.HTML(value="")
 
         # Hidden Number the card rail writes its clicked event index into.
         with gr.Row(visible=True, elem_id="timeline_click_input"):
             timeline_click_input = gr.Number(show_label=False, container=False)
-
-        # Always-visible task goal (stable per episode).
-        with gr.Row():
-            task_goal_md = gr.HTML(value="")
 
         # Left: the vertical event-card rail (navigation + profiler).
         # Right: the grouped detail tabs for the selected event's group.
