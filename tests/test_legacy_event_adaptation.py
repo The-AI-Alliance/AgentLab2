@@ -80,9 +80,61 @@ def test_legacy_llm_call_and_action_survive_adaptation(tmp_path: Path) -> None:
 
     # The card titles reflect the recovered data (not the placeholder "LLM call").
     cards = ep.cards()
-    assert cards[1].title == "act"
+    assert cards[1].title == "LLM call · act"
     assert cards[2].title == "bash"
 
     # And the whole step groups together: select the obs -> see the LLM call.
     group = ep.group_for(2)
     assert group.llm_index == 1 and group.observation_indices == [2]
+
+
+def _write_event_bytes(path: Path, payload: dict) -> None:
+    path.write_bytes(zstandard.ZstdCompressor().compress(msgpack.packb(payload, use_bin_type=True)))
+
+
+def test_old_agent_event_format_loads(tmp_path: Path) -> None:
+    """An events/ episode using the pre-rename batched `AgentEvent` (whose
+    `_type` points at a removed class) must still load: the loader synthesizes
+    an LLMCallEvent from its llm_calls instead of crashing the whole view."""
+    from cube_harness.core import ToolCallEvent, TrajectoryEvent
+    from cube_harness.storage import EVENTS_DIR, _serialize_event
+
+    exp = tmp_path / "exp"
+    storage = FileStorage(exp)
+    traj_id = "agentfmt_task_ep0"
+    storage.save_metadata(TrajectoryMetadata(id=traj_id, metadata={"task_id": "t", "agent_name": "Old"}))
+    events = storage._episode_dir(traj_id) / EVENTS_DIR
+    events.mkdir(parents=True, exist_ok=True)
+
+    # 000 reset observation (valid ToolCallEvent)
+    reset = TrajectoryEvent(
+        output=ToolCallEvent(parent_event_id="__reset__", turn_id="__reset__", obs=Observation.from_text("goal"))
+    )
+    (events / "000_tool_call.msgpack.zst").write_bytes(_serialize_event(reset))
+    # 001 old batched AgentEvent — _type refers to a class that no longer exists
+    agent_payload = {
+        "_type": "cube_harness.core.TrajectoryEvent",
+        "start_time": 0.1,
+        "end_time": 1.0,
+        "output": {
+            "_type": "cube_harness.core.AgentEvent",
+            "id": "agent-1",
+            "llm_calls": [_legacy_llm_call().model_dump(mode="json")],
+            "actions": [Action(name="bash", arguments={"command": "ls"}).model_dump(mode="json")],
+            "thoughts": "",
+            "error": None,
+        },
+    }
+    _write_event_bytes(events / "001_agent.msgpack.zst", agent_payload)
+    # 002 result observation, parented on the agent event id
+    obs = TrajectoryEvent(
+        output=ToolCallEvent(parent_event_id="agent-1", turn_id="agent-1", obs=Observation.from_text("done"))
+    )
+    (events / "002_tool_call.msgpack.zst").write_bytes(_serialize_event(obs))
+
+    ep = EpisodeEvents.from_view(storage.load_episode(traj_id))
+    assert len(ep) == 3
+    call = ep.llm_call(1)
+    assert call is not None and call.tag == "act"  # AgentEvent's llm_call survived
+    # The result observation groups under the synthesized LLM call (shared id).
+    assert ep.group_for(2).llm_index == 1
