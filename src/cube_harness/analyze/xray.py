@@ -489,10 +489,9 @@ html {
     padding: 2px 8px !important;
     flex: 0 0 auto;
 }
-#exp_refresh_btn {
-    margin-left: 10px !important;
-}
-#exp_archive_btn, #exp_submit_btn {
+/* On row 2 (Archive-pair · Submit-pair), only Submit needs a left margin to
+   separate the two split-buttons; Archive is first. */
+#exp_submit_btn {
     margin-left: 18px !important;
 }
 #exp_archive_btn button, #exp_submit_btn button {
@@ -1270,15 +1269,17 @@ def run_xray(
                     elem_classes="help-content",
                 )
             with gr.Tab("Experiments", id="experiments_tab"):
-                # Single toolbar row. Each action (Archive / Submit) has a small
-                # attached 🤖✓ auto-select button that ticks the rows it applies to;
-                # the user reviews the selection, then clicks the action. Tooltips
-                # (set in _INIT_JS) describe each button.
-                with gr.Row(elem_classes="xray-exp-toolbar"):
+                # Row 1: directory controls. Row 2: the two actions, each with an
+                # attached 🤖✓ auto-select button (split-button) that ticks the rows
+                # it applies to; the user reviews, then clicks the action. Tooltips
+                # are set in _INIT_JS.
+                with gr.Row():
                     exp_browse_btn = gr.Button(
                         "📁 Browse…", scale=0, size="sm", variant="secondary", elem_id="exp_browse_btn"
                     )
+                    results_dir_md = gr.Markdown(f"📂 `{state.results_dir}`")
                     exp_refresh_btn = gr.Button("↺", scale=0, size="sm", elem_id="exp_refresh_btn", min_width=0)
+                with gr.Row(elem_classes="xray-exp-toolbar"):
                     exp_archive_btn = gr.Button(
                         "🗃 Archive", scale=0, size="sm", variant="secondary", elem_id="exp_archive_btn"
                     )
@@ -1291,7 +1292,6 @@ def run_xray(
                     exp_pick_submittable_btn = gr.Button(
                         "🤖✓", scale=0, size="sm", elem_id="exp_pick_submittable_btn", min_width=0
                     )
-                results_dir_md = gr.Markdown(f"📂 `{state.results_dir}`")
                 exp_action_status = gr.Markdown("", visible=False)
                 exp_table = gr.DataFrame(
                     headers=[
