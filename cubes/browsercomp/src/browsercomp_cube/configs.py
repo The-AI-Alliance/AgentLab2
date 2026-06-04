@@ -1,19 +1,15 @@
 """Canonical BrowseComp benchmark configs.
 
-    from browsercomp_cube import BROWSECOMP_CONFIGS
-    benchmark = BROWSECOMP_CONFIGS["default"]
+    from browsercomp_cube import BrowseCompBenchmarkConfig
+    benchmark = BrowseCompBenchmarkConfig(scorer_model="openai/gpt-4o")
 
-The cube's intrinsic tool is answer submission; richer browsing tools are a
-recipe-side concern (clone the recipe and extend the ToolboxConfig).
+``scorer_model`` is required — the judge model used to grade answers — and has no
+sensible default, so the cube ships no pre-built default config. The cube's
+intrinsic tool is answer submission; richer browsing tools are a recipe-side
+concern (clone the recipe and extend the ToolboxConfig).
 """
 
 from cube.core import ConfigRegistry
-from cube.tool import ToolboxConfig
 from browsercomp_cube.benchmark import BrowseCompBenchmarkConfig
-from browsercomp_cube.tool import SubmitAnswerToolConfig
 
-BROWSECOMP_CONFIGS: ConfigRegistry[BrowseCompBenchmarkConfig] = ConfigRegistry(
-    {
-        "default": BrowseCompBenchmarkConfig(tool_config=ToolboxConfig(tool_configs=[SubmitAnswerToolConfig()])),
-    }
-)
+BROWSECOMP_CONFIGS: ConfigRegistry[BrowseCompBenchmarkConfig] = ConfigRegistry({})
