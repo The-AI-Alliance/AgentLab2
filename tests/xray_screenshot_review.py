@@ -32,16 +32,18 @@ from playwright.sync_api import Browser, Page, sync_playwright
 # Allow running from repo root or tests/
 _HERE = Path(__file__).parent
 _REPO = _HERE.parent
-sys.path.insert(0, str(_HERE))
 sys.path.insert(0, str(_REPO))
 
 from tests.xray_fixture import build_demo_experiment  # noqa: E402
 from tests.xray_test_helpers import EXTENDED_SCENARIOS, build_experiment, free_port, wait_for_server  # noqa: E402
 
 OUT_DIR = Path("/tmp/xray_screenshots")
-# Use the worktree venv directly — never uv run (it re-syncs and clobbers the
-# editable cube-standard install).
-_PYTHON = str(_REPO / ".venv" / "bin" / "python")
+# Use the worktree venv directly — never `uv run` (it re-syncs and clobbers the
+# editable cube-standard install). Requires `make install` to have been run.
+_VENV_PYTHON = _REPO / ".venv" / "bin" / "python"
+if not _VENV_PYTHON.exists():
+    sys.exit(f"ERROR: venv not found at {_VENV_PYTHON}. Run `make install` first.")
+_PYTHON = str(_VENV_PYTHON)
 
 
 # ---------------------------------------------------------------------------

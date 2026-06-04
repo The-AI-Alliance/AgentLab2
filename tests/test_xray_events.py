@@ -126,7 +126,7 @@ def test_grouping_is_order_independent() -> None:
     assert ep.accompanying_indices(0) == [1]
 
 
-def test_self_referential_parent_does_not_recurse() -> None:
+def test_self_referential_parent_forms_own_group() -> None:
     # A malformed self-parent link must not blow the recursion stack.
     ep = xe.EpisodeEvents([_tool("x", "x")])
     assert ep.group_for(0).members == [0]
