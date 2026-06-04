@@ -806,3 +806,11 @@ class TestEligibility:
         submissions.record_submitted(tmp_path, "eee", evaluation_id="b", schema_version="0.2")
         badge = xray_utils.eligibility_badge(tmp_path, "submittable")
         assert "registry" in badge and "eee" in badge
+
+
+def test_rejected_state_shows_rejected_badge(tmp_path: Path) -> None:
+    from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+    submissions.record_rejected(tmp_path, "journal", reason="broken: 58/279 episodes errored")
+    badge = xray_utils.eligibility_badge(tmp_path, "already_submitted")
+    assert "🚫 rejected" in badge and "58/279" in badge

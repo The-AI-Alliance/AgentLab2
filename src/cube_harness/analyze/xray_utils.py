@@ -599,13 +599,19 @@ def scan_category(exp_dir: Path, *, sweep_stale: bool = False) -> str:
 
 
 def eligibility_badge(exp_dir: Path, category: str) -> str:
-    """Badge for the eligibility column: a ✅ submission state (read fresh, cheap)
-    takes precedence over the cached scan `category`."""
+    """Badge for the eligibility column. The persisted submission state (read
+    fresh, cheap) takes precedence over the cached scan `category`: a successful
+    submission shows ✅; a recorded rejection shows 🚫 rejected (with its reason),
+    so a previously-rejected/broken run is never mistaken for a success."""
     subs = submissions.read(exp_dir)
     submitted = [d for d in ("journal", "eee") if subs.get(d, {}).get("status") == "submitted"]
     if submitted:
         names = " + ".join({"journal": "registry", "eee": "eee"}[d] for d in submitted)
         return f"<span title='Submitted to {names}'>✅ {names}</span>"
+    rejected = next((subs[d] for d in ("journal", "eee") if subs.get(d, {}).get("status") == "rejected"), None)
+    if rejected is not None:
+        reason = html_lib.escape(rejected.get("reason", "previously rejected"))
+        return f"<span title='{reason}'>🚫 rejected</span>"
     return _ELIGIBILITY_BADGES.get(category, f"<span>{html_lib.escape(category)}</span>")
 
 
