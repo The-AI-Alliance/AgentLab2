@@ -53,7 +53,7 @@ load-upgrade path but is not exported from `cube_harness.core`.
 ```python
 # In cube_harness.core
 class LLMCallEvent(TypedBaseModel):
-    id: str                            # turn_id for child ToolCallEvents
+    id: str                            # parent_event_id for child ToolCallEvents (groups parallel siblings)
     call: LLMCall | None               # full prompt/response/usage (None on legacy decode only)
     profiling: dict[str, tuple[float, float]]
     metadata: dict                     # free-form bag — producers attach sink-specific data
@@ -63,22 +63,22 @@ class LLMCallEvent(TypedBaseModel):
 
 class ToolCallEvent(TypedBaseModel):
     id: str                            # for step-wise EvaluationEvent.parent_event_id back-ref
-    parent_event_id: str               # parent LLMCallEvent.id (or RESET sentinel)
+    parent_event_id: str               # parent LLMCallEvent.id (or RESET sentinel); shared by parallel siblings
     action_id: str | None              # echoes Action.id
     action: Action | None              # full action payload — self-contained trajectory
     obs: Observation                   # what came back to the agent (empty when error)
     error: StepError | None            # set when execute_action returned a StepError
-    turn_id: str                       # groups parallel siblings
 
 class EvaluationEvent(TypedBaseModel):
     reward: float
     info: dict
     is_terminal: bool
-    parent_event_id: str | None        # ToolCallEvent.id for step-wise; None for terminal
+    parent_event_id: str | None        # ToolCallEvent.id for step-wise; for terminal, id of the most recent ToolCallEvent
 
 class AgentErrorEvent(TypedBaseModel):
     id: str
     error: StepError                   # Episode-level failure not tied to a call
+    parent_event_id: str | None        # id of the most recent LLMCallEvent (or last ToolCallEvent if none), or None
 
 class TrajectoryEvent(TypedBaseModel):
     output: LLMCallEvent | ToolCallEvent | EvaluationEvent | AgentErrorEvent
@@ -116,7 +116,9 @@ class TrajectoryView:
     def __getitem__(self, i: int) -> TrajectoryEvent
     def __iter__(self) -> Iterator[TrajectoryEvent]
     def iter_events(self) -> Iterator[TrajectoryEvent]   # alias for __iter__
-    def events_of_turn(self, turn_id: str) -> list[TrajectoryEvent]
+    # tool calls of one turn are queried directly from parent_event_id:
+    # [e for e in view if isinstance(e.output, ToolCallEvent)
+    #                  and e.output.parent_event_id == target_id]
     @property
     def summary_stats(self) -> dict | None
     @property
@@ -142,8 +144,9 @@ class TrajectoryView:
    when `task.validate_per_step=True`) AND once terminal (`is_terminal=True`,
    emitted by Episode in `finally`).
 4. `LLMCallEvent.id` is unique within a trajectory.
-5. `turn_id` equals the parent `LLMCallEvent.id`; all `ToolCallEvent`s
-   spawned from one LLM turn share that `turn_id`.
+5. All `ToolCallEvent`s spawned from one LLM turn share the same
+   `parent_event_id` (= the originating `LLMCallEvent.id`); that is how
+   parallel siblings are grouped.
 6. `TrajectoryView` never accumulates the full event list in memory; the
    per-view cache is bounded by accessed events and is freed when the
    view is GC'd.
@@ -221,25 +224,39 @@ agent/env boundary explicit: this is the tool that drives the
 **monitored environment**, distinct from any agent-private tools
 (memory, scratchpad) the agent holds on `self`.
 
-Default implementation in the base class:
+Default implementation in the base class: `Agent.run` is a thin
+dispatcher that calls `_run` or `_arun` based on
+`AgentConfig.parallel_actions: bool = False`.
+
+- `_run(initial_obs, env_tool)` — sync body, sequential action
+  dispatch, no `await`. Used for the default case.
+- `_arun(initial_obs, env_tool)` — async body; dispatches N actions
+  per turn via `asyncio.gather(*(env_tool.async_execute_action(a) for a in actions))`.
+- `_merge_results(results)` — static method on `Agent` that combines
+  multiple `Observation | StepError` returns into the next obs;
+  subclasses override.
+
+Both bodies follow the same shape:
 
 1. `obs = initial_obs`
 2. Loop:
-   1. `agent_output = await asyncio.to_thread(self.step, obs)`.
-      LLM calls inside `step()` auto-emit `LLMCallEvent` via the
-      attached recorder; the agent does NOT bundle them.
+   1. `agent_output = self.step(obs)`. LLM calls inside `step()`
+      auto-emit `LLMCallEvent` via the attached recorder; the agent
+      does NOT bundle them.
    2. If `not agent_output.actions and not agent_output.error`: return.
-   3. For each action: `result = await env_tool.execute_action(action)`.
-      May raise `TaskDone` (graceful, includes STOP_ACTION /
-      `task.finished()` true) or `BudgetExceeded` — both propagate to
-      `Episode`.
-   4. If `result` is `StepError`: return.
-   5. `obs = result`.
+   3. Dispatch actions (sequential in `_run`, parallel via
+      `asyncio.gather` in `_arun`). May raise `TaskDone` (graceful,
+      includes STOP_ACTION / `task.finished()` true) or
+      `BudgetExceeded` — both propagate to `Episode`.
+   4. If any result is `StepError`: return.
+   5. `obs = self._merge_results(results)` (or `results[0]` for the
+      sequential case).
 
 Agents that want parallel tool calls override `run` and dispatch
 N actions via `asyncio.gather(*(env_tool.execute_action(a) for a in actions))`.
-The async-uniform shape means parallel-dispatch agents (e.g.
-`GennyParallel`) don't need their own sync-vs-async branch either.
+The async-uniform shape means parallel-dispatch agents (e.g. `Genny`
+with `parallel_actions=True`) don't need their own sync-vs-async
+branch either.
 
 ### `EventStreamer`
 
@@ -275,7 +292,7 @@ class EventStreamer:
         error: StepError | None = None,
     ) -> str                                       # returns event id (also new current_parent_event_id)
 
-    # Bump `budget.turns` and enforce; called by Agent.run per step.
+    # Bump `budget.agent_steps` and enforce; called by Agent.run per step.
     def on_step(self) -> None
 
     # Episode-only boundary helpers:
@@ -346,11 +363,14 @@ auto-emit hook is the same path for native and connector use.
 - `BudgetExceeded` (`BaseException` subclass) raised out of any monitored
   tool call should propagate. Catching it is forbidden by convention.
 - Done detection comes from `EnvironmentOutput.done` (returned by
-  `task.astep`) or from the agent's own logic — `MonitoredTool` does not
+  `task.step`) or from the agent's own logic — `MonitoredTool` does not
   raise on done.
 - Agents must not capture `task` or `recorder` references that outlive
-  `run()`. Conventionally they call only `task.astep`, `task.toolbox.*`,
-  and `task.aevaluate`; not `reset` / `close` (Episode's).
+  `run()`. Conventionally they call only `task.step`, `task.toolbox.*`,
+  and `task.evaluate`; not `reset` / `close` (Episode's). (An async
+  `task.step` variant is out of scope for this PR — agent authors who
+  need async LLM override `_arun` and use whatever they want; a
+  follow-up RFC may add a first-class async step.)
 - Agents do not read budget or trajectory state. Those concerns belong to
   monitored tools (which raise) and `Episode` (which finalizes).
 
@@ -368,13 +388,13 @@ auto-emit hook is the same path for native and connector use.
 
 ### Contracts for implementers
 
-- For parallel tool calls in an overridden `run`:
-  `await asyncio.gather(*(task.toolbox.execute_action(a) for a in actions))`.
+- For parallel tool calls in an overridden `_arun`:
+  `await asyncio.gather(*(task.toolbox.async_execute_action(a) for a in actions))`.
   Each returns `Observation | StepError`. Monitoring happens inside each
   `MonitoredTool.execute_action`.
 - For early termination from inside the agent: return from `run` (don't raise).
 - For "the env said done" in gym-style: check
-  `env_output.done` after each `task.astep` and return.
+  `env_output.done` after each `task.step` and return.
 - For streaming agents: use `recorder.begin_turn() as turn:` and call
   `turn.add_*` as data arrives. Avoid the coarse `record(output)` for
   streaming use cases — it loses the partial-emit advantage.
@@ -389,15 +409,18 @@ single class: `MonitoredTool`.
 
 ### `MonitoredTool`
 
-`MonitoredTool` subclasses `cube.tool.AsyncTool` and has the **same**
-`execute_action` signature. It is a transparent decorator — mixable in a
-`Toolbox` alongside unmonitored tools. Agents call it identically.
+`MonitoredTool` is a single class with a **dual API**
+(`execute_action` sync + `async_execute_action` async). It collapses
+what an earlier draft split across `MonitoredTool(AbstractTool)` +
+`AsyncMonitoredTool(AbstractAsyncTool)` (plus the `_SyncToolAsAsync`
+shim). It is a transparent decorator — mixable in an `AsyncToolbox`
+alongside unmonitored sync or async tools. Agents call it identically.
 
 ```python
-class MonitoredTool(AsyncTool):
+class MonitoredTool:
     def __init__(
         self,
-        inner: Tool | AsyncTool,
+        inner: AbstractTool | AbstractAsyncTool,
         emit: Callable[[TrajectoryEvent], str],   # streamer.emit
         budget: Budget,
         parent_event_id_getter: Callable[[], str] | None = None,
@@ -408,25 +431,31 @@ class MonitoredTool(AsyncTool):
     def action_set(self) -> list[ActionSchema]
     # Delegates to inner.action_set — transparent.
 
-    async def execute_action(self, action: Action) -> Observation | StepError
+    def execute_action(self, action: Action) -> Observation | StepError
+    # Sync path; sync inner only. Raises TypeError if inner is async.
     # 1. If self.budget.exhausted: raise BudgetExceeded(action=action).
-    # 2. Invoke inner.execute_action(action) — await directly when inner is
-    #    AsyncTool, asyncio.to_thread when sync.
+    # 2. Invoke inner.execute_action(action) directly.
     # 3. Append a ToolCallEvent (with the action and result) to trajectory;
     #    storage.save_event; summary.on_event; budget.tool_calls += 1.
     # 4. Return result (Observation | StepError) unchanged.
+
+    async def async_execute_action(self, action: Action) -> Observation | StepError
+    # Async path; handles both inner kinds.
+    # 1. Budget check as above.
+    # 2. Invoke inner: `await inner.async_execute_action(action)` for async
+    #    inner, `await asyncio.to_thread(inner.execute_action, action)` for sync.
+    # 3+4. Emit + return as above.
 
 class BudgetExceeded(BaseException):
     action: Action                       # the call that pushed over budget
 ```
 
-`MonitoredToolbox` is a `Toolbox` whose member tools are each wrapped in
-`MonitoredTool`. Since `Toolbox` is-a `Tool`, the wrapping is
-straightforward and recursive: a toolbox may contain monitored tools,
-unmonitored tools, and nested toolboxes. Dispatch by action name routes
-each call to the right member, monitored or not. There is no separate
-`MonitoredToolbox` class — `Toolbox(members=[MonitoredTool(inner=t1), t2, ...])`
-is sufficient.
+No new harness-side toolbox container is added. `cube.tool.AsyncToolbox`
+was relaxed (cube-standard PR #152, merged to `dev` as `3e59fd14`) to
+accept mixed sync + async leaves, so
+`AsyncToolbox(members=[MonitoredTool(inner=t1), t2, ...])` covers all
+cases. Dispatch by action name routes each call to the right member,
+monitored or not.
 
 ### Contract
 
@@ -478,7 +507,7 @@ behavior override it.
 async def run(self) -> Trajectory:
     task = self.task_config.make(runtime_context=..., container_backend=...)
     trajectory = Trajectory(id=..., events=[])
-    budget = Budget(max_turns=self.max_steps, ...)
+    budget = Budget(max_agent_steps=self.max_steps, ...)   # Budget lives in cube_harness.budget; re-export shim in tool.py
 
     # Wrap each member of task.toolbox with MonitoredTool, sharing trajectory + budget.
     # task.toolbox is mutated in place so task.step also goes through monitored wrappers.
@@ -514,8 +543,9 @@ trajectory event stream is the harness's structured observability.
 
 The `trajectory` lives on `Episode`. The agent receives `task` and
 `recorder` — the monitoring wrappers are already installed onto
-`task.toolbox`, so any path through tools (gym-style `task.astep` or
-tool-level `task.toolbox.execute_action`) emits monitoring uniformly.
+`task.toolbox`, so any path through tools (gym-style `task.step` or
+tool-level `task.toolbox.execute_action` /
+`task.toolbox.async_execute_action`) emits monitoring uniformly.
 
 `EventStreamer` exposes Episode-only helpers (`record_reset`,
 `record_failure`, `record_evaluation`) on the same object as the agent-facing
@@ -532,8 +562,8 @@ disk survive any agent misbehavior.
 1. Final finalization (record_evaluation, storage.finalize, summary, task.close)
    runs even if `agent.run` raises an arbitrary exception. (replaces old #1, #2, #3)
 2. The agent receives `task` (with monitoring already installed on its
-   toolbox) and `recorder`. The agent uses `task.astep`, `task.toolbox.*`,
-   or `task.aevaluate` for tool / step / eval calls — all routed through
+   toolbox) and `recorder`. The agent uses `task.step`, `task.toolbox.*`,
+   or `task.evaluate` for tool / step / eval calls — all routed through
    monitored wrappers.
 3. `task.reset()` is always called by `Episode`, never by the agent.
 4. `task.evaluate()` is always called by `Episode` after `agent.run` returns,
@@ -555,9 +585,12 @@ class EpisodeConfig(TypedBaseModel):
     task_config: TaskConfig
 ```
 
-`Budget` is a new model with `max_turns`, `max_tool_calls`, `max_cost_usd`,
-`max_wallclock_s`. `max_steps` field is accepted as a deprecated alias that
-maps to `max_turns`.
+`Budget` lives in `cube_harness.budget` (with a re-export shim in
+`cube_harness.tool`). Its fields are `max_agent_steps`, `max_tool_calls`,
+`max_cost_usd`, `max_wallclock_s`; corresponding counters are
+`agent_steps` / `tool_calls` / ...; `bump_agent_step` is the bump hook.
+`max_steps` field is accepted as a deprecated alias that maps to
+`max_agent_steps`.
 
 ### Storage layout impact
 
@@ -587,7 +620,7 @@ episodes/<trajectory_id>/
 ├── events/                 # one file per TrajectoryEvent
 │   ├── 000_agent.msgpack.zst
 │   ├── 001_tool_call.msgpack.zst
-│   ├── 002_tool_call.msgpack.zst    # parallel sibling, same turn_id
+│   ├── 002_tool_call.msgpack.zst    # parallel sibling, same parent_event_id
 │   ├── 003_eval.msgpack.zst
 │   └── …
 ├── failure.txt             # optional: exception text on crash
@@ -699,8 +732,8 @@ The viewer renders one card per `TrajectoryEvent`. Card colour by kind:
 - `tool_call` — one env interaction
 - `eval` — final task.evaluate output
 
-`ToolCallEvent`s sharing a `turn_id` render in horizontal lanes within a turn
-group (parent `AgentEvent` above, siblings below).
+`ToolCallEvent`s sharing a `parent_event_id` render in horizontal lanes
+within a turn group (parent `AgentEvent` above, siblings below).
 
 ### Selection model
 
@@ -720,10 +753,10 @@ group (parent `AgentEvent` above, siblings below).
   `view[last_observation_event_index].output`. Screenshots, AXTree, and
   HTML are all surfaces inside the obs renderer; no separate screenshot tab.
 - **Turn observations** — list of all `tool_call` events sharing
-  `selected_event`'s `turn_id` (empty when no turn). Useful for parallel
-  tool calls.
+  `selected_event`'s `parent_event_id` (empty when no turn). Useful for
+  parallel tool calls.
 - **Profiling** — per-event `profiling` timing breakdown.
-- Header always reads: `Event X / N — kind={agent|tool_call|eval}, turn=<id>, t=<s>s`.
+- Header always reads: `Event X / N — kind={agent|tool_call|eval}, parent=<id>, t=<s>s`.
 
 ### Crashed / in-flight episodes
 
@@ -792,8 +825,15 @@ The following are **deleted outright** (no deprecation alias):
   accumulated.
 - `Trajectory.steps` field/alias — replaced by `TrajectoryView` iteration.
 - `Trajectory.last_env_step`, `last_env_output`, `n_agent_steps`,
-  `n_env_steps`, `events_of_turn` (methods) — moved to `TrajectoryView`
-  where they belong. Their old form on `Trajectory` is gone.
+  `n_env_steps` (methods) — moved to `TrajectoryView` where they
+  belong. Their old form on `Trajectory` is gone.
+- `Trajectory.events_of_turn` / `TrajectoryView.events_of_turn` —
+  dropped outright. With no separate `turn_id` field, callers query
+  parallel siblings directly by `parent_event_id`:
+  `[e for e in view if isinstance(e.output, ToolCallEvent) and e.output.parent_event_id == target_id]`.
+- `ToolCallEvent.turn_id` field — dropped. Parallel siblings are
+  identified by their shared `parent_event_id` (the originating
+  `LLMCallEvent.id`).
 - `_events_to_legacy_steps` is retained as a deprecated shim until the
   XRay rewrite lands; see deferred-removal note above.
 - `Storage.save_trajectory` / `load_trajectory` / `finalize(trajectory)`
@@ -850,6 +890,7 @@ The following are **deleted outright** (no deprecation alias):
    `step` stays required as the canonical sync entry point. Agents
    that override `run` get to omit it; the abstract requirement softens
    in the follow-up release.
-3. **Async `step` (`astep`)** as a first-class method on sync agents wanting
-   coroutine semantics without overriding `run` — worth adding or YAGNI?
-   Recommendation: YAGNI for Phase 1.
+3. ~~**Async `step`**~~ **Resolved (out of scope).** No async-step
+   method ships in this PR. Agent authors who need async LLM
+   semantics override `_arun` and use whatever they want. A
+   first-class async-step entry point is deferred to a future RFC.

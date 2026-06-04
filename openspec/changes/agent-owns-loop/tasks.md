@@ -23,7 +23,7 @@ delete the dead code the original phases couldn't touch.
 | E: Episode.run rewrite (async) | ✅ shipped | `tests/test_episode.py` + `test_cube_episode.py` + `test_experiment.py` (all pass) |
 | F: Storage event-file layout | ✅ shipped | `tests/test_storage_event_layout.py` (10/10) |
 | G: Structural parity | ✅ arithmetic-cube + miniwob-cube `cube test` pass | (SWE-bench / TerminalBench need Docker — verified plumbing works, full runs deferred to Phase L) |
-| H: GennyParallel agent | ✅ shipped | `tests/test_genny_parallel.py` (3/3) — sibling ToolCallEvents, parallel speedup, budget enforcement |
+| H: Parallel-dispatch mode in Genny (`GennyConfig.parallel_actions`) | ✅ shipped | `tests/test_genny_parallel.py` (3/3) — sibling ToolCallEvents, parallel speedup, budget enforcement |
 | I: XRay event compat (shim) | ✅ legacy steps view materialized from events at load time | superseded by Phase Q below |
 | J: Connector seam (record_external_run) | ✅ shipped + tested | covered by Phase C tests |
 | K: End-to-end smokes | ✅ 3 smokes in `scripts/smoke/` | `agent_owns_loop_events.py`, `genny_parallel_recorder.py`, `xray_loads_event_trajectory.py` all SMOKE OK |
@@ -68,9 +68,9 @@ code:
    bypasses `tool.execute_action` entirely — without recorder-side
    bumping + `BudgetExceeded` raise, the loop runs forever on such
    tasks.
-3. **`task.tool` attribute name** for the toolbox in GennyParallel
-   (cube-standard's canonical Task attribute), with `task.toolbox`
-   fallback for downstream tasks that aliased it.
+3. **`task.tool` attribute name** for the toolbox in Genny's
+   parallel-dispatch path (cube-standard's canonical Task attribute),
+   with `task.toolbox` fallback for downstream tasks that aliased it.
 4. **EvaluationEvent re-raise instead of swallow** — the legacy
    `test_episode_captures_env_error` expects `task.evaluate` exceptions
    to propagate. Episode's `finally` block still runs in all cases.
@@ -149,12 +149,13 @@ thread — not our task here.
 - [ ] A2. `TrajectoryEvent` replaces `TrajectoryStep`; `output` union expands.
 - [ ] A3. `Trajectory.events: list[TrajectoryEvent]`; keep `steps` as a
   computed read-only alias that exposes the legacy view (one release).
-- [ ] A4. Helpers: `last_env_output`, `events_of_turn`, `n_agent_events`,
-  `n_tool_calls`, `n_evaluations`.
+- [ ] A4. Helpers: `last_env_output`, `n_agent_events`,
+  `n_tool_calls`, `n_evaluations`. (No `events_of_turn`: parallel
+  siblings are queried directly via shared `parent_event_id`.)
 - [ ] A5. Update `core/spec.md` invariants (drop alternation; add
   back-reference and ordering invariants).
 - [ ] A6. Unit tests: `tests/test_event_types.py` (serialization, back-ref
-  validation, turn_id grouping).
+  validation, parent_event_id sibling grouping).
 
 **Validation**: `pytest tests/test_event_types.py` green.
 
@@ -201,13 +202,18 @@ thread — not our task here.
 
 ## Phase D — Default Agent.run (`cube_harness.agent`)
 
-- [ ] D1. Add `async def run(initial_obs, task, recorder)` to `Agent` base
-  with the default gym-style implementation using `asyncio.to_thread(self.step, obs)`
-  and `task.astep(actions)`.
-- [ ] D2. `Agent.step` stays as-is — backward compatible.
-- [ ] D3. `task.astep` doesn't exist in cube-standard yet; if not added by
-  then, wrap `task.step` in `asyncio.to_thread` inside the default `run`.
-- [ ] D4. Update `agent/spec.md` per deltas.
+- [ ] D1. Add `async def run(initial_obs, env_tool)` to `Agent` base
+  as a thin dispatcher selecting between `_run` (sync body) and
+  `_arun` (async body) by `AgentConfig.parallel_actions: bool`.
+- [ ] D2. `_run` calls `self.step(obs)` directly and dispatches via
+  `env_tool.execute_action(action)` (sync, no `await`) — debuggable.
+- [ ] D3. `_arun` uses `asyncio.gather` over `env_tool.async_execute_action(action)`
+  for parallel dispatch; `Agent._merge_results` is the default merge
+  (subclasses override for bespoke merging).
+- [ ] D4. `Agent.step` stays as-is — backward compatible.
+- [ ] D5. Update `agent/spec.md` per deltas. (Async `task.astep` open
+  question resolved as deferred — agents that want async LLM override
+  `_arun` directly.)
 
 **Validation**: structural parity test — Phase G below.
 
@@ -270,16 +276,16 @@ the structural parity test the user requested.
 
 ## Phase H — New parallel-tool agent
 
-- [ ] H1. `src/cube_harness/agents/genny_parallel.py` — `GennyParallel(Genny)`
-  that overrides `Agent.run` to dispatch tool calls via
-  `asyncio.gather(*(task.toolbox.execute_action(a) for a in actions))`.
+- [ ] H1. `GennyConfig.parallel_actions: bool` flag on `Genny` that dispatches
+  tool calls via `asyncio.gather(*(task.toolbox.execute_action(a) for a in actions))`
+  when set (selected via `Agent` base's dual `_run` / `_arun`).
 - [ ] H2. Reuse Genny's prompt + tool-call parser; only the loop differs.
 - [ ] H3. Result aggregation: `_merge_observations(results)` for the next
   `obs`.
-- [ ] H4. Add to `agents/__init__.py`. Document in `agent/spec.md`.
+- [ ] H4. Document the `parallel_actions` mode in `agent/spec.md`.
 - [ ] H5. Smoke: `scripts/smoke/parallel_tool_arithmetic.py` — runs
-  `GennyParallel` on one arithmetic episode; asserts ≥1 turn with
-  `len(events_of_turn) > 1`. Skip if no `OPENAI_API_KEY`.
+  `Genny(parallel_actions=True)` on one arithmetic episode; asserts ≥1 turn with
+  ≥2 ToolCallEvents sharing the same `parent_event_id`. Skip if no `OPENAI_API_KEY`.
 
 **Validation**: smoke passes.
 
@@ -324,11 +330,11 @@ No connector implementations land in this PR.
 - [ ] K2. `scripts/smoke/genny_arithmetic.py` — Genny via `Agent.run` on
   one arithmetic episode. Reward==1.0.
 - [ ] K3. `scripts/smoke/parallel_tool_swebench_single.py` —
-  `GennyParallel` on the cheapest SWE-bench Lite task. Trajectory
+  `Genny(parallel_actions=True)` on the cheapest SWE-bench Lite task. Trajectory
   loadable; verifier runs cleanly (pass or fail OK; what matters is the
   plumbing). Daytona OR local Docker.
 - [ ] K4. `scripts/smoke/parallel_tool_terminalbench_single.py` —
-  `GennyParallel` on a TerminalBench debug task. Daytona OR local Docker.
+  `Genny(parallel_actions=True)` on a TerminalBench debug task. Daytona OR local Docker.
 - [ ] K5. `scripts/smoke/episode_done_via_env.py` — fixture task with
   `env_output.done=True` mid-loop; default agent terminates, finalization
   happens once. No LLM needed.
@@ -368,10 +374,11 @@ Smokes exit 0/1/2 with `SMOKE OK/FAIL/SKIP: <name>`.
 
 - [ ] N1. Add `class TrajectoryView` to `cube_harness.storage`. Holds
   `(storage, id, metadata, _index, _cache)`. Methods: `__len__`,
-  `__getitem__(i)`, `__iter__`, `iter_events`, `events_of_turn`,
-  `is_complete`, properties for `n_agent_events` / `n_tool_calls` /
-  `n_evaluations`, shortcuts to `metadata.summary_stats` /
-  `metadata.reward_info`.
+  `__getitem__(i)`, `__iter__`, `iter_events`, `is_complete`,
+  properties for `n_agent_events` / `n_tool_calls` / `n_evaluations`,
+  shortcuts to `metadata.summary_stats` / `metadata.reward_info`.
+  (No `events_of_turn`: callers query parallel siblings via shared
+  `parent_event_id`.)
 - [ ] N2. Internal cache is a plain `dict[int, TrajectoryEvent]`,
   populated on access, scoped to view lifetime. No LRU.
 - [ ] N3. `_index` is a list of (event_num, kind, Path) tuples built
@@ -442,7 +449,7 @@ Smokes exit 0/1/2 with `SMOKE OK/FAIL/SKIP: <name>`.
 - [ ] Q2. Timeline: per-event cards coloured by kind. Drop the legacy
   obs/act pair UI.
 - [ ] Q3. Parallel `tool_call` siblings render in horizontal lanes
-  within a turn group (uses `turn_id` grouping from `view`).
+  within a turn group (grouped by shared `parent_event_id` from `view`).
 - [ ] Q4. Selection model: `selected_event_index` + computed
   `last_agent_event_index` / `last_observation_event_index` from the
   cheap kind table.

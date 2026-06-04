@@ -106,16 +106,22 @@ trajectories into typed event streams.
   (`LLM.attach_recorder` + `LLM.call(prompt, tag)`), tool dispatches
   auto-emit `ToolCallEvent` (MonitoredTool). The agent never touches
   the recorder; `self._recorder.budget` is available for introspection.
-- New `MonitoredTool` / `MonitoredToolbox` wrappers in cube-harness that
-  **subclass `cube.tool.Tool` / `AsyncTool` with the same `execute_action`
-  signature** — drop-in replacements, mixable in a `Toolbox` alongside
-  unmonitored tools. Agents call `execute_action(action) → Observation | StepError`
-  without knowing or caring which tools are monitored. The wrappers emit
-  trajectory events on every call. The previous
-  `ToolWithTelemetry` shim was already deleted in commit `e760f9e5`
-  together with the `openspec/specs/tool/` spec layer; this RFC re-creates
-  the layer around `MonitoredTool`. Budget enforcement lives in
-  `MonitoredTool` (raises `BudgetExceeded`).
+- New `MonitoredTool` wrapper in cube-harness that **subclasses
+  `cube.tool.AbstractTool` with a dual `execute_action` / `async_execute_action`
+  API** — a single class wraps either a sync `AbstractTool` or an async
+  `AbstractAsyncTool` inner. Drop-in mixable in `cube.tool.AsyncToolbox`
+  alongside unmonitored tools (cube-standard's companion PR relaxed
+  `AsyncToolbox` to accept mixed sync + async leaves, so no harness-side
+  toolbox wrapper is needed). Agents call
+  `execute_action(action) → Observation | StepError` (sync inner only) or
+  `await tool.async_execute_action(action)` (both inner kinds) without
+  knowing or caring which tools are monitored. The wrapper emits
+  trajectory events on every call. The previous `ToolWithTelemetry` shim
+  was already deleted in commit `e760f9e5` together with the
+  `openspec/specs/tool/` spec layer; this RFC re-creates the layer around
+  `MonitoredTool`. Budget enforcement lives in `MonitoredTool` (raises
+  `BudgetExceeded`); the `Budget` class itself moved to
+  `cube_harness/budget.py`.
 - New trajectory event model: `LLMCallEvent` (one event per LLM API call),
   `ToolCallEvent` (one per tool dispatch, carries the full `Action`),
   `EvaluationEvent` (step-wise or terminal), `AgentErrorEvent`
@@ -166,9 +172,9 @@ trajectories into typed event streams.
 
 ### Out (Phase 2)
 
-- External agents over JSON-RPC + `MonitoredToolbox` (the cube-standard
-  `cube.server` JSON-RPC layer already exists; per-session monitoring
-  attaches in a follow-up).
+- External agents over JSON-RPC with per-session `MonitoredTool` wrappers
+  (the cube-standard `cube.server` JSON-RPC layer already exists;
+  per-session monitoring attaches in a follow-up).
 - `cube_harness/mcp/server.py` migration — current FastMCP wrapper is
   duplicative with `cube.server`; consolidation is its own change.
 - WebSocket / streaming transport — covered by the
@@ -363,7 +369,8 @@ class ParallelAgent(Agent):
 
             # Parallel dispatch — N concurrent tool calls. Each lands as
             # a ToolCallEvent sharing the parent LLMCallEvent's id as
-            # turn_id; XRay renders them as horizontal sibling lanes.
+            # parent_event_id; XRay renders sibling ToolCallEvents with
+            # the same parent_event_id as horizontal lanes.
             # Budget + storage hooks fire inside each MonitoredTool.
             # TaskDone / BudgetExceeded propagate through asyncio.gather
             # to Episode's outer except.
@@ -373,7 +380,7 @@ class ParallelAgent(Agent):
             obs = self._merge(results)
 ```
 
-`GennyParallel` follows this shape. ~10 lines for the whole loop. No
+`Genny` with `parallel_actions=True` follows this shape. ~10 lines for the whole loop. No
 `task` reference, no `task.reset` / `task.evaluate` / `task.close`,
 no `recorder` reference inside the loop — Episode owns lifecycle;
 MonitoredTool absorbs `Task.step` semantics (STOP_ACTION,
@@ -508,17 +515,20 @@ successful tool dispatch; on True, raises `TaskDone`. Same for
 call. From the agent's POV, control flow simply unwinds out of
 `toolbox.execute_action` when the task decides it's done.
 
-### `MonitoredTool` / `MonitoredToolbox`
+### `MonitoredTool`
 
-`MonitoredTool` subclasses `cube.tool.AsyncTool` and exposes exactly the
-same `execute_action` signature. It is a transparent decorator: agents and
-`task.step` call it identically to any other tool.
+`MonitoredTool` subclasses `cube.tool.AbstractTool` and exposes a **dual
+API**: `execute_action` (sync; sync inner only) and `async_execute_action`
+(async; works for both sync and async inners). It is a transparent
+decorator: agents and `task.step` call it identically to any other tool.
+The previously-proposed split into `MonitoredTool(AbstractTool)` +
+`AsyncMonitoredTool(AbstractAsyncTool)` collapsed into this single class.
 
 ```python
-class MonitoredTool(AsyncTool):
+class MonitoredTool(AbstractTool):
     def __init__(
         self,
-        inner: Tool | AsyncTool,
+        inner: AbstractTool | AbstractAsyncTool,
         emit: Callable[[TrajectoryEvent], str],   # streamer.emit
         budget: Budget,
         parent_event_id_getter: Callable[[], str] | None = None,
@@ -529,7 +539,11 @@ class MonitoredTool(AsyncTool):
     def action_set(self) -> list[ActionSchema]:
         return self.inner.action_set                          # transparent
 
-    async def execute_action(self, action: Action) -> Observation | StepError:
+    def execute_action(self, action: Action) -> Observation | StepError:
+        """Sync path. Requires inner to be a sync AbstractTool."""
+        ...
+
+    async def async_execute_action(self, action: Action) -> Observation | StepError:
         if self.budget.exhausted:
             raise BudgetExceeded(action=action)
         # Await directly when inner is AsyncTool;
@@ -540,11 +554,14 @@ class MonitoredTool(AsyncTool):
         return result                                          # unchanged
 ```
 
-`MonitoredToolbox` is just a `Toolbox` whose member tools are each wrapped
-in `MonitoredTool`. Since `Toolbox` is-a `Tool`, the wrapper is recursive:
-a toolbox may contain monitored tools, unmonitored tools, and nested
-toolboxes side-by-side. The agent calls `toolbox.execute_action(action)`;
-dispatch by action name routes to the right member, monitored or not.
+When a multi-tool container is needed, use `cube.tool.AsyncToolbox`
+directly — cube-standard's companion PR (#152) relaxed it to accept mixed
+sync + async leaves, so monitored and unmonitored tools coexist in one
+toolbox without a harness-side wrapper class. Since `AsyncToolbox` is-a
+tool, the composition is recursive: a toolbox may contain monitored
+tools, unmonitored tools, and nested toolboxes side-by-side. The agent
+calls `toolbox.async_execute_action(action)`; dispatch by action name
+routes to the right member, monitored or not.
 
 Three things to note about this shape:
 
@@ -556,9 +573,11 @@ Three things to note about this shape:
 2. **Done detection is unchanged.** `Task.step` returns
    `EnvironmentOutput.done = True` when `self.finished(obs)` is True. The
    default `Agent.run` inspects that and terminates. Tool-level agents that
-   bypass `task.astep` need their own done logic — typically a "submit"
+   bypass `task.step` need their own done logic — typically a "submit"
    tool whose obs triggers `task.finished()` for the next gym caller, or
    the agent returning when its own success criterion is met.
+   (Open question resolved: an async `task.astep` is deferred — agents that
+   want async LLM dispatch override `_arun` directly.)
 3. **Step-wise evaluation is already handled by cube-standard.** `Task.step()`
    invokes `self.evaluate(obs)` internally when `Task.validate_per_step` is
    `True`, and the resulting `reward` / `info` flow back through
@@ -673,7 +692,7 @@ async def run(self) -> TrajectoryView:
     task = self.task_config.make(...)
     meta = TrajectoryMetadata(id=self.id, metadata={...}, start_time=now(), end_time=None)
     self.storage.save_metadata(meta)              # WRITE-AT-START: crashed runs are loadable
-    budget = Budget(max_turns=self.max_steps, ...)
+    budget = Budget(max_agent_steps=self.config.max_agent_steps, ...)  # was max_turns; counts agent-loop iterations, not LLM turns
 
     # Wrap each member of task.tool with MonitoredTool, baking in the
     # task ref so wrappers absorb cube-standard Task.step semantics
@@ -753,19 +772,20 @@ already does for the gym path). This avoids the harness having to chase the
 
 ```python
 class LLMCallEvent(TypedBaseModel):
-    id: str                            # turn_id for child ToolCallEvents
+    id: str                            # parent_event_id for child ToolCallEvents
     call: LLMCall | None               # full prompt/response/usage (None on legacy decode only)
     profiling: dict[str, tuple[float, float]]
     error: StepError | None
 
 class ToolCallEvent(TypedBaseModel):
     id: str                            # for step-wise EvaluationEvent.parent_event_id back-ref
-    parent_event_id: str               # the parent LLMCallEvent.id (or RESET sentinel)
+    parent_event_id: str               # the originating LLMCallEvent.id (or RESET sentinel);
+                                       # parallel-sibling tool calls share this id by construction —
+                                       # it is the sole grouping primitive (no separate turn_id field)
     action_id: str | None              # echoes Action.id
     action: Action | None              # full action payload — self-contained trajectory
     obs: Observation                   # what came back to the agent (empty when error)
     error: StepError | None            # set when execute_action returned a StepError
-    turn_id: str                       # groups sibling parallel calls
 
 class EvaluationEvent(TypedBaseModel):
     reward: float
@@ -792,7 +812,7 @@ Why this shape:
   prior batched `AgentEvent`. Streaming-friendly: each event lands as soon
   as the LLM call completes; no batched flush at turn boundaries. An agent
   that makes 3 LLM calls per step (Genny: compact + summarize + act) emits
-  3 LLMCallEvents; XRay groups them by `turn_id`.
+  3 LLMCallEvents; XRay groups them by `parent_event_id`.
 - **`ToolCallEvent` carries only `obs` + `error`** — the agent's view of
   what came back. `reward` / `done` / `info` are NOT here:
   - `done` is signalled by the `TaskDone(BaseException)` exception
@@ -805,8 +825,11 @@ Why this shape:
 - **`ToolCallEvent.action_id` references back to the parent
   `AgentEvent.actions[i].id`**, so the event stream is a flat list but the
   parent-child structure is recoverable.
-- **`turn_id` groups parallel calls** so XRay can render them as siblings of
-  one turn.
+- **`parent_event_id` groups parallel calls** so XRay can render
+  sibling `ToolCallEvent`s sharing the same originating `LLMCallEvent.id`
+  as horizontal lanes within a turn. A separate `turn_id` field was
+  considered and dropped — `parent_event_id` is already the grouping
+  primitive by construction.
 - **One `EvaluationEvent` type for both step-wise and terminal**
   evaluations — discriminated by `is_terminal` and the presence of
   `parent_event_id`. One type, two flavors; no discriminated union in
@@ -909,8 +932,9 @@ is no remaining caller after this PR.
   new view and the old cache is GC'd.
 - **Timeline:** one card per `TrajectoryEvent`. Colours by kind: `agent`
   (LLM / thoughts / response text), `tool_call` (one per action),
-  `evaluation` (final). Parallel `tool_call` siblings share a `turn_id`
-  and render in horizontal lanes within a turn group.
+  `evaluation` (final). Parallel `tool_call` siblings share a
+  `parent_event_id` (the originating `LLMCallEvent.id`) and render in
+  horizontal lanes within a turn group.
 - **Selection:** clicking a card sets `selected_event_index`. The viewer
   derives `last_agent_event_index` and `last_observation_event_index` by
   walking back from the selection (cached in the view).
@@ -922,7 +946,7 @@ is no remaining caller after this PR.
     `tool_call`, else from `last_observation_event`. Screenshots are
     content inside the observation, not a separate tab.
   - **Turn observations** — all `tool_call` events sharing the selected
-    event's `turn_id`. Empty for non-tool events.
+    event's `parent_event_id`. Empty for non-tool events.
   - **Profiling** — per-event timing breakdown (already supported via
     `AgentEvent.profiling`).
   - Header strip always shows: `Event X / N — kind, turn=…, t=…s`.
@@ -938,18 +962,22 @@ cube-standard already has the canonical RPC surface: `cube.server` exposes
 `tools/list`, `tools/call`, `cube/step`, etc. as JSON-RPC 2.0 (MCP-compatible).
 The Phase 1 PR does **not** change `cube.server`. The companion cube-standard
 change (`cube-standard/openspec/changes/agent-owns-loop/`) only clarifies that
-`MonitoredToolbox` lives in the harness (it captures harness-side trajectory
-state) and that future external-agent connectivity will use the existing
-`cube.server` endpoint with a per-session monitoring context attached on the
-harness side. The harness's duplicate `cube_harness/mcp/server.py` is left
+`MonitoredTool` lives in the harness (it captures harness-side trajectory
+state, composed into `cube.tool.AsyncToolbox`) and that future external-agent
+connectivity will use the existing `cube.server` endpoint with a per-session
+monitoring context attached on the harness side. The harness's duplicate `cube_harness/mcp/server.py` is left
 alone in Phase 1 and slated for retirement in a follow-up.
 
 ### Async-first
 
 The new `Agent.run` is `async def`. Sync `step()` is wrapped in
-`asyncio.to_thread` by the default `run()`. `MonitoredToolbox` is built on
-`AsyncToolbox` (cube-standard already ships it). LLM calls become awaitable
-through `cube_harness.llm` — out of scope for this RFC if LiteLLM async is
+`asyncio.to_thread` by the default `run()`. The `Agent` base ships dual
+`_run` / `_arun` paths, selected by `AgentConfig.parallel_actions` — the
+parallel-dispatch mode lives on `Genny` as a config flag rather than a
+separate parallel-agent class. Monitored tools compose into
+`cube.tool.AsyncToolbox` (cube-standard's companion PR relaxed it to
+accept mixed sync + async leaves). LLM calls become awaitable through
+`cube_harness.llm` — out of scope for this RFC if LiteLLM async is
 already available (likely yes, follow-up if not).
 
 ---
@@ -968,8 +996,11 @@ already available (likely yes, follow-up if not).
 - **`trajectory.json` (V1 metadata file)** is still read by the legacy
   loader. New writes always use `episode.metadata.json`. The V1 reader
   path stays for backward compat with archived runs.
-- Existing agents (`ReactAgent`, `Genny`, `GennyParallel`) keep their
-  `step()` / `run()` — no agent-side changes for backward compat.
+- Existing agents (`ReactAgent`, `Genny`) keep their `step()` / `run()` —
+  no agent-side changes for backward compat. The previously-proposed
+  parallel-agent subclass folds into `Genny` with
+  `GennyConfig(..., parallel_actions=True)`; selection of `_run` vs
+  `_arun` follows `AgentConfig.parallel_actions`.
 - `EpisodeRecord.from_trajectory(traj)` → `EpisodeRecord.from_view(view)`.
   Body reads `view.metadata` only — no event I/O.
 - Tests that hand-built `Trajectory(id=..., steps=[...])` migrate to
