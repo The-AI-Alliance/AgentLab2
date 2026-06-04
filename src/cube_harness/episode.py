@@ -189,7 +189,7 @@ class Episode:
                 agent = self.config.agent_config.make(action_set, task_id=task_id)
 
                 # 2. Reset the env to get the initial observation.
-                obs, info = task.reset()
+                obs, info = await asyncio.to_thread(task.reset)
                 initial = EnvironmentOutput(obs=obs, info=info)
 
                 agent_name = self.config.agent_config.agent_name
@@ -295,7 +295,7 @@ class Episode:
                 # the outer except below tags status and propagates to the
                 # runner.
                 try:
-                    reward, info = task.evaluate()
+                    reward, info = await asyncio.to_thread(task.evaluate)
                 except Exception as e:
                     streamer.record_failure(e)
                     raise
@@ -370,7 +370,7 @@ class Episode:
             # task.close is best-effort; avoid masking the real exception.
             try:
                 if "task" in locals():
-                    task.close()
+                    await asyncio.to_thread(task.close)
             except Exception:
                 logger.exception("Failed to close task")
             tracer.shutdown()

@@ -191,7 +191,13 @@ class Agent(ABC):
                     f"`AgentConfig.parallel_actions=True` to use the async `_arun` body, "
                     f"or override `run` to customize dispatch for async-only tools."
                 )
-            self._run(initial_obs, env_tool)
+            # Run the sync loop OFF the event-loop thread. asyncio.run (in
+            # Episode.run) puts a running loop on the calling thread; some sync
+            # tools (Playwright) refuse to operate there. to_thread runs _run
+            # on a worker thread with no loop, and for a sequential episode the
+            # same worker is reused for every sync env call (reset/steps/
+            # evaluate), preserving thread-affine tools. [F1 temp — see episode]
+            await asyncio.to_thread(self._run, initial_obs, env_tool)
 
     def _run(
         self,
