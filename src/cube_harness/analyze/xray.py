@@ -373,6 +373,10 @@ class XRayState:
             self.current_events = None  # no episode dir on disk to load
         else:
             self._reload_events(storage, traj_id)
+            # Default to the first event AFTER the initial observation (the first
+            # LLM call / action) rather than the reset observation itself.
+            if self.n_events() > 1:
+                self.selected = 1
 
     def _reload_events(self, storage: FileStorage, traj_id: str) -> None:
         """(Re)load the open episode's event stream into `current_events`."""
@@ -446,6 +450,23 @@ def if_active(tab_name: str, n_out: int = 1) -> Callable:
 _CSS = """
 html {
     color-scheme: light only;
+}
+/* Stable scroll container for the event rail: overflow lives here (not on the
+   re-rendered inner HTML), so clicking a card keeps the scroll position. */
+#xray_rail {
+    max-height: 72vh;
+    overflow-y: auto;
+    padding: 4px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+/* Tiny, tight prev/next nav buttons hugging the rail. */
+#xray_prev_btn, #xray_next_btn {
+    min-width: 28px !important;
+    max-width: 34px;
+    padding: 2px 6px !important;
+    flex: 0 0 auto;
 }
 .compact-header {
     padding: 8px 16px;
@@ -594,42 +615,36 @@ th {
 }
 """
 
-# Runs once on app load (Blocks js=): force light theme, bind keyboard event
-# navigation, and preserve the event-rail scroll position across re-renders.
-#   - Arrow keys (←/→ or ↑/↓) move to the previous/next event. Plain arrows are
-#     used (not Shift+arrow, which the browser steals for text selection).
-#   - Clicking a card or navigating saves the rail's scrollTop; a MutationObserver
-#     restores it after the rail HTML re-renders, so selecting a card no longer
-#     snaps the list back to the top.
+# Runs once on app load (Blocks js=): force light theme + bind keyboard event
+# navigation. Arrow keys (←/→ or ↑/↓) move to the previous/next event — plain
+# arrows, not Shift+arrow (which the browser steals for text selection). Gradio
+# puts `elem_id` on the <button> itself, so the selectors are `#xray_prev_btn`,
+# NOT `#xray_prev_btn button`. Tooltips advertise the shortcut. (Rail scroll is
+# preserved by the CSS overflow living on the stable `#xray_rail` container, so
+# no scroll-restore JS is needed.)
 _INIT_JS = """
 () => {
     document.body.classList.remove('dark');
     if (window.__xrayInit) return;
     window.__xrayInit = true;
-    let pending = false;
-    const saveScroll = () => {
-        const r = document.querySelector('#xray-event-rail');
-        if (r) { window.__xrayScroll = r.scrollTop; pending = true; }
+    const setTip = () => {
+        const pb = document.querySelector('#xray_prev_btn'), nb = document.querySelector('#xray_next_btn');
+        if (pb) pb.title = 'Previous event (← or ↑)';
+        if (nb) nb.title = 'Next event (→ or ↓)';
     };
+    setTip();
+    setTimeout(setTip, 1000);
     document.addEventListener('keydown', (e) => {
         const t = e.target, tag = (t.tagName || '').toLowerCase();
         if (tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable) return;
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         let sel = null;
-        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') sel = '#xray_prev_btn button';
-        else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') sel = '#xray_next_btn button';
+        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') sel = '#xray_prev_btn';
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') sel = '#xray_next_btn';
         if (!sel) return;
         const b = document.querySelector(sel);
-        if (b) { e.preventDefault(); saveScroll(); b.click(); }
+        if (b) { e.preventDefault(); b.click(); }
     }, true);
-    document.addEventListener('click', (e) => {
-        if (e.target.closest && e.target.closest('.xray-event-card')) saveScroll();
-    }, true);
-    new MutationObserver(() => {
-        if (!pending) return;
-        const r = document.querySelector('#xray-event-rail');
-        if (r) { requestAnimationFrame(() => { r.scrollTop = window.__xrayScroll || 0; }); pending = false; }
-    }).observe(document.body, { childList: true, subtree: true });
 }
 """
 
@@ -728,7 +743,7 @@ def run_xray(
             exp_stats,
             agent_table_data,
             traj_table_data,
-            StepId(step=0),
+            StepId(step=state.selected),
             *tab_labels,
             *state.get_config_jsons(),
         )
@@ -816,7 +831,7 @@ def run_xray(
         return (
             agent_table_data,
             traj_table_data,
-            StepId(step=0),
+            StepId(step=state.selected),
             *tab_labels,
             *state.get_config_jsons(),
         )
@@ -837,7 +852,7 @@ def run_xray(
             return _rows_to_table([]), StepId(step=0)
         traj_id = current_traj_row_ids[row]
         state.select_trajectory(traj_id)
-        return _rows_to_table(current_traj_rows, traj_id, "_traj_id"), StepId(step=0)
+        return _rows_to_table(current_traj_rows, traj_id, "_traj_id"), StepId(step=state.selected)
 
     def on_bg_load_tick() -> tuple[Any, Any, Any, Any, str, gr.Timer, gr.Tab, gr.Tab, gr.Tab]:
         """Periodic live-poll: pick up new/changed trajectory files from a running experiment.

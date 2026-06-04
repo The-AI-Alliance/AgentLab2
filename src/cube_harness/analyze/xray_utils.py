@@ -1346,10 +1346,10 @@ def render_event_rail_html(events: EpisodeEvents | None, selected: int) -> str:
             f"</div>"
         )
 
-    return (
-        "<div id='xray-event-rail' style='max-height:640px;overflow-y:auto;padding:4px;"
-        "background:#f8f9fa;border-radius:8px;border:1px solid #e2e8f0;'>" + "".join(cards_html) + "</div>"
-    )
+    # No scroll wrapper here — the overflow lives on the stable `#xray_rail`
+    # Gradio container (see _CSS), so re-rendering these cards on selection does
+    # not reset the scroll position.
+    return "<div id='xray-event-rail'>" + "".join(cards_html) + "</div>"
 
 
 # --- Grouped detail panes --------------------------------------------------
@@ -1376,15 +1376,25 @@ def _message_text(msg: object) -> str:
 def render_group_reasoning_html(events: EpisodeEvents, group: EventGroup) -> str:
     """Reasoning pane: the LLM's thinking for the group, shown beside the action.
 
-    Prefers extended-thinking `reasoning_content`; otherwise the assistant
-    message text. Tool-call-only turns (no prose) say so."""
+    Prefers extended-thinking `reasoning_content` (Anthropic exposes this);
+    otherwise the assistant message text. When neither is present but the model
+    consumed reasoning tokens, note that the provider hid the chain-of-thought
+    (OpenAI/Azure return `reasoning_tokens` but not the text)."""
     call = events.llm_call(group.llm_index)
     if call is None:
         return "<em>No LLM call in this group.</em>"
     text = getattr(call.output, "reasoning_content", None) or _message_text(call.output)
-    if not text or not text.strip():
-        return "<em>No reasoning text — the model emitted only tool call(s).</em>"
-    return f"<div style='white-space:pre-wrap;font-size:13px;line-height:1.4;'>{html_lib.escape(text.strip())}</div>"
+    if text and text.strip():
+        return (
+            f"<div style='white-space:pre-wrap;font-size:13px;line-height:1.4;'>{html_lib.escape(text.strip())}</div>"
+        )
+    reasoning_tokens = getattr(call.usage, "reasoning_tokens", 0) or 0
+    if reasoning_tokens > 0:
+        return (
+            f"<em>🔒 The model used {reasoning_tokens:,} reasoning token(s), but the provider "
+            "did not return the reasoning text (hidden chain-of-thought).</em>"
+        )
+    return "<em>No reasoning text — the model emitted only tool call(s).</em>"
 
 
 def render_group_observation_html(events: EpisodeEvents, group: EventGroup) -> tuple[list[Image.Image], str]:
