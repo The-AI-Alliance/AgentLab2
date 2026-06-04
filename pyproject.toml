@@ -11,7 +11,7 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "cube-standard>=0.1.0rc8",
+    "cube-standard",
     "cube-browser-playwright>=0.2.0",  # used by cubes/workarena (PlaywrightSessionConfig)
     "pydantic~=2.0",
     "litellm~=1.80.8",
@@ -95,3 +95,6 @@ markers = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.uv.sources]
+cube-standard = { git = "https://github.com/The-AI-Alliance/cube-standard.git", branch = "dev" }
