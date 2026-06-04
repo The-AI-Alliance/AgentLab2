@@ -1363,6 +1363,30 @@ def render_group_chat_html(events: EpisodeEvents, group: EventGroup) -> str:
     return _render_llm_call_html(call)
 
 
+def _message_text(msg: object) -> str:
+    """Plain text of an LLM output message (str content, or text parts of a list)."""
+    content = getattr(msg, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(p.get("text", "") for p in content if isinstance(p, dict) and p.get("type") == "text")
+    return ""
+
+
+def render_group_reasoning_html(events: EpisodeEvents, group: EventGroup) -> str:
+    """Reasoning pane: the LLM's thinking for the group, shown beside the action.
+
+    Prefers extended-thinking `reasoning_content`; otherwise the assistant
+    message text. Tool-call-only turns (no prose) say so."""
+    call = events.llm_call(group.llm_index)
+    if call is None:
+        return "<em>No LLM call in this group.</em>"
+    text = getattr(call.output, "reasoning_content", None) or _message_text(call.output)
+    if not text or not text.strip():
+        return "<em>No reasoning text — the model emitted only tool call(s).</em>"
+    return f"<div style='white-space:pre-wrap;font-size:13px;line-height:1.4;'>{html_lib.escape(text.strip())}</div>"
+
+
 def render_group_observation_html(events: EpisodeEvents, group: EventGroup) -> tuple[list[Image.Image], str]:
     """Observation pane: screenshots + text contents for every observation in
     the group. Parallel siblings are stacked with per-observation labels.
@@ -1397,15 +1421,6 @@ def render_group_observation_html(events: EpisodeEvents, group: EventGroup) -> t
     if not blocks:
         return [], "<em>No observation in this group.</em>"
     return images, "".join(blocks)
-
-
-def render_group_axtree(events: EpisodeEvents, group: EventGroup) -> str:
-    """AXTree pane: axtree text of the group's first observation."""
-    if not group.observation_indices:
-        return "No observation in this group."
-    obs = events.observation(group.observation_indices[0])
-    content = text_content_from_obs(obs, "axtree")
-    return content if content is not None else "No AXTree content in this observation."
 
 
 def render_group_evaluation_md(events: EpisodeEvents, group: EventGroup) -> str:

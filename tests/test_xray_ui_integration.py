@@ -90,10 +90,20 @@ def test_observation_pane_has_no_images_for_text_only(tmp_path: Path) -> None:
     assert "file1" in html  # the text still renders
 
 
-def test_axtree_pane_reads_observation_content(tmp_path: Path) -> None:
+def test_observation_pane_includes_axtree_text(tmp_path: Path) -> None:
+    # The AXTree tab is gone; axtree content now shows inside the Observation
+    # pane alongside the other text contents.
     ep = _events(tmp_path)
     group = ep.group_for(_parallel_llm_index(ep))
-    assert "value=shoes" in xray_utils.render_group_axtree(ep, group)
+    _, html = xray_utils.render_group_observation_html(ep, group)
+    assert "value=shoes" in html
+
+
+def test_reasoning_pane_shows_assistant_text(tmp_path: Path) -> None:
+    ep = _events(tmp_path)
+    group = ep.group_for(_parallel_llm_index(ep))
+    reasoning = xray_utils.render_group_reasoning_html(ep, group)
+    assert "parallel" in reasoning.lower()  # the assistant output text
 
 
 def test_evaluation_and_error_panes(tmp_path: Path) -> None:
