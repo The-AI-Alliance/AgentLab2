@@ -132,6 +132,21 @@ def test_self_referential_parent_forms_own_group() -> None:
     assert ep.group_for(0).members == [0]
 
 
+def test_group_navigation_moves_one_step_per_press() -> None:
+    # gym stream groups: {0:reset}, {1:llm,2:obs}, {3:llm,4:obs,5:terminal-eval}.
+    ep = _gym_stream()
+    assert ep.group_roots() == [0, 1, 3]
+    # Next from anywhere in a group jumps to the NEXT group's root (one press).
+    assert ep.next_group_root(0) == 1
+    assert ep.next_group_root(1) == 3
+    assert ep.next_group_root(2) == 3  # from the observation inside group {1,2}
+    assert ep.next_group_root(3) == 3  # last group, clamped
+    # Prev mirrors it.
+    assert ep.prev_group_root(4) == 1  # from inside the last group
+    assert ep.prev_group_root(1) == 0
+    assert ep.prev_group_root(0) == 0  # first group, clamped
+
+
 def test_terminal_eval_attaches_to_last_group() -> None:
     # No parent link on the terminal eval -> it joins the most recent group.
     ep = xe.EpisodeEvents([_llm("llm1"), _tool("obs1", "llm1"), _eval(1.0, terminal=True)])

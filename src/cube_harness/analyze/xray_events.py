@@ -231,6 +231,24 @@ class EpisodeEvents:
         """The event payload at index `i` (LLMCallEvent / ToolCallEvent / …)."""
         return self.events[i].output
 
+    # --- group navigation (logical step = one group) ----------------------
+
+    def group_roots(self) -> list[int]:
+        """Ordered root index of each logical group (one entry per group)."""
+        return sorted(set(self._root_of))
+
+    def next_group_root(self, i: int) -> int:
+        """Root of the group after the one containing `i` (clamped to the last)."""
+        roots = self.group_roots()
+        pos = roots.index(self._root_of[i])
+        return roots[min(pos + 1, len(roots) - 1)]
+
+    def prev_group_root(self, i: int) -> int:
+        """Root of the group before the one containing `i` (clamped to the first)."""
+        roots = self.group_roots()
+        pos = roots.index(self._root_of[i])
+        return roots[max(pos - 1, 0)]
+
     # --- parent-link pairing ----------------------------------------------
 
     def parent_index(self, i: int) -> int | None:
