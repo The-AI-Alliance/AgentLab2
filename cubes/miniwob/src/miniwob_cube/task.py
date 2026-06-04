@@ -1,4 +1,12 @@
+from io import TextIOWrapper
 import logging
+import socket
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.request
+from pathlib import Path
 from typing import Any
 
 from cube.benchmark import RuntimeContext
@@ -6,6 +14,7 @@ from cube.core import Content, Observation
 from cube.task import Task, TaskConfig, TaskMetadata  # noqa: F401 — TaskMetadata kept for typing
 from cube.tools.browser import BrowserTool
 from PIL import Image
+from pydantic import PrivateAttr
 
 
 class MiniWobTaskMetadata(TaskMetadata):
@@ -24,6 +33,10 @@ class MiniWobTask(Task):
     base_url: str = "http://localhost:8000/miniwob"
     remove_human_display: bool = True
     episode_max_time: int = 1000000
+
+    _server_process: subprocess.Popen | None = PrivateAttr(default=None)
+    _stdout_file: TextIOWrapper | None = PrivateAttr(default=None)
+    _stderr_file: TextIOWrapper | None = PrivateAttr(default=None)
 
     @property
     def tool(self) -> BrowserTool:  # type: ignore[override]
@@ -49,6 +62,19 @@ return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GL
     def finished(self, obs: Observation | None = None) -> bool:
         return self.tool.evaluate_js("() => {return WOB_DONE_GLOBAL;}")
 
+    def close(self) -> None:
+        try:
+            super().close()
+        finally:
+            _stop_miniwob_server(
+                process=self._server_process,
+                stdout_file=self._stdout_file,
+                stderr_file=self._stderr_file,
+            )
+            self._server_process = None
+            self._stdout_file = None
+            self._stderr_file = None
+
     def obs_postprocess(self, obs: Observation) -> Observation:
         contents = []
         for content in obs.contents:
@@ -62,9 +88,12 @@ return [WOB_REWARD_GLOBAL, WOB_RAW_REWARD_GLOBAL, WOB_REWARD_REASON, WOB_DONE_GL
 
 
 class MiniWobTaskConfig(TaskConfig[MiniWobTaskMetadata]):
-    base_url: str = "http://localhost:8000/miniwob"
+    html_path: str
+    port: int | None = None
     remove_human_display: bool = True
     episode_max_time: int = 1000000
+    server_start_timeout: float = 10.0
+    server_start_poll_interval: float = 0.1
 
     def make(
         self,
@@ -72,13 +101,132 @@ class MiniWobTaskConfig(TaskConfig[MiniWobTaskMetadata]):
     ) -> MiniWobTask:
         _ = runtime_context
         assert self.tool_config is not None, "tool_config must be set"
-        return MiniWobTask(
-            metadata=self.metadata,
-            tool_config=self.tool_config,
-            base_url=self.base_url,
-            remove_human_display=self.remove_human_display,
-            episode_max_time=self.episode_max_time,
+        server = _start_miniwob_server(
+            html_path=Path(self.html_path),
+            port=self.port,
+            task_id=self.metadata.id,
+            startup_timeout=self.server_start_timeout,
+            startup_poll_interval=self.server_start_poll_interval,
         )
+        try:
+            task = MiniWobTask(
+                metadata=self.metadata,
+                tool_config=self.tool_config,
+                base_url=server.base_url,
+                remove_human_display=self.remove_human_display,
+                episode_max_time=self.episode_max_time,
+            )
+        except Exception:
+            _stop_miniwob_server(
+                process=server.process,
+                stdout_file=server.stdout_file,
+                stderr_file=server.stderr_file,
+            )
+            raise
+        task._server_process = server.process
+        task._stdout_file = server.stdout_file
+        task._stderr_file = server.stderr_file
+        return task
+
+
+class _MiniWobServer:
+    def __init__(
+        self,
+        *,
+        port: int,
+        base_url: str,
+        process: subprocess.Popen,
+        stdout_file: TextIOWrapper,
+        stderr_file: TextIOWrapper,
+    ) -> None:
+        self.port = port
+        self.base_url = base_url
+        self.process = process
+        self.stdout_file = stdout_file
+        self.stderr_file = stderr_file
+
+
+def _allocate_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _start_miniwob_server(
+    *,
+    html_path: Path,
+    port: int | None,
+    task_id: str,
+    startup_timeout: float,
+    startup_poll_interval: float,
+) -> _MiniWobServer:
+    selected_port = port or _allocate_free_port()
+    base_url = f"http://localhost:{selected_port}/miniwob"
+    tmp_dir = Path(tempfile.gettempdir())
+    safe_task_id = "".join(ch if ch.isalnum() or ch in "._-" else "_" for ch in task_id)
+    stdout_file = open(tmp_dir / f"miniwob_server_{safe_task_id}_{selected_port}_stdout.log", "w")
+    stderr_file = open(tmp_dir / f"miniwob_server_{safe_task_id}_{selected_port}_stderr.log", "w")
+    logger.info("Starting MiniWob server at port %s serving from %s...", selected_port, html_path)
+    process = subprocess.Popen(
+        [sys.executable, "-m", "http.server", str(selected_port), "--bind", "127.0.0.1"],
+        cwd=html_path,
+        stdout=stdout_file,
+        stderr=stderr_file,
+    )
+
+    server = _MiniWobServer(
+        port=selected_port,
+        base_url=base_url,
+        process=process,
+        stdout_file=stdout_file,
+        stderr_file=stderr_file,
+    )
+    startup_deadline = time.monotonic() + startup_timeout
+    last_response_error: Exception | None = None
+
+    while time.monotonic() < startup_deadline:
+        if process.poll() is not None:
+            stderr_file.flush()
+            stderr_path = Path(stderr_file.name)
+            stderr_content = stderr_path.read_text() if stderr_path.exists() else "No stderr available"
+            returncode = process.returncode
+            _stop_miniwob_server(process=process, stdout_file=stdout_file, stderr_file=stderr_file)
+            raise RuntimeError(f"MiniWob server failed to start (exit code {returncode}): {stderr_content}")
+
+        try:
+            urllib.request.urlopen(base_url, timeout=1).close()
+            logger.info("MiniWob server responding at %s", base_url)
+            return server
+        except Exception as exc:
+            last_response_error = exc
+            time.sleep(startup_poll_interval)
+
+    _stop_miniwob_server(process=process, stdout_file=stdout_file, stderr_file=stderr_file)
+    raise RuntimeError(
+        f"MiniWob server failed to respond at {base_url} within {startup_timeout:.1f}s"
+    ) from last_response_error
+
+
+def _stop_miniwob_server(
+    *,
+    process: subprocess.Popen | None,
+    stdout_file: TextIOWrapper | None,
+    stderr_file: TextIOWrapper | None,
+) -> None:
+    if process is not None and process.poll() is None:
+        logger.info("Shutting down MiniWob server...")
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            logger.warning("Server did not terminate gracefully, killing...")
+            process.kill()
+            process.wait(timeout=5)
+
+    if stdout_file is not None and not stdout_file.closed:
+        stdout_file.close()
+    if stderr_file is not None and not stderr_file.closed:
+        stderr_file.close()
 
 
 def _build_setup_js(remove_human_display: bool, episode_max_time: int) -> str:
