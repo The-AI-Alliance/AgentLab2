@@ -16,6 +16,7 @@ from typing import Callable
 
 import pytest
 from cube.core import Action, ActionSchema, Observation, StepError
+from cube.task import STOP_ACTION
 from cube.tool import AbstractAsyncTool, AbstractTool, AsyncToolbox, Toolbox
 
 from cube_harness.core import ToolCallEvent, TrajectoryEvent
@@ -23,6 +24,7 @@ from cube_harness.tool import (
     Budget,
     BudgetExceeded,
     MonitoredTool,
+    as_async,
     build_monitored_env_tool,
     wrap_tool,
 )
@@ -415,6 +417,26 @@ def test_build_monitored_env_tool_recurses_into_nested_toolboxes() -> None:
     # Original toolbox tree is untouched (concrete leaves).
     assert isinstance(outer_box.tools[0].tools[0], _SyncEchoTool)
     assert isinstance(outer_box.tools[1], _SyncOtherTool)
+
+
+def test_build_monitored_env_tool_surfaces_stop_once_for_multi_leaf() -> None:
+    """F4: a multi-leaf monitored toolbox must advertise STOP_ACTION exactly
+    once. Otherwise AsyncToolbox (parallel_actions path) raises on the
+    duplicate 'stop', and the LLM gets duplicate stop tool schemas."""
+
+    class _StopTask:
+        accept_agent_stop = True
+
+        def __init__(self) -> None:
+            self.toolbox = Toolbox([_SyncEchoTool(), _SyncOtherTool()])
+
+    task = _StopTask()
+    env_tool = build_monitored_env_tool(task, _make_streamer(Budget(max_agent_steps=5)))
+    stop_count = sum(a.name == STOP_ACTION.name for a in env_tool.action_set)
+    assert stop_count == 1, f"expected exactly one STOP_ACTION, got {stop_count}"
+    # Parallel path: converting to AsyncToolbox must not trip its duplicate
+    # action-name guard.
+    as_async(env_tool)
 
 
 def test_build_monitored_env_tool_with_parent_event_id_getter() -> None:

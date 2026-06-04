@@ -268,6 +268,11 @@ class MonitoredTool(AbstractTool):
         self.inner = inner
         self._inner_is_async = isinstance(inner, AbstractAsyncTool)
         self._state = _MonitorState(emit, budget, parent_event_id_getter, task)
+        # TEMP (F4 / design-debt): when set, this leaf does NOT surface
+        # STOP_ACTION. `_dedup_stop_actions` flips it on every monitored leaf
+        # but one so a multi-leaf toolbox surfaces `stop` exactly once. See
+        # `_dedup_stop_actions` for why and the proper fix.
+        self._suppress_stop = False
 
     # --- delegation ---
 
@@ -286,7 +291,7 @@ class MonitoredTool(AbstractTool):
         """
         actions = list(self.inner.action_set)
         task = self._state.task
-        if task is not None and getattr(task, "accept_agent_stop", False):
+        if task is not None and getattr(task, "accept_agent_stop", False) and not self._suppress_stop:
             if not any(a.name == STOP_ACTION.name for a in actions):
                 actions.append(STOP_ACTION)
         return actions
@@ -463,7 +468,36 @@ def build_monitored_env_tool(task: Any, streamer: Any) -> AbstractTool | Abstrac
     container = getattr(task, "toolbox", None) or getattr(task, "tool", None)
     if container is None:
         return None
-    return _monitored_view(container, emit, budget, parent_event_id_getter, task)
+    env_tool = _monitored_view(container, emit, budget, parent_event_id_getter, task)
+    _dedup_stop_actions(env_tool)
+    return env_tool
+
+
+def _dedup_stop_actions(env_tool: AbstractTool | AbstractAsyncTool) -> None:
+    """TEMP (F4 / design-debt): surface STOP_ACTION on exactly one monitored leaf.
+
+    `MonitoredTool.action_set` appends `STOP_ACTION` per leaf, so a multi-leaf
+    monitored toolbox advertises `stop` N times — which both trips
+    `AsyncToolbox.__init__`'s duplicate-name guard (crashing `parallel_actions`
+    on multi-tool cubes) and sends duplicate `stop` tool schemas to the LLM.
+    Keep STOP on the first monitored leaf and suppress it on the rest.
+
+    Proper fix (deferred): STOP is a task/container-level action, not a per-leaf
+    one — surface it once at the toolbox boundary (or have the toolbox treat
+    STOP_ACTION as a shared sentinel) and drop both this pass and the per-leaf
+    append. Tracked as design-debt F4.
+    """
+    seen_stop = False
+    stack: list = [env_tool]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (Toolbox, AsyncToolbox)):
+            stack.extend(node.tools)
+        elif isinstance(node, MonitoredTool):
+            if seen_stop:
+                node._suppress_stop = True
+            else:
+                seen_stop = True
 
 
 def _monitored_view(
