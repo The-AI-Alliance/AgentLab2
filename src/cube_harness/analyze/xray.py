@@ -476,23 +476,46 @@ html {
     margin-bottom: 2px !important;
     min-height: 0 !important;
 }
-/* Experiments toolbar: render each (action, auto-select) pair as a single
-   split-button so it's clear the 🤖✓ belongs to its action. gap:0 makes the
-   pair touch; explicit left margins re-introduce spacing BETWEEN groups. */
+/* Experiments toolbar: one row that never wraps. Dir controls on the left; the
+   growing dir label pushes the two action split-buttons (Archive 🤖✓ · Submit 🤖✓)
+   to the right. Each (action, auto-select) pair renders as one split-button. */
 .xray-exp-toolbar {
     gap: 0 !important;
-    align-items: center;
+    align-items: center !important;
+    flex-wrap: nowrap !important;
+    width: 100%;
 }
-#exp_pick_archivable_btn, #exp_pick_submittable_btn, #exp_refresh_btn {
+/* The dir label grows to fill, right-aligning the actions; ellipsis if long. */
+#exp_dir_label {
+    flex: 1 1 auto !important;
+    min-width: 30px;
+    margin: 0 10px !important;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+#exp_refresh_btn {
     min-width: 34px !important;
     max-width: 40px;
     padding: 2px 8px !important;
     flex: 0 0 auto;
+    margin-left: 6px !important;
 }
-/* On row 2 (Archive-pair · Submit-pair), only Submit needs a left margin to
-   separate the two split-buttons; Archive is first. */
+/* auto-select buttons: stretch to the action button's height (so the split-
+   button halves match) and fit "🤖✓" on ONE line (no vertical wrap). */
+#exp_pick_archivable_btn, #exp_pick_submittable_btn {
+    min-width: 0 !important;
+    flex: 0 0 auto;
+    align-self: stretch !important;
+}
+#exp_pick_archivable_btn button, #exp_pick_submittable_btn button {
+    height: 100% !important;
+    padding: 2px 10px !important;
+    white-space: nowrap !important;
+}
+/* gap between the Archive split-button and the Submit split-button */
 #exp_submit_btn {
-    margin-left: 18px !important;
+    margin-left: 16px !important;
 }
 #exp_archive_btn button, #exp_submit_btn button {
     border-top-right-radius: 0 !important;
@@ -1269,17 +1292,17 @@ def run_xray(
                     elem_classes="help-content",
                 )
             with gr.Tab("Experiments", id="experiments_tab"):
-                # Row 1: directory controls. Row 2: the two actions, each with an
-                # attached 🤖✓ auto-select button (split-button) that ticks the rows
-                # it applies to; the user reviews, then clicks the action. Tooltips
-                # are set in _INIT_JS.
-                with gr.Row():
+                # One toolbar row: directory controls on the left, the two action
+                # split-buttons (Archive 🤖✓ · Submit 🤖✓) pushed to the right by the
+                # growing directory label. Each 🤖✓ auto-selects the rows its action
+                # applies to; the user reviews, then clicks the action. Tooltips are
+                # set in _INIT_JS.
+                with gr.Row(elem_classes="xray-exp-toolbar"):
                     exp_browse_btn = gr.Button(
                         "📁 Browse…", scale=0, size="sm", variant="secondary", elem_id="exp_browse_btn"
                     )
-                    results_dir_md = gr.Markdown(f"📂 `{state.results_dir}`")
                     exp_refresh_btn = gr.Button("↺", scale=0, size="sm", elem_id="exp_refresh_btn", min_width=0)
-                with gr.Row(elem_classes="xray-exp-toolbar"):
+                    results_dir_md = gr.Markdown(f"📂 `{state.results_dir}`", elem_id="exp_dir_label")
                     exp_archive_btn = gr.Button(
                         "🗃 Archive", scale=0, size="sm", variant="secondary", elem_id="exp_archive_btn"
                     )
