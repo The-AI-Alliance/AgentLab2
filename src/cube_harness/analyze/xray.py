@@ -1176,8 +1176,10 @@ def run_xray(
                 )
             with gr.Tab("Experiments"):
                 with gr.Row():
+                    exp_browse_btn = gr.Button("📁 Browse…", scale=0, size="sm", variant="secondary")
                     exp_refresh_btn = gr.Button("↺ Refresh", scale=0, size="sm")
                     exp_archive_btn = gr.Button("🗃 Archive selected", scale=0, size="sm", variant="secondary")
+                results_dir_md = gr.Markdown(f"📂 `{state.results_dir}`")
                 exp_table = gr.DataFrame(
                     headers=["", "experiment", "date", "agent", "model", "benchmark", "status", "avg_reward"],
                     datatype=["bool", "str", "str", "str", "str", "str", "html", "str"],
@@ -1323,6 +1325,15 @@ def run_xray(
         def _exp_table_value() -> list[list[Any]]:
             return _exp_table_rows(auto_select_first=False)
 
+        def on_browse_dir() -> tuple[list[list[Any]], str]:
+            """Open a native folder picker; on choice, switch the results dir and
+            reload the experiments table (the table .change cascade clears the
+            current selection/hierarchy). No-op if the user cancels."""
+            picked = xray_utils.pick_directory(state.results_dir)
+            if picked is not None:
+                state.results_dir = picked
+            return _exp_table_value(), f"📂 `{state.results_dir}`"
+
         _hierarchy_outputs = [
             experiment_stats,
             agent_table,
@@ -1336,6 +1347,7 @@ def run_xray(
         ]
 
         exp_table.change(fn=on_experiments_change, inputs=exp_table, outputs=_hierarchy_outputs)
+        exp_browse_btn.click(fn=on_browse_dir, outputs=[exp_table, results_dir_md])
         exp_refresh_btn.click(fn=_exp_table_value, outputs=exp_table)
         exp_archive_btn.click(fn=on_archive_selected, outputs=[exp_table, *_hierarchy_outputs])
 
