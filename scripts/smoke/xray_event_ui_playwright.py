@@ -59,13 +59,26 @@ def _fail(msg: str) -> int:
 
 
 def main() -> int:
+    # Optional: point at a real results dir to debug a specific experiment, e.g.
+    #   xray_event_ui_playwright.py --results-dir ~/cube_harness_results
+    # With no arg, synthesizes the deterministic demo fixture (CI-safe).
+    real_dir: Path | None = None
+    if "--results-dir" in sys.argv:
+        real_dir = Path(sys.argv[sys.argv.index("--results-dir") + 1]).expanduser()
+
     out_dir = Path("/tmp/xray_shots")
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
 
-    exp_root = Path(tempfile.mkdtemp(prefix="xray-ui-"))
-    build_demo_experiment(exp_root / "demo_experiment")
+    tmp: Path | None = None
+    if real_dir is not None:
+        exp_root = real_dir
+        print(f"  • pointing at real results dir: {exp_root}")
+    else:
+        tmp = Path(tempfile.mkdtemp(prefix="xray-ui-"))
+        exp_root = tmp
+        build_demo_experiment(exp_root / "demo_experiment")
 
     port = _free_port()
     url = f"http://127.0.0.1:{port}/"
@@ -128,7 +141,8 @@ def main() -> int:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
-        shutil.rmtree(exp_root, ignore_errors=True)
+        if tmp is not None:  # only remove the synthesized fixture, never a real dir
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":
