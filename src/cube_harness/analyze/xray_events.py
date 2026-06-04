@@ -347,7 +347,11 @@ class EpisodeEvents:
 def _card_text(out, index: int) -> tuple[str, str]:
     """`(title, subtitle)` for a card, derived from the event payload."""
     if isinstance(out, LLMCallEvent):
-        tag = (out.call.tag if out.call else "") or "LLM call"
+        # Title clearly marks this as the LLM turn; the call's tag (e.g. "act",
+        # "summary") is a secondary detail in the subtitle so it isn't mistaken
+        # for an action.
+        tag = out.call.tag if out.call else ""
+        title = f"LLM call · {tag}" if tag else "LLM call"
         if out.error is not None:
             return "LLM error", _error_preview(out.error)
         sub = ""
@@ -356,7 +360,7 @@ def _card_text(out, index: int) -> tuple[str, str]:
             sub = out.call.llm_config.model_name
             if n_tools:
                 sub += f" · {n_tools} tools"
-        return tag, sub
+        return title, sub
     if isinstance(out, ToolCallEvent):
         if out.parent_event_id == RESET_PARENT:
             return "Initial observation", "task reset"
