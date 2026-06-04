@@ -147,9 +147,6 @@ _STATUS_HTML: dict[str, str] = {
     "failed": "<span title='Failed — worker crashed'>⛔</span>",
     "stale": "<span title='Stale — heartbeat lost, dead worker'>👻</span>",
     "cancelled": "<span title='Cancelled'>🚫</span>",
-    # Declared-but-never-run tasks (experiment ran a subset of its declared
-    # benchmark — a partial / early-stopped run; this is why it reads unfinished).
-    "missing": "<span title='No status file — task in the declared subset never ran'>○</span>",
     # Legacy heuristic (no status.json — pre-PR#315 experiments)
     "system_error": "<span title='System error — crashed (legacy inferred status)' style='color:#dc3545;font-weight:bold;font-size:14px'>✕</span>",
 }
@@ -186,7 +183,7 @@ def _build_status_cell(statuses: list[str]) -> str:
         if s not in TERMINAL_OUTCOME_STATUSES:
             counts[s] = counts.get(s, 0) + 1
 
-    order = ["running", "queued", "stale", "cancelled", "failed", "system_error", "missing"]
+    order = ["running", "queued", "stale", "cancelled", "failed", "system_error"]
     parts = []
     if n_terminal:
         parts.append(f"{n_terminal}{_COMPLETED_AGGREGATE_HTML}")
@@ -485,8 +482,8 @@ def _parse_experiment_config(exp_dir: Path) -> dict[str, str]:
 GHOST_TIMEOUT = DEFAULT_STEP_TIMEOUT_S + DEFAULT_CANCEL_GRACE_S  # mirrors runner's kill threshold
 _XRAY_CACHE_FILENAME = ".xray_summary.json"
 # Bump when the cached row schema/semantics change so stale caches recompute.
-# v2: added `_category` (eligibility) + count declared-but-unrun tasks in `status`.
-_EXP_ROW_VERSION = 2
+# v3: added _category (eligibility) + _ran/_total for the incomplete badge.
+_EXP_ROW_VERSION = 3
 
 
 def _promote_ghost_episodes(exp_dir: Path) -> None:
@@ -605,11 +602,12 @@ def scan_category(exp_dir: Path, *, sweep_stale: bool = False) -> str:
         return "broken"
 
 
-def eligibility_badge(exp_dir: Path, category: str) -> str:
+def eligibility_badge(exp_dir: Path, category: str, ran: int | None = None, total: int | None = None) -> str:
     """Badge for the eligibility column. The persisted submission state (read
     fresh, cheap) takes precedence over the cached scan `category`: a successful
     submission shows ✅; a recorded rejection shows 🚫 rejected (with its reason),
-    so a previously-rejected/broken run is never mistaken for a success."""
+    so a previously-rejected/broken run is never mistaken for a success.
+    `incomplete` is annotated with ran/declared task counts (e.g. 🧪 3/500 incomplete)."""
     subs = submissions.read(exp_dir)
     submitted = [d for d in ("journal", "eee") if subs.get(d, {}).get("status") == "submitted"]
     if submitted:
@@ -619,6 +617,11 @@ def eligibility_badge(exp_dir: Path, category: str) -> str:
     if rejected is not None:
         reason = html_lib.escape(rejected.get("reason", "previously rejected"))
         return f"<span title='{reason}'>🚫 rejected</span>"
+    if category == "incomplete" and ran is not None and total:
+        return (
+            f"<span title='Ran only {ran} of {total} declared tasks — partial / debug subset, not submittable'>"
+            f"🧪 {ran}/{total} incomplete</span>"
+        )
     return _ELIGIBILITY_BADGES.get(category, f"<span>{html_lib.escape(category)}</span>")
 
 
@@ -643,9 +646,6 @@ def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:
             for raw, n in result.status_counts.items()
             for display in [_RAW_STATUS_MAP.get(raw, "system_error")] * n
         ]
-        # Surface declared-but-never-run tasks so a partial run reads as e.g.
-        # "3✅ + 497○ / 500" instead of a finished-looking "3✅ / 3".
-        statuses.extend(["missing"] * max(0, result.n_missing))
         rewards = list(result.rewards)
     else:
         statuses, rewards = _read_display_statuses(exp_dir)
@@ -664,6 +664,9 @@ def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:
         # Cached scan category (stable for terminal runs); the displayed badge is
         # derived fresh in get_experiments_table_rows so submissions stay current.
         "_category": result.category.value,
+        # Ran/declared task counts — used to annotate the incomplete badge (3/500).
+        "_ran": result.n_terminal,
+        "_total": result.n_tasks,
         "_v": _EXP_ROW_VERSION,
     }
 
@@ -753,7 +756,9 @@ def get_experiments_table_rows(results_dir: Path) -> list[dict[str, Any]]:
             row = {"selected": False, "experiment": dir_path.name, **summary}
         # Derive the eligibility badge fresh (submissions.json is cheap and can
         # change after a submit without invalidating the mtime-based cache).
-        row["eligibility"] = eligibility_badge(dir_path, row.get("_category", "broken"))
+        row["eligibility"] = eligibility_badge(
+            dir_path, row.get("_category", "broken"), row.get("_ran"), row.get("_total")
+        )
         rows.append(row)
     rows.sort(key=lambda r: r["date"], reverse=True)
     return rows

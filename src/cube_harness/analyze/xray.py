@@ -1296,7 +1296,6 @@ def run_xray(
 | ⛔ | Failed — episode errored |
 | 👻 | Stale — no activity for too long |
 | 🚫 | Cancelled |
-| ○ | Task in the declared subset that never ran (partial / early-stopped run) |
 | ✕ | System error — crashed before trajectory was written |
 """,
                     elem_classes="help-content",
