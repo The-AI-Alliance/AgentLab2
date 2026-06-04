@@ -27,13 +27,13 @@ except Exception:  # pragma: no cover - platform without Tk
     _tk_filedialog = None
 
 from cube.benchmark import BenchmarkConfig
-from cube.core import Observation
+from cube.core import EnvironmentOutput, Observation
 from PIL import Image
 
 from cube_harness.agent import AgentConfig
 from cube_harness.analyze.stats import reward_mean_stderr
 from cube_harness.analyze.xray_events import EpisodeEvents, EventGroup
-from cube_harness.core import Trajectory
+from cube_harness.core import AgentOutput, Trajectory
 from cube_harness.episode_status import STATUS_FILENAME, EpisodeStatus, should_sweep_running_to_stale
 from cube_harness.episode_status import TERMINAL_STATUSES as _EPISODE_TERMINAL_STATUSES
 from cube_harness.exp_runner import DEFAULT_CANCEL_GRACE_S, DEFAULT_STEP_TIMEOUT_S
@@ -992,11 +992,32 @@ def compute_trajectory_stats(traj: Trajectory) -> dict[str, Any]:
     prompt_tokens, completion_tokens, cached_tokens, cache_creation_tokens, cost,
     final_reward.
 
-    Token/step counts are aggregated by ``EventStreamer`` into ``summary_stats`` on
-    the metadata stub, so this is a pure lookup. Returns a zeroed dict for stubs
-    that carry no ``summary_stats`` (e.g. missing-trajectory placeholders).
+    XRay's metadata stubs carry ``summary_stats`` (aggregated by ``EventStreamer``),
+    so that's a pure lookup. Legacy in-memory ``Trajectory`` objects with ``steps``
+    (still built by ``inspect_results`` / the Global Report and ``experiments_report``)
+    have no ``summary_stats`` — fall back to counting steps and reading the reward
+    from ``reward_info`` (or the last env step). Token stats stay zero on this path
+    (the legacy ``AgentOutput.llm_calls`` are gone).
     """
-    return traj.summary_stats if traj.summary_stats else dict(_EMPTY_TRAJECTORY_STATS)
+    if traj.summary_stats:
+        return traj.summary_stats
+    if not traj.steps:
+        return dict(_EMPTY_TRAJECTORY_STATS)
+
+    stats = dict(_EMPTY_TRAJECTORY_STATS)
+    stats["n_env_steps"] = sum(1 for s in traj.steps if isinstance(s.output, EnvironmentOutput))
+    stats["n_agent_steps"] = sum(1 for s in traj.steps if isinstance(s.output, AgentOutput))
+    stats["total_actions"] = sum(len(s.output.actions) for s in traj.steps if isinstance(s.output, AgentOutput))
+    if traj.start_time is not None and traj.end_time is not None:
+        stats["duration"] = traj.end_time - traj.start_time
+    if traj.reward_info:
+        stats["final_reward"] = traj.reward_info.get("reward", 0.0)
+    else:
+        for s in reversed(traj.steps):
+            if isinstance(s.output, EnvironmentOutput):
+                stats["final_reward"] = s.output.reward
+                break
+    return stats
 
 
 def _finished_rewards(trajectories: list[Trajectory]) -> list[float]:
