@@ -285,12 +285,16 @@ class TerminalClaudeDriver:
 
     Cost reporting is left at zero — the headless CLI does not surface a per-run
     cost in its JSON envelope. Token counts are populated when the CLI provides
-    them. Parallelism is conservative (2) because each invocation spawns a full
-    Node process.
+    them.
+
+    `max_parallelism=16` reflects the smoke (`scripts/smoke/investigator_drivers.py`):
+    clean through level=24 on a quiet host, crashes around 32. The advisory cap
+    is set ~50% below the documented breaking point — well above the original
+    over-conservative `2` (which had no empirical basis once the smoke ran).
     """
 
     name: str = "claude-terminal"
-    max_parallelism: int = 2
+    max_parallelism: int = 16
 
     def __init__(
         self,

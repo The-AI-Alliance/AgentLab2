@@ -4,7 +4,7 @@
 Drives both `ClaudeCodeSDKDriver` and `TerminalClaudeDriver` with a trivial
 JSON-emitting prompt at sweeping concurrency levels and reports success rate
 plus latency per level. Used to validate that the spec's documented
-`max_parallelism` defaults (SDK=8, terminal=2) reflect reality on this host.
+`max_parallelism` defaults (SDK=8, terminal=16) reflect reality on this host.
 
 The prompt is intentionally tiny ("emit `{\"hello\": \"world\"}` and stop") —
 this exercises the transport / session-store layer, not the model. Costs
@@ -42,7 +42,7 @@ results vary with API health, network, and concurrent local processes.
     level=32  32/32  ok   10.8s wall    9.2s avg
     -> Clean through 32. Latency ~3x as parallelism scales 1 -> 32.
 
-  TerminalClaudeDriver (advisory max_parallelism=2):
+  TerminalClaudeDriver (advisory max_parallelism=16):
     level=1    1/1   ok    6.0s wall    6.0s avg
     level=2    2/2   ok    5.4s wall    4.1s avg
     level=3    3/3   ok    3.8s wall    3.5s avg
