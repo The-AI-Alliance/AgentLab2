@@ -18,7 +18,7 @@ class MiniWobBenchmark(Benchmark["MiniWobBenchmarkConfig"]):
         pass
     
     def close(self) -> None:
-	pass
+	    pass
 
 class MiniWobBenchmarkConfig(BenchmarkConfig[MiniWobTaskMetadata]):
     benchmark_metadata: ClassVar[BenchmarkMetadata] = BenchmarkMetadata(
