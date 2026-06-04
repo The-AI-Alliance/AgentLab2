@@ -159,14 +159,19 @@ class EpisodeEvents:
         `parent_event_id` on them).
         """
         root_of: list[int | None] = [None] * len(self.events)
+        # Cycle guard: indices currently on the active DFS stack.
+        # Using a mutable set + explicit pop (O(N) total) rather than
+        # rebuilding a frozenset per frame (O(N²)).
+        visiting: set[int] = set()
 
-        def resolve(i: int, seen: frozenset[int]) -> int:
+        def resolve(i: int) -> int:
             """Root of the parent chain at `i` (order-independent, memoized)."""
             if root_of[i] is not None:
                 return root_of[i]  # type: ignore[return-value]
-            if i in seen:  # malformed self/cyclic parent link — break the cycle
+            if i in visiting:  # malformed self/cyclic parent link
                 root_of[i] = i
                 return i
+            visiting.add(i)
             out = self.events[i].output
             parent_id: str | None = None
             if isinstance(out, ToolCallEvent) and out.parent_event_id != RESET_PARENT:
@@ -174,20 +179,22 @@ class EpisodeEvents:
             elif isinstance(out, EvaluationEvent) and out.parent_event_id:
                 parent_id = out.parent_event_id
             p = self._id_to_index.get(parent_id) if parent_id else None
-            root = resolve(p, seen | {i}) if p is not None else i
+            root = resolve(p) if p is not None else i
+            visiting.discard(i)
             root_of[i] = root
             return root
 
         # Forward pass: parent-linked events resolve through `resolve`;
         # parent-less terminal evals / agent errors attach to the most recent
-        # group root seen so far (positional fallback).
+        # group root by stream position (becomes exact once producers stamp
+        # `parent_event_id` on them).
         last_root: int | None = None
         for i, ev in enumerate(self.events):
             out = ev.output
             if isinstance(out, (EvaluationEvent, AgentErrorEvent)) and not getattr(out, "parent_event_id", None):
                 root_of[i] = last_root if last_root is not None else i
             else:
-                resolve(i, frozenset())
+                resolve(i)
             if root_of[i] == i:  # this event opens a new group
                 last_root = i
         return [r if r is not None else i for i, r in enumerate(root_of)]
