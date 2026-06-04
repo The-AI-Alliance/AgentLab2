@@ -147,6 +147,9 @@ _STATUS_HTML: dict[str, str] = {
     "failed": "<span title='Failed — worker crashed'>⛔</span>",
     "stale": "<span title='Stale — heartbeat lost, dead worker'>👻</span>",
     "cancelled": "<span title='Cancelled'>🚫</span>",
+    # Declared-but-never-run tasks (experiment ran a subset of its declared
+    # benchmark — a partial / early-stopped run; this is why it reads unfinished).
+    "missing": "<span title='No status file — task in the declared subset never ran'>○</span>",
     # Legacy heuristic (no status.json — pre-PR#315 experiments)
     "system_error": "<span title='System error — crashed (legacy inferred status)' style='color:#dc3545;font-weight:bold;font-size:14px'>✕</span>",
 }
@@ -183,7 +186,7 @@ def _build_status_cell(statuses: list[str]) -> str:
         if s not in TERMINAL_OUTCOME_STATUSES:
             counts[s] = counts.get(s, 0) + 1
 
-    order = ["running", "queued", "stale", "cancelled", "failed", "system_error"]
+    order = ["running", "queued", "stale", "cancelled", "failed", "system_error", "missing"]
     parts = []
     if n_terminal:
         parts.append(f"{n_terminal}{_COMPLETED_AGGREGATE_HTML}")
@@ -481,6 +484,9 @@ def _parse_experiment_config(exp_dir: Path) -> dict[str, str]:
 
 GHOST_TIMEOUT = DEFAULT_STEP_TIMEOUT_S + DEFAULT_CANCEL_GRACE_S  # mirrors runner's kill threshold
 _XRAY_CACHE_FILENAME = ".xray_summary.json"
+# Bump when the cached row schema/semantics change so stale caches recompute.
+# v2: added `_category` (eligibility) + count declared-but-unrun tasks in `status`.
+_EXP_ROW_VERSION = 2
 
 
 def _promote_ghost_episodes(exp_dir: Path) -> None:
@@ -636,6 +642,9 @@ def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:
             for raw, n in result.status_counts.items()
             for display in [_RAW_STATUS_MAP.get(raw, "system_error")] * n
         ]
+        # Surface declared-but-never-run tasks so a partial run reads as e.g.
+        # "3✅ + 497○ / 500" instead of a finished-looking "3✅ / 3".
+        statuses.extend(["missing"] * max(0, result.n_missing))
         rewards = list(result.rewards)
     else:
         statuses, rewards = _read_display_statuses(exp_dir)
@@ -654,6 +663,7 @@ def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:
         # Cached scan category (stable for terminal runs); the displayed badge is
         # derived fresh in get_experiments_table_rows so submissions stay current.
         "_category": result.category.value,
+        "_v": _EXP_ROW_VERSION,
     }
 
 
@@ -721,12 +731,11 @@ def get_experiments_table_rows(results_dir: Path) -> list[dict[str, Any]]:
         if cache_path.exists():
             try:
                 cache_mtime = cache_path.stat().st_mtime
-                # Old caches predate `_category`; treat them as stale so the
-                # eligibility column backfills (and the cache is rewritten).
+                # Older-schema caches are treated as stale (recompute + rewrite).
                 if _is_cache_valid(dir_path, cache_mtime):
                     with open(cache_path) as f:
                         cached = json.load(f)
-                    if "_category" in cached:
+                    if cached.get("_v") == _EXP_ROW_VERSION:
                         row = {"selected": False, "experiment": dir_path.name, **cached}
             except Exception as exc:
                 logger.debug("Cache read failed for %s: %s", cache_path, exc)

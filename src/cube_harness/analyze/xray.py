@@ -852,9 +852,12 @@ def run_xray(
         hierarchy = _load_and_build_hierarchy()
         return (*hierarchy, gr.Timer(active=state.should_poll()))
 
-    def on_archive_selected() -> tuple[Any, str, Any, Any, Any, StepId, gr.Tab, gr.Tab, gr.Tab, str, str, gr.Timer]:
+    def on_archive_selected() -> tuple[
+        Any, str, Any, Any, Any, StepId, gr.Tab, gr.Tab, gr.Tab, str, str, gr.Timer, Any
+    ]:
         """Archive all currently selected experiments and reset state."""
-        for name in list(state._selected_exp_names):
+        names = list(state._selected_exp_names)
+        for name in names:
             xray_utils.archive_experiment(state.results_dir, name)
         state._selected_exp_names = []
         state.trajectories = []
@@ -870,7 +873,13 @@ def run_xray(
             "",
             gr.Timer(active=False),
         )
-        return (_exp_table_rows(), *_empty_hierarchy)
+        # Replace the now-stale "Selected N…" line with a result (or clear it).
+        status = (
+            gr.update(value=f"🗃 Archived **{len(names)}** experiment(s) to `_archive/`.", visible=True)
+            if names
+            else gr.update(value="", visible=False)
+        )
+        return (_exp_table_rows(), *_empty_hierarchy, status)
 
     def on_select_agent(evt: gr.SelectData, agent_df: Any) -> tuple[Any, Any, StepId, gr.Tab, gr.Tab, str, str]:
         if evt is None or evt.index is None or agent_df is None or len(agent_df) == 0:
@@ -1287,6 +1296,7 @@ def run_xray(
 | ⛔ | Failed — episode errored |
 | 👻 | Stale — no activity for too long |
 | 🚫 | Cancelled |
+| ○ | Task in the declared subset that never ran (partial / early-stopped run) |
 | ✕ | System error — crashed before trajectory was written |
 """,
                     elem_classes="help-content",
@@ -1554,7 +1564,7 @@ def run_xray(
         exp_submit_btn.click(
             fn=lambda t: on_submit(t, "journal"), inputs=exp_table, outputs=[exp_table, exp_action_status]
         )
-        exp_archive_btn.click(fn=on_archive_selected, outputs=[exp_table, *_hierarchy_outputs])
+        exp_archive_btn.click(fn=on_archive_selected, outputs=[exp_table, *_hierarchy_outputs, exp_action_status])
 
         bg_timer.tick(
             fn=on_bg_load_tick,
