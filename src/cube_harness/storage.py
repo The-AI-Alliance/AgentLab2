@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Protocol
 
 import msgpack
 import zstandard
-from cube.core import Action, EnvironmentOutput
+from cube.core import Action, EnvironmentOutput, StepError
 from pydantic import BaseModel
 
 from cube_harness.core import (
@@ -24,6 +24,7 @@ from cube_harness.core import (
     TrajectoryEvent,
     TrajectoryMetadata,
     TrajectoryStep,
+    _new_event_id,
 )
 from cube_harness.episode_logs import get_log_path as get_episode_log_path
 from cube_harness.episode_logs import trajectory_log_id
@@ -394,7 +395,18 @@ class TrajectoryView:
             step = TrajectoryStep.model_validate(step_data)
             return self._step_to_event(step, entry, step_data)
         data = _deserialize_event(entry.path.read_bytes())
-        return TrajectoryEvent.model_validate(data)
+        # Old intermediate event format: the batched `AgentEvent` (pre the
+        # LLMCallEvent rename) — its `_type` points at a removed class, so it
+        # can't be model-validated. Synthesize an LLMCallEvent from its raw
+        # llm_calls (the `_tool_call` siblings reference its id, so grouping
+        # still works). Any other decode failure degrades to an error card
+        # rather than blanking the whole episode.
+        if entry.kind == "agent":
+            return _agent_event_to_llm_event(data)
+        try:
+            return TrajectoryEvent.model_validate(data)
+        except Exception as exc:
+            return _decode_error_event(data, exc)
 
     def _step_to_event(self, step: TrajectoryStep, entry: _EventIndexEntry, step_data: dict) -> TrajectoryEvent:
         """Synthesize a TrajectoryEvent from a legacy step file.
@@ -455,6 +467,36 @@ class TrajectoryView:
                     action = None
             self._legacy_act_action_cache[act_num] = action
         return self._legacy_act_action_cache[act_num]
+
+
+def _agent_event_to_llm_event(data: dict) -> TrajectoryEvent:
+    """Adapt an old batched `AgentEvent` payload into an `LLMCallEvent`.
+
+    The pre-rename event format stored `{output: {AgentEvent: id, llm_calls,
+    actions, error, ...}}`; `AgentEvent` no longer exists, so it can't be
+    model-validated. Reuse the legacy primary-call extraction and preserve the
+    event `id` so sibling `ToolCallEvent`s (which reference it via
+    `parent_event_id`) still group under it."""
+    output = data.get("output") or {}
+    raw_error = output.get("error")
+    error = StepError.model_validate(raw_error) if raw_error else None
+    llm_event = LLMCallEvent(
+        id=output.get("id") or _new_event_id(),
+        call=_legacy_primary_call(data),
+        error=error,
+    )
+    return TrajectoryEvent(output=llm_event, start_time=data.get("start_time"), end_time=data.get("end_time"))
+
+
+def _decode_error_event(data: dict, exc: Exception) -> TrajectoryEvent:
+    """Fallback for an event whose payload won't decode — render it as an error
+    card instead of letting one bad event blank the whole episode."""
+    err = StepError(error_type="DecodeError", exception_str=str(exc), stack_trace="")
+    return TrajectoryEvent(
+        output=AgentErrorEvent(error=err),
+        start_time=data.get("start_time"),
+        end_time=data.get("end_time"),
+    )
 
 
 def _legacy_primary_call(step_data: dict) -> LLMCall | None:
