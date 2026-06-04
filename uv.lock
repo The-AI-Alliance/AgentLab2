@@ -710,7 +710,7 @@ requires-dist = [
     { name = "browsergym-core", specifier = ">=0.14.3" },
     { name = "claude-agent-sdk", marker = "extra == 'investigator'", specifier = ">=0.1.6" },
     { name = "cube-browser-playwright", specifier = ">=0.2.0" },
-    { name = "cube-standard", git = "https://github.com/The-AI-Alliance/cube-standard.git?branch=dev" },
+    { name = "cube-standard", specifier = ">=0.1.0rc8" },
     { name = "docker", specifier = ">=7.1.0" },
     { name = "gradio", marker = "extra == 'analyze'", specifier = "~=5.49" },
     { name = "litellm", specifier = "~=1.80.8" },
@@ -745,8 +745,8 @@ dev = [
 
 [[package]]
 name = "cube-standard"
-version = "0.1.0rc9"
-source = { git = "https://github.com/The-AI-Alliance/cube-standard.git?branch=dev#1c9721f2dad10dee758f3f90045c237e4d47c900" }
+version = "0.1.0rc8"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "docstring-parser" },
     { name = "fastapi" },
@@ -757,8 +757,11 @@ dependencies = [
     { name = "requests" },
     { name = "rich" },
     { name = "tqdm" },
-    { name = "typing-extensions" },
     { name = "uvicorn", extra = ["standard"] },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/72/9d/d14afd70a745efd32b42b2ff6e1d586e4977b385ecbb49c3feb7c5bed6b9/cube_standard-0.1.0rc8.tar.gz", hash = "sha256:f30602b14a893801aa1d1015d5e09aa4d8606984802e9e642434f27ec9183fd1", size = 114284, upload-time = "2026-05-01T18:46:36.493Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7b/6c/0dbc1ae8737d6c0d3f97bf86a1331e9d13a629776f1eeff48c909272e8df/cube_standard-0.1.0rc8-py3-none-any.whl", hash = "sha256:d29be2e034ac369fdc1b2741e58ef780c04d6e1dbbe69cf0407852be2d4f1685", size = 134313, upload-time = "2026-05-01T18:46:34.93Z" },
 ]
 
 [[package]]
