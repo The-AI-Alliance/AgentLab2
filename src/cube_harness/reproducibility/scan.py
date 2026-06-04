@@ -94,7 +94,8 @@ def archive_experiment_dir(experiment_dir: Path) -> Path:
 class ScanCategory(str, Enum):
     already_submitted = "already_submitted"
     broken = "broken"
-    unfinished = "unfinished"
+    unfinished = "unfinished"  # episodes still QUEUED/RUNNING — state may change
+    incomplete = "incomplete"  # finished, but ran only a subset of the declared benchmark
     subset_review = "subset_review"
     submittable = "submittable"
 
@@ -271,12 +272,16 @@ def classify(
             ),
         )
 
-    # ── Missing tasks ⇒ unfinished (could resume) ───────────────────────
+    # ── Missing tasks, nothing in flight ⇒ incomplete ───────────────────
+    # A finished run that covered only a subset of the declared benchmark
+    # (selected via glob / task-list / early stop). Distinct from `unfinished`
+    # (still running): this won't progress on its own, and it isn't submittable
+    # as the full benchmark — it's typically a debug / partial slice.
     if n_missing > 0:
         return ScanResult(
             **base,
-            category=ScanCategory.unfinished,
-            reasons=(f"{n_missing}/{n_tasks} task(s) have no status file — experiment may have stopped early",),
+            category=ScanCategory.incomplete,
+            reasons=(f"{n_terminal}/{n_tasks} declared task(s) ran — partial subset, not the full benchmark",),
         )
 
     # ── Subset-shape gate: more restrictive than the original sketch ─────

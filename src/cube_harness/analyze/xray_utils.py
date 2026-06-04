@@ -586,7 +586,8 @@ def _is_cache_valid(exp_dir: Path, cache_mtime: float) -> bool:
 _ELIGIBILITY_BADGES: dict[str, str] = {
     "submittable": "<span title='Clean run — ready to submit'>🟢 submittable</span>",
     "subset_review": "<span title='Passed integrity checks but the subset shape needs a human look'>🔍 review</span>",
-    "unfinished": "<span title='Some episodes are still queued/running (or stale)'>⏳ unfinished</span>",
+    "unfinished": "<span title='Episodes still queued/running — state may change'>⏳ unfinished</span>",
+    "incomplete": "<span title='Finished, but ran only a subset of the declared benchmark (partial / debug slice) — not submittable'>🧪 incomplete</span>",
     "broken": "<span title='Cannot produce a meaningful score'>🚫 broken</span>",
     "already_submitted": "<span title='Has a prior submission/rejection decision'>✅ decided</span>",
 }

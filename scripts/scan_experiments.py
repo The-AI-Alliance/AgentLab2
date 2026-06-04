@@ -9,6 +9,8 @@ the script classifies it into one of:
   • broken             — cannot produce a meaningful submission (silent
                           rejection persisted into ``submissions.json``)
   • unfinished         — still running; state may change, re-scan later
+  • incomplete         — finished, but ran only a subset of the declared
+                          benchmark (partial / debug slice); not submittable
   • subset_review      — passed integrity but not a "complete named subset";
                           requires ``--yes`` to submit
   • submittable        — clean run of a full benchmark or a complete named
@@ -43,6 +45,7 @@ _CATEGORY_ICON = {
     ScanCategory.submittable: "→",
     ScanCategory.subset_review: "?",
     ScanCategory.unfinished: "…",
+    ScanCategory.incomplete: "◐",
     ScanCategory.broken: "✗",
 }
 

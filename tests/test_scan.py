@@ -165,14 +165,17 @@ class TestClassifierUnfinished:
         assert result.category is ScanCategory.unfinished
         assert "QUEUED/RUNNING" in result.reasons[0]
 
-    def test_missing_status_files_is_unfinished(self, tmp_path: Path) -> None:
+    def test_missing_status_files_is_incomplete(self, tmp_path: Path) -> None:
+        # A finished run covering only a subset of the declared benchmark is
+        # `incomplete` (a partial/debug slice), distinct from `unfinished`
+        # (still running).
         exp_dir = tmp_path / "partial"
         _populate_clean_run(exp_dir, n_tasks=5, n_success=3)
         # Bump n_tasks to 10 — 5 tasks have no status file at all.
         _set_subset_field(exp_dir, n_tasks=10)
         result = classify(exp_dir)
-        assert result.category is ScanCategory.unfinished
-        assert "have no status file" in result.reasons[0]
+        assert result.category is ScanCategory.incomplete
+        assert "partial subset" in result.reasons[0]
 
 
 class TestClassifierSubsetReview:

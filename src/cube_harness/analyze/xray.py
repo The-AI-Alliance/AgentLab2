@@ -691,7 +691,7 @@ _INIT_JS = """
         '#exp_browse_btn': 'Pick a different results directory',
         '#exp_refresh_btn': 'Re-scan the results directory (cached — fast)',
         '#exp_archive_btn': 'Archive all checked experiments (moves them to _archive/)',
-        '#exp_pick_archivable_btn': 'Auto-select broken / un-scorable experiments to archive',
+        '#exp_pick_archivable_btn': 'Auto-select broken + incomplete (partial/debug) experiments to archive',
         '#exp_submit_btn': 'Submit checked experiments to the cube-registry — opens a PR that auto-validates + merges',
         '#exp_pick_submittable_btn': 'Auto-select submittable, not-yet-submitted experiments',
     };
@@ -1501,8 +1501,10 @@ def run_xray(
             return _to_exp_table(rows), gr.update(value=msg, visible=True)
 
         def on_pick_archivable() -> tuple[list[list[Any]], Any]:
-            """Auto-tick broken / un-scorable experiments for Archive."""
-            return _select_rows(lambda c: c == "broken", "broken / archivable")
+            """Auto-tick non-keepers for Archive: broken runs + incomplete
+            (partial / debug) subsets. The user reviews the ticks before
+            archiving (e.g. to spare an intentional small subset)."""
+            return _select_rows(lambda c: c in ("broken", "incomplete"), "broken / incomplete")
 
         def on_pick_submittable() -> tuple[list[list[Any]], Any]:
             """Auto-tick submittable, not-yet-submitted experiments for Submit."""
