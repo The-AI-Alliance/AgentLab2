@@ -21,7 +21,6 @@ from typing import Any, Callable
 
 import gradio as gr
 import pandas as pd
-from PIL import Image
 
 from cube_harness import EXP_DIR
 from cube_harness.analyze import inspect_results, xray_utils
@@ -975,13 +974,17 @@ def run_xray(
     # Each reads state via closure and takes no arguments.
     # ------------------------------------------------------------------
 
-    def _render_observation() -> tuple[list[Image.Image], str]:
+    def _render_observation() -> tuple[Any, str]:
         """Observation tab: screenshots (gallery) + text contents for the
-        selected group's observation(s). Parallel siblings are stacked."""
+        selected group's observation(s). Parallel siblings are stacked.
+
+        The gallery is hidden entirely when the group has no screenshots (most
+        non-browser tasks) so it doesn't render an empty placeholder."""
         group = state.selected_group()
         if group is None or state.current_events is None:
-            return [], "<em>No event selected.</em>"
-        return xray_utils.render_group_observation_html(state.current_events, group)
+            return gr.update(value=[], visible=False), "<em>No event selected.</em>"
+        images, html = xray_utils.render_group_observation_html(state.current_events, group)
+        return gr.update(value=images, visible=bool(images)), html
 
     def _render_axtree() -> str:
         group = state.selected_group()
@@ -1279,6 +1282,7 @@ def run_xray(
                             columns=2,
                             height=420,
                             object_fit="contain",
+                            visible=False,  # shown only when the group has screenshots
                         )
                         observation_text = gr.HTML()
 
