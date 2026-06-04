@@ -16,7 +16,7 @@ from cube.tool import AbstractTool
 from cube_harness.agent import Agent, AgentConfig
 from cube_harness.core import AgentOutput, LLMCallEvent, ToolCallEvent, TrajectoryEvent
 from cube_harness.streamer import EventStreamer
-from cube_harness.tool import Budget, BudgetExceeded, TaskDone, install_monitoring
+from cube_harness.tool import Budget, BudgetExceeded, TaskDone, build_monitored_env_tool
 
 # ---------------------------------------------------------------------------
 # Mock pieces: a tiny "task" with a sync step that increments a counter
@@ -107,13 +107,15 @@ class _FakeStorage:
         return [te.output for _, _, te in self.events]
 
 
-def _setup(task, budget: Budget) -> tuple[EventStreamer, _FakeStorage]:
-    """Build EventStreamer + storage + install monitoring — the way
-    Episode does it. Storage owns event numbering; nothing to thread."""
+def _setup(task, budget: Budget) -> tuple[EventStreamer, _FakeStorage, object]:
+    """Build EventStreamer + storage + the monitored env_tool — the way
+    Episode does it. Storage owns event numbering; nothing to thread. The
+    returned env_tool is what the agent drives (task's own tool is left
+    concrete)."""
     storage = _FakeStorage()
     streamer = EventStreamer(trajectory_id="t", storage=storage, budget=budget)
-    install_monitoring(task, streamer)
-    return streamer, storage
+    env_tool = build_monitored_env_tool(task, streamer)
+    return streamer, storage, env_tool
 
 
 # ---------------------------------------------------------------------------
@@ -128,12 +130,12 @@ def test_default_run_completes_when_task_signals_done() -> None:
 
     task = _MockTask(done_after_n=3)
     budget = Budget(max_agent_steps=100)
-    recorder, storage = _setup(task, budget)
+    recorder, storage, env_tool = _setup(task, budget)
 
     agent = _CounterAgent(_CounterAgentConfig())
     agent.attach_recorder(recorder)
     try:
-        agent.run(initial_obs=Observation(), env_tool=task.toolbox)
+        agent.run(initial_obs=Observation(), env_tool=env_tool)
     except TaskDone:
         pass  # expected: task.finished() returned True after 3 counter increments
 
@@ -161,10 +163,10 @@ def test_default_run_terminates_on_empty_actions() -> None:
 
     task = _MockTask(done_after_n=100)
     budget = Budget(max_agent_steps=10)
-    recorder, storage = _setup(task, budget)
+    recorder, storage, env_tool = _setup(task, budget)
     agent = _NoopAgent(_CounterAgentConfig())
     agent.attach_recorder(recorder)
-    agent.run(initial_obs=Observation(), env_tool=task.toolbox)
+    agent.run(initial_obs=Observation(), env_tool=env_tool)
     outputs = storage.outputs()
     # No LLM call + empty actions => nothing was emitted by the agent
     # loop (LLM auto-emit doesn't fire; ToolCallEvent dispatch doesn't fire).
@@ -179,11 +181,11 @@ def test_default_run_records_parent_event_id_on_tool_calls() -> None:
 
     task = _MockTask(done_after_n=2)
     budget = Budget(max_agent_steps=10)
-    recorder, storage = _setup(task, budget)
+    recorder, storage, env_tool = _setup(task, budget)
     agent = _CounterAgent(_CounterAgentConfig())
     agent.attach_recorder(recorder)
     try:
-        agent.run(Observation(), task.toolbox)
+        agent.run(Observation(), env_tool)
     except TaskDone:
         pass
 
@@ -203,14 +205,14 @@ def test_default_run_propagates_budget_exceeded() -> None:
 
     task = _MockTask(done_after_n=100)
     budget = Budget(max_agent_steps=100, max_tool_calls=1)
-    recorder, storage = _setup(task, budget)
+    recorder, storage, env_tool = _setup(task, budget)
 
     agent = _CounterAgent(_CounterAgentConfig())
     agent.attach_recorder(recorder)
     # The second tool call (turn 2) raises.
     raised: list[BaseException] = []
     try:
-        agent.run(initial_obs=Observation(), env_tool=task.toolbox)
+        agent.run(initial_obs=Observation(), env_tool=env_tool)
     except BaseException as e:  # noqa: BLE001
         raised.append(e)
     assert any(isinstance(e, BudgetExceeded) for e in raised)

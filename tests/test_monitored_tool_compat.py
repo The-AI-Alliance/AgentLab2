@@ -1,5 +1,5 @@
 """Tests for MonitoredTool — drop-in compatibility,
-mixed toolbox dispatch, budget enforcement, and install_monitoring.
+mixed toolbox dispatch, budget enforcement, and build_monitored_env_tool.
 
 Design note: the RFC originally specified a single async wrapper, but in
 practice every in-tree cube uses sync `Tool` subclasses (and
@@ -23,7 +23,7 @@ from cube_harness.tool import (
     Budget,
     BudgetExceeded,
     MonitoredTool,
-    install_monitoring,
+    build_monitored_env_tool,
     wrap_tool,
 )
 
@@ -316,7 +316,7 @@ def test_wrap_tool_is_idempotent() -> None:
 
 
 # ---------------------------------------------------------------------------
-# install_monitoring
+# build_monitored_env_tool
 # ---------------------------------------------------------------------------
 
 
@@ -331,7 +331,7 @@ def _make_streamer(
     parent_event_id_getter: Callable[[], str] | None = None,
 ) -> object:
     """Lightweight streamer stand-in matching the duck-typed surface
-    `install_monitoring` reads: `.emit`, `.budget`,
+    `build_monitored_env_tool` reads: `.emit`, `.budget`,
     `.current_parent_event_id`. Avoids importing EventStreamer to
     keep this test module agnostic of streamer wiring."""
 
@@ -352,34 +352,53 @@ def _make_streamer(
     return s
 
 
-def test_install_monitoring_wraps_each_member_in_place() -> None:
+def test_build_monitored_env_tool_wraps_each_member() -> None:
     task = _FakeTask([_SyncEchoTool()])
-    install_monitoring(task, _make_streamer(Budget(max_agent_steps=5)))
-    assert all(isinstance(t, MonitoredTool) for t in task.toolbox.tools)
-    assert "sync_echo" in task.toolbox._action_name_to_tool
+    env_tool = build_monitored_env_tool(task, _make_streamer(Budget(max_agent_steps=5)))
+    assert all(isinstance(t, MonitoredTool) for t in env_tool.tools)
+    assert "sync_echo" in env_tool._action_name_to_tool
 
 
-def test_install_monitoring_is_idempotent() -> None:
+def test_build_monitored_env_tool_does_not_mutate_task_tool() -> None:
+    """The task keeps its concrete tool — only the returned env_tool is
+    monitored. This is the contract that lets task.evaluate/setup reach
+    concrete-tool methods, private attrs, and isinstance/find_tool."""
+    task = _FakeTask([_SyncEchoTool()])
+    original_leaves = list(task.toolbox.tools)
+    env_tool = build_monitored_env_tool(task, _make_streamer(Budget(max_agent_steps=5)))
+    # task's toolbox is untouched: same object, same concrete leaves.
+    assert task.toolbox.tools == original_leaves
+    assert all(not isinstance(t, MonitoredTool) for t in task.toolbox.tools)
+    # env_tool is a distinct toolbox whose wrappers share the SAME inner.
+    assert env_tool is not task.toolbox
+    assert env_tool.tools[0].inner is task.toolbox.tools[0]
+    # find_tool by concrete type still resolves on the task's toolbox.
+    assert task.toolbox.find_tool(_SyncEchoTool) is task.toolbox.tools[0]
+
+
+def test_build_monitored_env_tool_is_idempotent() -> None:
     task = _FakeTask([_SyncEchoTool()])
     budget = Budget(max_agent_steps=5)
-    install_monitoring(task, _make_streamer(budget))
-    install_monitoring(task, _make_streamer(budget))
-    assert len(task.toolbox.tools) == 1
-    assert isinstance(task.toolbox.tools[0], MonitoredTool)
-    assert not isinstance(task.toolbox.tools[0].inner, MonitoredTool)
+    env_tool = build_monitored_env_tool(task, _make_streamer(budget))
+    assert len(env_tool.tools) == 1
+    assert isinstance(env_tool.tools[0], MonitoredTool)
+    assert not isinstance(env_tool.tools[0].inner, MonitoredTool)
 
 
-def test_install_monitoring_dispatch_records_event() -> None:
-    """After install_monitoring, calling task.toolbox.execute_action
-    transitively writes a ToolCallEvent."""
+def test_build_monitored_env_tool_dispatch_records_event() -> None:
+    """Calling execute_action on the returned env_tool writes a
+    ToolCallEvent; the task's own concrete toolbox does NOT record."""
     task = _FakeTask([_SyncEchoTool()])
     storage = _FakeStorage()
-    install_monitoring(task, _make_streamer(Budget(max_agent_steps=5), storage=storage))
+    env_tool = build_monitored_env_tool(task, _make_streamer(Budget(max_agent_steps=5), storage=storage))
+    env_tool.execute_action(_action("sync_echo", msg="hi"))
+    assert len(storage.tool_call_events()) == 1
+    # The task's own concrete tool calls are NOT monitored.
     task.toolbox.execute_action(_action("sync_echo", msg="hi"))
     assert len(storage.tool_call_events()) == 1
 
 
-def test_install_monitoring_recurses_into_nested_toolboxes() -> None:
+def test_build_monitored_env_tool_recurses_into_nested_toolboxes() -> None:
     inner_box = Toolbox([_SyncEchoTool()])
     outer_box = Toolbox([inner_box, _SyncOtherTool()])
 
@@ -388,26 +407,29 @@ def test_install_monitoring_recurses_into_nested_toolboxes() -> None:
             self.toolbox = outer_box
 
     task = _Task()
-    install_monitoring(task, _make_streamer(Budget(max_agent_steps=5)))
-    # Every leaf is wrapped; toolboxes stay as toolboxes.
-    assert isinstance(outer_box.tools[0], Toolbox)
-    assert isinstance(outer_box.tools[0].tools[0], MonitoredTool)
-    assert isinstance(outer_box.tools[1], MonitoredTool)
+    env_tool = build_monitored_env_tool(task, _make_streamer(Budget(max_agent_steps=5)))
+    # Returned env_tool: every leaf wrapped; toolboxes stay as toolboxes.
+    assert isinstance(env_tool.tools[0], Toolbox)
+    assert isinstance(env_tool.tools[0].tools[0], MonitoredTool)
+    assert isinstance(env_tool.tools[1], MonitoredTool)
+    # Original toolbox tree is untouched (concrete leaves).
+    assert isinstance(outer_box.tools[0].tools[0], _SyncEchoTool)
+    assert isinstance(outer_box.tools[1], _SyncOtherTool)
 
 
-def test_install_monitoring_with_parent_event_id_getter() -> None:
+def test_build_monitored_env_tool_with_parent_event_id_getter() -> None:
     """parent_event_id_getter is late-bound to the streamer's current turn.
     Recorded events carry the value the getter returns at call time."""
     task = _FakeTask([_SyncEchoTool()])
     storage = _FakeStorage()
     current_turn = {"v": "agent-001"}
-    install_monitoring(
+    env_tool = build_monitored_env_tool(
         task,
         _make_streamer(Budget(max_agent_steps=5), storage=storage, parent_event_id_getter=lambda: current_turn["v"]),
     )
-    task.toolbox.execute_action(_action("sync_echo"))
+    env_tool.execute_action(_action("sync_echo"))
     current_turn["v"] = "agent-002"
-    task.toolbox.execute_action(_action("sync_echo"))
+    env_tool.execute_action(_action("sync_echo"))
     events = storage.tool_call_events()
     assert events[0].parent_event_id == "agent-001"
     assert events[1].parent_event_id == "agent-002"
