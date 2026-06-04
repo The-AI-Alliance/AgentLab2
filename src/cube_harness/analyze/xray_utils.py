@@ -11,9 +11,20 @@ import logging
 import os
 import re
 import shutil
+import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
+
+# Optional Tk fallback for the directory picker on non-macOS platforms.
+# Imported at module level (EX-001); guarded since headless hosts may lack Tk.
+try:
+    import tkinter as _tkinter
+    from tkinter import filedialog as _tk_filedialog
+except Exception:  # pragma: no cover - platform without Tk
+    _tkinter = None
+    _tk_filedialog = None
 
 from cube.benchmark import BenchmarkConfig
 from cube.core import Observation
@@ -269,6 +280,42 @@ def _build_ray_dashboard_links_html(ray_dashboard_urls: list[tuple[str, str]] | 
             f'style="color:#1d4ed8;text-decoration:none;">🔗 Ray dashboard</a>'
         )
     return '<div style="font-size:11px;margin-top:4px;">' + " &nbsp;·&nbsp; ".join(parts) + "</div>"
+
+
+def pick_directory(start: Path) -> Path | None:
+    """Open a native folder picker rooted at `start`; return the chosen dir.
+
+    Runs on the XRay host (a local tool), so the dialog appears on the user's
+    own desktop. Uses macOS `osascript` (no GUI-thread constraints, unlike Tk in
+    a Gradio worker thread) and falls back to Tk elsewhere. Returns None if the
+    user cancels, the picker is unavailable, or the choice isn't a directory.
+    """
+    chosen: str | None = None
+    if sys.platform == "darwin":
+        script = (
+            f'set startDir to POSIX file "{start}"\n'
+            'set d to choose folder with prompt "Select XRay results directory" default location startDir\n'
+            "POSIX path of d"
+        )
+        try:
+            result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True, timeout=300)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if result.returncode == 0:  # non-zero == user cancelled
+            chosen = result.stdout.strip()
+    elif _tkinter is not None and _tk_filedialog is not None:
+        try:
+            root = _tkinter.Tk()
+            root.withdraw()
+            chosen = _tk_filedialog.askdirectory(initialdir=str(start))
+            root.destroy()
+        except Exception:  # pragma: no cover - display-less host
+            return None
+
+    if not chosen:
+        return None
+    path = Path(chosen).expanduser()
+    return path if path.is_dir() else None
 
 
 def archive_experiment(results_dir: Path, exp_name: str) -> None:

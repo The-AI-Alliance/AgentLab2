@@ -740,3 +740,39 @@ class TestBuildProgressHtml:
         )
         assert "<script>alert(1)</script>" not in html
         assert "&lt;script&gt;" in html
+
+
+class TestPickDirectory:
+    """The native folder-picker wrapper (mocked — no real dialog)."""
+
+    def test_returns_chosen_dir_on_macos(self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch") -> None:
+        target = tmp_path / "results"
+        target.mkdir()
+        monkeypatch.setattr(xray_utils.sys, "platform", "darwin")
+
+        class _R:
+            returncode = 0
+            stdout = f"{target}\n"
+
+        monkeypatch.setattr(xray_utils.subprocess, "run", lambda *a, **k: _R())
+        assert xray_utils.pick_directory(tmp_path) == target
+
+    def test_returns_none_on_cancel(self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch") -> None:
+        monkeypatch.setattr(xray_utils.sys, "platform", "darwin")
+
+        class _R:
+            returncode = 1  # user cancelled
+            stdout = ""
+
+        monkeypatch.setattr(xray_utils.subprocess, "run", lambda *a, **k: _R())
+        assert xray_utils.pick_directory(tmp_path) is None
+
+    def test_returns_none_when_choice_is_not_a_dir(self, tmp_path: Path, monkeypatch: "pytest.MonkeyPatch") -> None:
+        monkeypatch.setattr(xray_utils.sys, "platform", "darwin")
+
+        class _R:
+            returncode = 0
+            stdout = f"{tmp_path / 'nope'}\n"
+
+        monkeypatch.setattr(xray_utils.subprocess, "run", lambda *a, **k: _R())
+        assert xray_utils.pick_directory(tmp_path) is None
