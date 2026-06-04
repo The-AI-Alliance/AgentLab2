@@ -776,3 +776,33 @@ class TestPickDirectory:
 
         monkeypatch.setattr(xray_utils.subprocess, "run", lambda *a, **k: _R())
         assert xray_utils.pick_directory(tmp_path) is None
+
+
+class TestEligibility:
+    """Submission-eligibility badge logic (clean + submit)."""
+
+    def test_scan_category_missing_dir_is_broken(self, tmp_path: Path) -> None:
+        # No experiment_record.json → classify returns broken; helper never raises.
+        assert xray_utils.scan_category(tmp_path / "nope") == "broken"
+
+    def test_badge_uses_category_when_no_submission(self, tmp_path: Path) -> None:
+        badge = xray_utils.eligibility_badge(tmp_path, "submittable")
+        assert "submittable" in badge
+        assert xray_utils.eligibility_badge(tmp_path, "broken").count("broken")
+
+    def test_submitted_state_overrides_category(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        submissions.record_submitted(
+            tmp_path, "journal", evaluation_id="me/exp", schema_version="1.0", pr_url="http://x"
+        )
+        badge = xray_utils.eligibility_badge(tmp_path, "broken")  # category ignored once submitted
+        assert "✅" in badge and "registry" in badge
+
+    def test_eee_and_registry_both_submitted(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        submissions.record_submitted(tmp_path, "journal", evaluation_id="a", schema_version="1.0")
+        submissions.record_submitted(tmp_path, "eee", evaluation_id="b", schema_version="0.2")
+        badge = xray_utils.eligibility_badge(tmp_path, "submittable")
+        assert "registry" in badge and "eee" in badge

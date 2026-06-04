@@ -14,6 +14,8 @@ import argparse
 import html as html_lib
 import json
 import re
+import subprocess
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1233,13 +1235,36 @@ def run_xray(
                     exp_browse_btn = gr.Button("📁 Browse…", scale=0, size="sm", variant="secondary")
                     exp_refresh_btn = gr.Button("↺ Refresh", scale=0, size="sm")
                     exp_archive_btn = gr.Button("🗃 Archive selected", scale=0, size="sm", variant="secondary")
+                with gr.Row():
+                    # Clean + submit workflow. The two Submit buttons stay hidden
+                    # until "Check submittable" selects clean runs, to keep the
+                    # default toolbar uncluttered.
+                    exp_gc_btn = gr.Button("🧹 Garbage-collect", scale=0, size="sm", variant="secondary")
+                    exp_checksubmit_btn = gr.Button("📤 Check submittable", scale=0, size="sm", variant="secondary")
+                    exp_submit_eee_btn = gr.Button(
+                        "⬆️ Submit → EEE", scale=0, size="sm", variant="primary", visible=False
+                    )
+                    exp_submit_registry_btn = gr.Button(
+                        "⬆️ Submit → Registry", scale=0, size="sm", variant="primary", visible=False
+                    )
                 results_dir_md = gr.Markdown(f"📂 `{state.results_dir}`")
+                exp_action_status = gr.Markdown("", visible=False)
                 exp_table = gr.DataFrame(
-                    headers=["", "experiment", "date", "agent", "model", "benchmark", "status", "avg_reward"],
-                    datatype=["bool", "str", "str", "str", "str", "str", "html", "str"],
-                    col_count=(8, "fixed"),
+                    headers=[
+                        "",
+                        "experiment",
+                        "date",
+                        "agent",
+                        "model",
+                        "benchmark",
+                        "status",
+                        "avg_reward",
+                        "eligibility",
+                    ],
+                    datatype=["bool", "str", "str", "str", "str", "str", "html", "str", "html"],
+                    col_count=(9, "fixed"),
                     interactive=True,
-                    static_columns=[1, 2, 3, 4, 5, 6, 7],
+                    static_columns=[1, 2, 3, 4, 5, 6, 7, 8],
                     max_height=260,
                     show_label=False,
                     elem_id="exp_table",
@@ -1360,10 +1385,7 @@ def run_xray(
         # Event wiring
         # ------------------------------------------------------------------
 
-        def _exp_table_rows(auto_select_first: bool = False) -> list[list[Any]]:
-            rows = xray_utils.get_experiments_table_rows(state.results_dir)
-            if auto_select_first and rows:
-                rows[0]["selected"] = True
+        def _to_exp_table(rows: list[dict[str, Any]]) -> list[list[Any]]:
             return [
                 [
                     r["selected"],
@@ -1374,12 +1396,79 @@ def run_xray(
                     r["benchmark"],
                     r["status"],
                     r.get("avg_reward", "—"),
+                    r.get("eligibility", "—"),
                 ]
                 for r in rows
             ]
 
+        def _exp_table_rows(auto_select_first: bool = False) -> list[list[Any]]:
+            rows = xray_utils.get_experiments_table_rows(state.results_dir)
+            if auto_select_first and rows:
+                rows[0]["selected"] = True
+            return _to_exp_table(rows)
+
         def _exp_table_value() -> list[list[Any]]:
             return _exp_table_rows(auto_select_first=False)
+
+        def on_garbage_collect() -> list[list[Any]]:
+            """Reclassify every experiment (sweeping dead RUNNING/QUEUED → stale)
+            and auto-check the broken ones for the user to review and Archive."""
+            rows = xray_utils.get_experiments_table_rows(state.results_dir)
+            for r in rows:
+                exp_dir = state.results_dir / r["experiment"]
+                category = xray_utils.scan_category(exp_dir, sweep_stale=True)
+                r["_category"] = category
+                r["eligibility"] = xray_utils.eligibility_badge(exp_dir, category)
+                r["selected"] = category == "broken"
+            return _to_exp_table(rows)
+
+        def on_check_submit() -> tuple[list[list[Any]], Any, Any, Any]:
+            """Auto-check the submittable experiments and reveal the Submit buttons."""
+            rows = xray_utils.get_experiments_table_rows(state.results_dir)
+            n = 0
+            for r in rows:
+                is_submittable = r.get("_category") == "submittable"
+                r["selected"] = is_submittable
+                n += int(is_submittable)
+            msg = (
+                f"📤 Selected **{n}** submittable experiment(s). Review the selection, then "
+                "**Submit → EEE** or **Submit → Registry**."
+                if n
+                else "No submittable experiments found (need a clean, complete run with an experiment record)."
+            )
+            return (
+                _to_exp_table(rows),
+                gr.update(visible=n > 0),
+                gr.update(visible=n > 0),
+                gr.update(value=msg, visible=True),
+            )
+
+        def _selected_exp_dirs(table: Any) -> list[Path]:
+            """Experiment dirs whose checkbox is ticked in the current table value."""
+            records = table.values.tolist() if hasattr(table, "values") else (table or [])
+            return [state.results_dir / row[1] for row in records if row and bool(row[0])]
+
+        def _run_submitter(script: str, exp_dir: Path, extra: list[str]) -> tuple[bool, str]:
+            """Invoke a submit script for one experiment; return (ok, last-output-line)."""
+            cmd = [sys.executable, str(Path(__file__).resolve().parents[3] / "scripts" / script), str(exp_dir), *extra]
+            proc = subprocess.run(cmd, capture_output=True, text=True)
+            tail = (proc.stdout.strip().splitlines() or [""])[-1]
+            return proc.returncode == 0, tail
+
+        def on_submit(table: Any, destination: str) -> tuple[list[list[Any]], Any]:
+            """Submit the checked experiments to EEE or the cube-registry journal."""
+            dirs = _selected_exp_dirs(table)
+            if not dirs:
+                return _exp_table_value(), gr.update(value="Nothing selected to submit.", visible=True)
+            if destination == "eee":
+                script, extra = "submit_to_eee.py", []
+            else:
+                script, extra = "submit_to_journal.py", ["--auto-pr", "--i-understand-this-is-not-a-leaderboard"]
+            lines = [f"### Submit → {destination.upper()} ({len(dirs)} experiment(s))"]
+            for d in dirs:
+                ok, tail = _run_submitter(script, d, extra)
+                lines.append(f"- {'✅' if ok else '❌'} `{d.name}` — {tail or ('done' if ok else 'failed')}")
+            return _exp_table_value(), gr.update(value="\n".join(lines), visible=True)
 
         def on_browse_dir() -> tuple[list[list[Any]], str]:
             """Open a native folder picker; on choice, switch the results dir and
@@ -1405,6 +1494,17 @@ def run_xray(
         exp_table.change(fn=on_experiments_change, inputs=exp_table, outputs=_hierarchy_outputs)
         exp_browse_btn.click(fn=on_browse_dir, outputs=[exp_table, results_dir_md])
         exp_refresh_btn.click(fn=_exp_table_value, outputs=exp_table)
+        exp_gc_btn.click(fn=on_garbage_collect, outputs=exp_table)
+        exp_checksubmit_btn.click(
+            fn=on_check_submit,
+            outputs=[exp_table, exp_submit_eee_btn, exp_submit_registry_btn, exp_action_status],
+        )
+        exp_submit_eee_btn.click(
+            fn=lambda t: on_submit(t, "eee"), inputs=exp_table, outputs=[exp_table, exp_action_status]
+        )
+        exp_submit_registry_btn.click(
+            fn=lambda t: on_submit(t, "journal"), inputs=exp_table, outputs=[exp_table, exp_action_status]
+        )
         exp_archive_btn.click(fn=on_archive_selected, outputs=[exp_table, *_hierarchy_outputs])
 
         bg_timer.tick(

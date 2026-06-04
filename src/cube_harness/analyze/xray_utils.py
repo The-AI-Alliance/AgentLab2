@@ -39,6 +39,7 @@ from cube_harness.episode_status import TERMINAL_STATUSES as _EPISODE_TERMINAL_S
 from cube_harness.exp_runner import DEFAULT_CANCEL_GRACE_S, DEFAULT_STEP_TIMEOUT_S
 from cube_harness.experiment_status import EXPERIMENT_STATUS_FILENAME, ExperimentStatus, is_driver_alive
 from cube_harness.llm import LLMCall
+from cube_harness.reproducibility import scan, submissions
 
 logger = logging.getLogger(__name__)
 
@@ -571,6 +572,43 @@ def _is_cache_valid(exp_dir: Path, cache_mtime: float) -> bool:
     return True
 
 
+# --- Submission eligibility (clean + submit) -------------------------------
+# Compact badges for the Experiments-table "eligibility" column. The raw
+# category (stored on the hidden `_category` key) drives the Garbage-collect /
+# Check-submit auto-selection.
+
+_ELIGIBILITY_BADGES: dict[str, str] = {
+    "submittable": "<span title='Clean run — ready to submit'>🟢 submittable</span>",
+    "subset_review": "<span title='Passed integrity checks but the subset shape needs a human look'>🔍 review</span>",
+    "unfinished": "<span title='Some episodes are still queued/running (or stale)'>⏳ unfinished</span>",
+    "broken": "<span title='Cannot produce a meaningful score'>🚫 broken</span>",
+    "already_submitted": "<span title='Has a prior submission/rejection decision'>✅ decided</span>",
+}
+
+
+def scan_category(exp_dir: Path, *, sweep_stale: bool = False) -> str:
+    """The `ScanCategory` value for one experiment (``"broken"`` on any error).
+
+    The expensive part (reads `experiment_record.json` + per-episode statuses),
+    so it's cached on the row's hidden `_category` key. `sweep_stale=True` lets a
+    cleanup pass reclassify dead RUNNING/QUEUED episodes as broken first."""
+    try:
+        return scan.classify(exp_dir, sweep_stale=sweep_stale).category.value
+    except Exception:  # pragma: no cover - defensive
+        return "broken"
+
+
+def eligibility_badge(exp_dir: Path, category: str) -> str:
+    """Badge for the eligibility column: a ✅ submission state (read fresh, cheap)
+    takes precedence over the cached scan `category`."""
+    subs = submissions.read(exp_dir)
+    submitted = [d for d in ("journal", "eee") if subs.get(d, {}).get("status") == "submitted"]
+    if submitted:
+        names = " + ".join({"journal": "registry", "eee": "eee"}[d] for d in submitted)
+        return f"<span title='Submitted to {names}'>✅ {names}</span>"
+    return _ELIGIBILITY_BADGES.get(category, f"<span>{html_lib.escape(category)}</span>")
+
+
 def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:
     """Compute display fields for one experiment by reading per-episode status.json files.
 
@@ -630,6 +668,9 @@ def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:
         "benchmark": cfg_info["benchmark"],
         "status": status_html,
         "avg_reward": avg_reward_str,
+        # Cached scan category (stable for terminal runs); the displayed badge is
+        # derived fresh in get_experiments_table_rows so submissions stay current.
+        "_category": scan_category(exp_dir),
     }
 
 
@@ -649,26 +690,34 @@ def get_experiments_table_rows(results_dir: Path) -> list[dict[str, Any]]:
         if not _is_experiment_dir(dir_path):
             continue
         cache_path = dir_path / _XRAY_CACHE_FILENAME
+        row: dict[str, Any] | None = None
         if cache_path.exists():
             try:
                 cache_mtime = cache_path.stat().st_mtime
+                # Old caches predate `_category`; treat them as stale so the
+                # eligibility column backfills (and the cache is rewritten).
                 if _is_cache_valid(dir_path, cache_mtime):
                     with open(cache_path) as f:
                         cached = json.load(f)
-                    rows.append({"selected": False, "experiment": dir_path.name, **cached})
-                    continue
+                    if "_category" in cached:
+                        row = {"selected": False, "experiment": dir_path.name, **cached}
             except Exception as exc:
                 logger.debug("Cache read failed for %s: %s", cache_path, exc)
-        _promote_ghost_episodes(dir_path)
-        summary = _compute_exp_row(dir_path)
-        if _all_episodes_terminal(dir_path):
-            try:
-                tmp = cache_path.parent / (cache_path.name + ".tmp")
-                tmp.write_text(json.dumps(summary, indent=2))
-                os.replace(tmp, cache_path)
-            except Exception as exc:
-                logger.debug("Cache write failed for %s: %s", cache_path, exc)
-        rows.append({"selected": False, "experiment": dir_path.name, **summary})
+        if row is None:
+            _promote_ghost_episodes(dir_path)
+            summary = _compute_exp_row(dir_path)
+            if _all_episodes_terminal(dir_path):
+                try:
+                    tmp = cache_path.parent / (cache_path.name + ".tmp")
+                    tmp.write_text(json.dumps(summary, indent=2))
+                    os.replace(tmp, cache_path)
+                except Exception as exc:
+                    logger.debug("Cache write failed for %s: %s", cache_path, exc)
+            row = {"selected": False, "experiment": dir_path.name, **summary}
+        # Derive the eligibility badge fresh (submissions.json is cheap and can
+        # change after a submit without invalidating the mtime-based cache).
+        row["eligibility"] = eligibility_badge(dir_path, row.get("_category", "broken"))
+        rows.append(row)
     rows.sort(key=lambda r: r["date"], reverse=True)
     return rows
 
