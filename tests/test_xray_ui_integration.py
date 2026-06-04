@@ -68,6 +68,28 @@ def test_observation_pane_stacks_parallel_siblings(tmp_path: Path) -> None:
     assert "Sibling 1/2" in html and "Sibling 2/2" in html
 
 
+def test_observation_pane_has_no_images_for_text_only(tmp_path: Path) -> None:
+    # A text-only observation yields zero gallery images, so the UI hides the
+    # Screenshots gallery instead of showing an empty placeholder.
+    from cube.core import Action, Observation  # noqa: PLC0415
+
+    from cube_harness.core import LLMCallEvent, ToolCallEvent, TrajectoryEvent  # noqa: PLC0415
+
+    ev_llm = TrajectoryEvent(output=LLMCallEvent(id="l1", call=None))
+    ev_obs = TrajectoryEvent(
+        output=ToolCallEvent(
+            parent_event_id="l1",
+            turn_id="l1",
+            action=Action(name="bash", arguments={"command": "ls"}),
+            obs=Observation.from_text("file1\nfile2"),  # text only, no image
+        )
+    )
+    ep = EpisodeEvents([ev_llm, ev_obs])
+    images, html = xray_utils.render_group_observation_html(ep, ep.group_for(1))
+    assert images == []
+    assert "file1" in html  # the text still renders
+
+
 def test_axtree_pane_reads_observation_content(tmp_path: Path) -> None:
     ep = _events(tmp_path)
     group = ep.group_for(_parallel_llm_index(ep))
