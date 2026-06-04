@@ -617,9 +617,46 @@ def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:
     Returns: {date, agent, model, benchmark, status, avg_reward}.
     """
     cfg_info = _parse_experiment_config(exp_dir)
+
+    # Single source of truth: one classification pass reads the per-episode
+    # statuses AND yields the eligibility category. For record-bearing runs it
+    # also returns the status breakdown + rewards, so we don't re-read the status
+    # files here. Record-less / V1 layouts (which the scanner can't classify) fall
+    # back to a direct read.
+    result = scan.classify(exp_dir, sweep_stale=False)
+    if result.status_counts:
+        statuses = [
+            display
+            for raw, n in result.status_counts.items()
+            for display in [_RAW_STATUS_MAP.get(raw, "system_error")] * n
+        ]
+        rewards = list(result.rewards)
+    else:
+        statuses, rewards = _read_display_statuses(exp_dir)
+
+    status_html = _build_status_cell(statuses) if statuses else "—"
+    mean, stderr = _reward_mean_stderr(rewards)
+    avg_reward_str = f"{mean:.3f} ± {stderr:.3f}" if rewards else "—"
+
+    return {
+        "date": _parse_exp_date(exp_dir),
+        "agent": cfg_info["agent"],
+        "model": cfg_info["model"],
+        "benchmark": cfg_info["benchmark"],
+        "status": status_html,
+        "avg_reward": avg_reward_str,
+        # Cached scan category (stable for terminal runs); the displayed badge is
+        # derived fresh in get_experiments_table_rows so submissions stay current.
+        "_category": result.category.value,
+    }
+
+
+def _read_display_statuses(exp_dir: Path) -> tuple[list[str], list[float]]:
+    """Fallback per-episode read for layouts the scanner can't classify
+    (record-less V2, or V1 flat ``*.metadata.json``). Returns
+    ``(display_statuses, rewards)``."""
     statuses: list[str] = []
     rewards: list[float] = []
-
     episodes_dir = exp_dir / "episodes"
     if episodes_dir.exists():
         for ep_dir in episodes_dir.iterdir():
@@ -635,7 +672,6 @@ def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:
             else:
                 statuses.append("queued")
     else:
-        # V1: read flat *.metadata.json for status and reward
         for search_dir in (exp_dir, exp_dir / "trajectories"):
             if not search_dir.exists():
                 continue
@@ -656,22 +692,7 @@ def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:
                 except Exception as exc:
                     logger.debug("Failed to parse %s: %s", meta_file, exc)
                     statuses.append("system_error")
-
-    status_html = _build_status_cell(statuses) if statuses else "—"
-    mean, stderr = _reward_mean_stderr(rewards)
-    avg_reward_str = f"{mean:.3f} ± {stderr:.3f}" if rewards else "—"
-
-    return {
-        "date": _parse_exp_date(exp_dir),
-        "agent": cfg_info["agent"],
-        "model": cfg_info["model"],
-        "benchmark": cfg_info["benchmark"],
-        "status": status_html,
-        "avg_reward": avg_reward_str,
-        # Cached scan category (stable for terminal runs); the displayed badge is
-        # derived fresh in get_experiments_table_rows so submissions stay current.
-        "_category": scan_category(exp_dir),
-    }
+    return statuses, rewards
 
 
 def get_experiments_table_rows(results_dir: Path) -> list[dict[str, Any]]:

@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
@@ -122,6 +122,12 @@ class ScanResult:
     benchmark_subset_name: str = ""
     benchmark_subset_filter: str | None = None
     has_explicit_task_list: bool = False
+    # Raw per-episode signal collected during the single status pass, so display
+    # consumers (XRay's experiment table) don't have to re-read the status files.
+    # `status_counts` maps raw EpisodeStatus.status → count; `rewards` are the
+    # scored episode rewards (COMPLETED / MAX_STEPS_REACHED).
+    status_counts: dict[str, int] = field(default_factory=dict)
+    rewards: tuple[float, ...] = ()
 
 
 def _load_experiment_record(experiment_dir: Path) -> ExperimentRecord | None:
@@ -197,15 +203,20 @@ def classify(
     n_in_flight = 0
     n_system_error = 0
     seen_task_ids: set[str] = set()
+    status_counts: dict[str, int] = {}
+    rewards: list[float] = []
     try:
         for status in ExperimentResult(experiment_dir).iter_episode_statuses():
             seen_task_ids.add(status.task_id)
+            status_counts[status.status] = status_counts.get(status.status, 0) + 1
             if status.status in IN_FLIGHT_STATUSES:
                 n_in_flight += 1
                 continue
             n_terminal += 1
             if status.status in {"FAILED", "STALE", "INVALID_CONFIG"}:
                 n_system_error += 1
+            elif status.status in {"COMPLETED", "MAX_STEPS_REACHED"} and status.reward is not None:
+                rewards.append(float(status.reward))
     except Exception as e:
         return ScanResult(
             experiment_dir,
@@ -225,6 +236,8 @@ def classify(
         n_system_error=n_system_error,
         n_missing=n_missing,
         debug_limit=debug_limit,
+        status_counts=status_counts,
+        rewards=tuple(rewards),
         benchmark_subset_name=bench_subset.name,
         benchmark_subset_filter=bench_subset.filter,
         has_explicit_task_list=has_explicit_task_list,
