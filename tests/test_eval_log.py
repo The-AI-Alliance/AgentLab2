@@ -375,6 +375,18 @@ def test_benchmark_subset_from_benchmark(mock_cube_benchmark_config) -> None:
     assert subset.name == "mock-cube"
     assert subset.n_tasks == 2
     assert subset.filter is None
+    # Full benchmark: no explicit task list, so the scan treats it as submittable.
+    assert subset.task_ids is None
+
+
+def test_benchmark_subset_reflects_subset_selection(mock_cube_benchmark_config) -> None:
+    # A subset config narrows task_ids; the descriptor must record the *selected*
+    # count (1), not the full registry size (2) — otherwise the scan computes a
+    # bogus n_missing and flags the run as unfinished.
+    subset_config = mock_cube_benchmark_config.subset_from_list(["mock_cube_task_1"])
+    subset = BenchmarkSubset.from_benchmark_config(subset_config)
+    assert subset.n_tasks == 1
+    assert subset.task_ids == ["mock_cube_task_1"]
 
 
 def test_benchmark_subset_unknown_benchmark() -> None:

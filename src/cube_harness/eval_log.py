@@ -434,9 +434,11 @@ class AgentInfo(TypedBaseModel):
 class BenchmarkSubset(TypedBaseModel):
     """Benchmark subset descriptor for MNAR propensity correction.
 
-    Automatically derived from the benchmark object. The name field captures any subset
-    suffix applied via subset_from_glob (e.g., "[level=l1]") or subset_from_list.
-    n_tasks is the denominator for computing completion rate without requiring the benchmark.
+    Automatically derived from the benchmark config. ``n_tasks`` is the size of the
+    selected view (the denominator for completion rate), and ``task_ids`` carries the
+    explicit selection when the config was subset. ``BenchmarkConfig`` does not retain
+    the glob/suffix used to build a subset, so ``name`` is the plain benchmark name and
+    ``filter`` stays None until that is threaded through cube-standard.
     """
 
     name: str = Field(description="Benchmark name including any subset suffix (benchmark_metadata.name).")
@@ -457,10 +459,18 @@ class BenchmarkSubset(TypedBaseModel):
 
     @classmethod
     def from_benchmark_config(cls, benchmark_config: BenchmarkConfig) -> "BenchmarkSubset":
-        """Derive BenchmarkSubset from a cube BenchmarkConfig object."""
+        """Derive BenchmarkSubset from a cube BenchmarkConfig object.
+
+        ``n_tasks`` reflects the *selected* view (``num_tasks``), not the full
+        class-level ``task_metadata`` registry. A subset config narrowed via
+        ``subset_from_list`` / ``subset_from_glob`` / ``named_subset`` carries its
+        selection in ``task_ids``; recording the full registry size here made the
+        reproducibility scan compute a bogus ``n_missing`` and flag every subset
+        run as unfinished. ``task_ids`` is threaded through so the scan can tell a
+        hand-picked subset (``subset_review``) from a full run (``submittable``).
+        """
         name = benchmark_config.benchmark_metadata.name
-        n_tasks = len(benchmark_config.task_metadata)
-        return cls(name=name, n_tasks=n_tasks)
+        return cls(name=name, n_tasks=benchmark_config.num_tasks, task_ids=benchmark_config.task_ids)
 
 
 class InvestigatorLLMConfig(TypedBaseModel):
