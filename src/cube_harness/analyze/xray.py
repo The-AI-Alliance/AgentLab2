@@ -594,26 +594,43 @@ th {
 }
 """
 
-_FORCE_LIGHT_JS = "() => { document.body.classList.remove('dark'); }"
-
-_SHORTCUT_JS = """
-<script>
-function shortcuts(e) {
-    if (!e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
-    const tag = e.target.tagName.toLowerCase();
-    if (tag === "input" || tag === "textarea" || tag === "select") return;
-    if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        const prev = document.querySelector('#xray_prev_btn button');
-        if (prev) prev.click();
-    } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        const next = document.querySelector('#xray_next_btn button');
-        if (next) next.click();
-    }
+# Runs once on app load (Blocks js=): force light theme, bind keyboard event
+# navigation, and preserve the event-rail scroll position across re-renders.
+#   - Arrow keys (←/→ or ↑/↓) move to the previous/next event. Plain arrows are
+#     used (not Shift+arrow, which the browser steals for text selection).
+#   - Clicking a card or navigating saves the rail's scrollTop; a MutationObserver
+#     restores it after the rail HTML re-renders, so selecting a card no longer
+#     snaps the list back to the top.
+_INIT_JS = """
+() => {
+    document.body.classList.remove('dark');
+    if (window.__xrayInit) return;
+    window.__xrayInit = true;
+    let pending = false;
+    const saveScroll = () => {
+        const r = document.querySelector('#xray-event-rail');
+        if (r) { window.__xrayScroll = r.scrollTop; pending = true; }
+    };
+    document.addEventListener('keydown', (e) => {
+        const t = e.target, tag = (t.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable) return;
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        let sel = null;
+        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') sel = '#xray_prev_btn button';
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') sel = '#xray_next_btn button';
+        if (!sel) return;
+        const b = document.querySelector(sel);
+        if (b) { e.preventDefault(); saveScroll(); b.click(); }
+    }, true);
+    document.addEventListener('click', (e) => {
+        if (e.target.closest && e.target.closest('.xray-event-card')) saveScroll();
+    }, true);
+    new MutationObserver(() => {
+        if (!pending) return;
+        const r = document.querySelector('#xray-event-rail');
+        if (r) { requestAnimationFrame(() => { r.scrollTop = window.__xrayScroll || 0; }); pending = false; }
+    }).observe(document.body, { childList: true, subtree: true });
 }
-document.addEventListener('keydown', shortcuts, false);
-</script>
 """
 
 
@@ -975,6 +992,19 @@ def run_xray(
             "</div>"
         )
 
+    def get_agent_reasoning_md() -> str:
+        """Return the selected group's LLM reasoning as a panel (beside Action)."""
+        if state.current_events is None or state.selected_group() is None:
+            body = "<em>No event selected</em>"
+        else:
+            body = xray_utils.render_group_reasoning_html(state.current_events, state.selected_group())
+        return (
+            '<div class="info-panel" style="background:#eff6ff; border-color:#bfdbfe;">'
+            '<div class="info-panel-title" style="background:#dbeafe; color:#1d4ed8;">🧠 Reasoning</div>'
+            f'<div class="info-panel-body">{body}</div>'
+            "</div>"
+        )
+
     # ------------------------------------------------------------------
     # Lazy tab render handlers (only run when their tab is active).
     # Each reads state via closure and takes no arguments.
@@ -991,12 +1021,6 @@ def run_xray(
             return gr.update(value=[], visible=False), "<em>No event selected.</em>"
         images, html = xray_utils.render_group_observation_html(state.current_events, group)
         return gr.update(value=images, visible=bool(images)), html
-
-    def _render_axtree() -> str:
-        group = state.selected_group()
-        if group is None or state.current_events is None:
-            return "No event selected."
-        return xray_utils.render_group_axtree(state.current_events, group)
 
     def _render_chat() -> str:
         """Chat tab: the selected group's LLM call (prompt + response + tokens)."""
@@ -1104,9 +1128,6 @@ def run_xray(
     def _activate_observation() -> str:
         return "Observation"
 
-    def _activate_axtree() -> str:
-        return "AXTree"
-
     def _activate_chat() -> str:
         return "Chat"
 
@@ -1129,7 +1150,7 @@ def run_xray(
     # Build the Gradio UI
     # ------------------------------------------------------------------
 
-    with gr.Blocks(theme=gr.themes.Soft(), css=_CSS, head=_SHORTCUT_JS, js=_FORCE_LIGHT_JS) as demo:  # type: ignore[attr-defined]
+    with gr.Blocks(theme=gr.themes.Soft(), css=_CSS, js=_INIT_JS) as demo:  # type: ignore[attr-defined]
         active_tab = gr.State(value="Chat")
         step_id = gr.State(value=StepId())
 
@@ -1271,15 +1292,20 @@ def run_xray(
         with gr.Row(equal_height=False):
             with gr.Column(scale=1, min_width=240):
                 with gr.Row():
-                    prev_btn = gr.Button("◀", size="sm", elem_id="xray_prev_btn", min_width=36)
-                    next_btn = gr.Button("▶", size="sm", elem_id="xray_next_btn", min_width=36)
-                timeline_html = gr.HTML(label="Events")
+                    prev_btn = gr.Button("◀", size="sm", elem_id="xray_prev_btn", min_width=0, scale=0)
+                    next_btn = gr.Button("▶", size="sm", elem_id="xray_next_btn", min_width=0, scale=0)
+                timeline_html = gr.HTML(elem_id="xray_rail")
             with gr.Column(scale=3):
-                agent_action_md = gr.HTML(value="")
+                # Reasoning (the LLM's thinking) beside the dispatched action.
+                with gr.Row(equal_height=True):
+                    agent_reasoning_md = gr.HTML(value="")
+                    agent_action_md = gr.HTML(value="")
                 with gr.Tabs():
                     with gr.Tab("Chat") as chat_tab:
                         chat_act_md = gr.HTML()
 
+                    # Observation folds in the screenshot gallery AND any text
+                    # contents (incl. AXTree) — there is no separate AXTree tab.
                     with gr.Tab("Observation") as screenshots_tab:
                         observation_gallery = gr.Gallery(
                             label="Screenshots",
@@ -1290,9 +1316,6 @@ def run_xray(
                             visible=False,  # shown only when the group has screenshots
                         )
                         observation_text = gr.HTML()
-
-                    with gr.Tab("AXTree") as axtree_tab:
-                        axtree_code = gr.Code(language=None, show_label=False, max_lines=40)
 
                     with gr.Tab("Evaluation") as evaluation_tab:
                         evaluation_md = gr.Markdown()
@@ -1402,6 +1425,7 @@ def run_xray(
         step_id.change(fn=update_trajectory_stats, outputs=stats_display)
         step_id.change(fn=get_task_goal, outputs=task_goal_md)
         step_id.change(fn=get_agent_action_md, outputs=agent_action_md)
+        step_id.change(fn=get_agent_reasoning_md, outputs=agent_reasoning_md)
 
         # Lazy renders on event-selection change (active_tab checked by if_active;
         # step_id is the trigger).
@@ -1409,11 +1433,6 @@ def run_xray(
             fn=if_active("Observation", 2)(_render_observation),
             inputs=[active_tab, step_id],
             outputs=[observation_gallery, observation_text],
-        )
-        step_id.change(
-            fn=if_active("AXTree")(_render_axtree),
-            inputs=[active_tab, step_id],
-            outputs=axtree_code,
         )
         step_id.change(
             fn=if_active("Chat")(_render_chat),
@@ -1450,9 +1469,6 @@ def run_xray(
         # Tab .select fires with no extra inputs — handlers take no arguments.
         screenshots_tab.select(fn=_activate_observation, outputs=active_tab)
         screenshots_tab.select(fn=_render_observation, outputs=[observation_gallery, observation_text])
-
-        axtree_tab.select(fn=_activate_axtree, outputs=active_tab)
-        axtree_tab.select(fn=_render_axtree, outputs=axtree_code)
 
         chat_tab.select(fn=_activate_chat, outputs=active_tab)
         chat_tab.select(fn=_render_chat, outputs=chat_act_md)

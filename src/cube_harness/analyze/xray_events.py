@@ -201,8 +201,23 @@ class EpisodeEvents:
 
     @classmethod
     def from_view(cls, view: TrajectoryView) -> "EpisodeEvents":
-        """Materialize the flat event list from a lazy `TrajectoryView`."""
-        return cls(list(view))
+        """Materialize the flat event list from a lazy `TrajectoryView`.
+
+        If the stream carries no terminal `EvaluationEvent` (most trajectories
+        record the final reward in `reward_info` metadata rather than as an
+        event), synthesize one so the final reward shows as a card at the end.
+        """
+        events = list(view)
+        has_terminal_eval = any(isinstance(ev.output, EvaluationEvent) and ev.output.is_terminal for ev in events)
+        reward_info = view.reward_info or {}
+        if not has_terminal_eval and reward_info.get("reward") is not None:
+            info = {k: v for k, v in reward_info.items() if k != "reward"}
+            events.append(
+                TrajectoryEvent(
+                    output=EvaluationEvent(reward=float(reward_info["reward"]), info=info, is_terminal=True)
+                )
+            )
+        return cls(events)
 
     # --- basic access -----------------------------------------------------
 
