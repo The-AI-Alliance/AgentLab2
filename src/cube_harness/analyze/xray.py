@@ -691,7 +691,7 @@ _INIT_JS = """
         '#exp_browse_btn': 'Pick a different results directory',
         '#exp_refresh_btn': 'Re-scan the results directory (cached — fast)',
         '#exp_archive_btn': 'Archive all checked experiments (moves them to _archive/)',
-        '#exp_pick_archivable_btn': 'Auto-select broken + incomplete (partial/debug) experiments to archive',
+        '#exp_pick_archivable_btn': 'Auto-select broken + incomplete (partial/debug) + rejected experiments to archive',
         '#exp_submit_btn': 'Submit checked experiments to the cube-registry — opens a PR that auto-validates + merges',
         '#exp_pick_submittable_btn': 'Auto-select submittable, not-yet-submitted experiments',
     };
@@ -1486,28 +1486,29 @@ def run_xray(
         def _exp_table_value() -> list[list[Any]]:
             return _exp_table_rows(auto_select_first=False)
 
-        def _select_rows(category_match: Callable[[str], bool], label: str) -> tuple[list[list[Any]], Any]:
-            """Tick rows whose cached scan category matches. Routes through the
-            same cached `get_experiments_table_rows` as Refresh (status + ghost
-            heartbeat + eligibility, all cached), so it is as fast as a refresh."""
+        def _select_rows(predicate: Callable[[str, Path], bool], label: str) -> tuple[list[list[Any]], Any]:
+            """Tick rows for which ``predicate(category, exp_dir)`` is true. Routes
+            through the same cached `get_experiments_table_rows` as Refresh (status +
+            ghost heartbeat + eligibility, all cached), so it is as fast as a refresh."""
             rows = xray_utils.get_experiments_table_rows(state.results_dir)
             n = 0
             for r in rows:
-                hit = category_match(r.get("_category", "broken"))
+                hit = predicate(r.get("_category", "broken"), state.results_dir / r["experiment"])
                 r["selected"] = hit
                 n += int(hit)
             msg = f"🎯 Selected **{n}** {label} experiment(s). Review the ticks, then click the action button."
             return _to_exp_table(rows), gr.update(value=msg, visible=True)
 
         def on_pick_archivable() -> tuple[list[list[Any]], Any]:
-            """Auto-tick non-keepers for Archive: broken runs + incomplete
-            (partial / debug) subsets. The user reviews the ticks before
-            archiving (e.g. to spare an intentional small subset)."""
-            return _select_rows(lambda c: c in ("broken", "incomplete"), "broken / incomplete")
+            """Auto-tick non-keepers for Archive: broken runs, incomplete
+            (partial / debug) subsets, and runs already recorded as rejected
+            (e.g. all-ghost runs). The user reviews the ticks before archiving
+            (e.g. to spare an intentional small subset)."""
+            return _select_rows(xray_utils.is_archivable, "broken / incomplete / rejected")
 
         def on_pick_submittable() -> tuple[list[list[Any]], Any]:
             """Auto-tick submittable, not-yet-submitted experiments for Submit."""
-            return _select_rows(lambda c: c == "submittable", "submittable")
+            return _select_rows(lambda c, _d: c == "submittable", "submittable")
 
         def _selected_exp_dirs(table: Any) -> list[Path]:
             """Experiment dirs whose checkbox is ticked in the current table value."""

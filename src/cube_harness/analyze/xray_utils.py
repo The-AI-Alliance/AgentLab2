@@ -625,6 +625,16 @@ def eligibility_badge(exp_dir: Path, category: str, ran: int | None = None, tota
     return _ELIGIBILITY_BADGES.get(category, f"<span>{html_lib.escape(category)}</span>")
 
 
+def is_archivable(exp_dir: Path, category: str) -> bool:
+    """True for runs not worth keeping / not submittable, so the Archive
+    auto-select ticks them: a broken or incomplete (partial/debug) scan, or a run
+    already recorded as rejected (e.g. an all-ghost run decided broken earlier)."""
+    if category in ("broken", "incomplete"):
+        return True
+    subs = submissions.read(exp_dir)
+    return any(subs.get(d, {}).get("status") == "rejected" for d in ("journal", "eee"))
+
+
 def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:
     """Compute display fields for one experiment by reading per-episode status.json files.
 

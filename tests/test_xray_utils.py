@@ -814,3 +814,28 @@ def test_rejected_state_shows_rejected_badge(tmp_path: Path) -> None:
     submissions.record_rejected(tmp_path, "journal", reason="broken: 58/279 episodes errored")
     badge = xray_utils.eligibility_badge(tmp_path, "already_submitted")
     assert "🚫 rejected" in badge and "58/279" in badge
+
+
+class TestIsArchivable:
+    """Archive auto-select: broken + incomplete + rejected, but not submittable/submitted."""
+
+    def test_broken_and_incomplete_are_archivable(self, tmp_path: Path) -> None:
+        assert xray_utils.is_archivable(tmp_path, "broken")
+        assert xray_utils.is_archivable(tmp_path, "incomplete")
+
+    def test_submittable_and_subset_review_are_not(self, tmp_path: Path) -> None:
+        assert not xray_utils.is_archivable(tmp_path, "submittable")
+        assert not xray_utils.is_archivable(tmp_path, "subset_review")
+
+    def test_rejected_run_is_archivable(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        submissions.record_rejected(tmp_path, "journal", reason="broken: all episodes ghost")
+        # category is already_submitted (a journal decision exists) — but it's a rejection.
+        assert xray_utils.is_archivable(tmp_path, "already_submitted")
+
+    def test_successfully_submitted_run_is_not_archivable(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        submissions.record_submitted(tmp_path, "journal", evaluation_id="a", schema_version="1.0")
+        assert not xray_utils.is_archivable(tmp_path, "already_submitted")
