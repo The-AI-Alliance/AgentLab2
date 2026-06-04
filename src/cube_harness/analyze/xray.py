@@ -476,16 +476,33 @@ html {
     margin-bottom: 2px !important;
     min-height: 0 !important;
 }
-/* Experiments toolbar: tight row; the 🎯 auto-select buttons hug their action. */
+/* Experiments toolbar: render each (action, auto-select) pair as a single
+   split-button so it's clear the 🤖✓ belongs to its action. gap:0 makes the
+   pair touch; explicit left margins re-introduce spacing BETWEEN groups. */
 .xray-exp-toolbar {
-    gap: 4px !important;
+    gap: 0 !important;
     align-items: center;
 }
 #exp_pick_archivable_btn, #exp_pick_submittable_btn, #exp_refresh_btn {
-    min-width: 32px !important;
-    max-width: 38px;
-    padding: 2px 6px !important;
+    min-width: 34px !important;
+    max-width: 40px;
+    padding: 2px 8px !important;
     flex: 0 0 auto;
+}
+#exp_refresh_btn {
+    margin-left: 10px !important;
+}
+#exp_archive_btn, #exp_submit_btn {
+    margin-left: 18px !important;
+}
+#exp_archive_btn button, #exp_submit_btn button {
+    border-top-right-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+}
+#exp_pick_archivable_btn button, #exp_pick_submittable_btn button {
+    border-top-left-radius: 0 !important;
+    border-bottom-left-radius: 0 !important;
+    border-left: 1px solid rgba(0, 0, 0, 0.18) !important;
 }
 .compact-header {
     padding: 8px 16px;
@@ -1202,7 +1219,7 @@ def run_xray(
         active_tab = gr.State(value="Chat")
         step_id = gr.State(value=StepId())
 
-        with gr.Tabs():
+        with gr.Tabs(selected="experiments_tab"):
             with gr.Tab("Help"):
                 gr.Markdown(
                     """\
@@ -1252,9 +1269,9 @@ def run_xray(
 """,
                     elem_classes="help-content",
                 )
-            with gr.Tab("Experiments"):
+            with gr.Tab("Experiments", id="experiments_tab"):
                 # Single toolbar row. Each action (Archive / Submit) has a small
-                # attached 🎯 auto-select button that ticks the rows it applies to;
+                # attached 🤖✓ auto-select button that ticks the rows it applies to;
                 # the user reviews the selection, then clicks the action. Tooltips
                 # (set in _INIT_JS) describe each button.
                 with gr.Row(elem_classes="xray-exp-toolbar"):
@@ -1266,13 +1283,13 @@ def run_xray(
                         "🗃 Archive", scale=0, size="sm", variant="secondary", elem_id="exp_archive_btn"
                     )
                     exp_pick_archivable_btn = gr.Button(
-                        "🎯", scale=0, size="sm", elem_id="exp_pick_archivable_btn", min_width=0
+                        "🤖✓", scale=0, size="sm", elem_id="exp_pick_archivable_btn", min_width=0
                     )
                     exp_submit_btn = gr.Button(
                         "⬆️ Submit", scale=0, size="sm", variant="primary", elem_id="exp_submit_btn"
                     )
                     exp_pick_submittable_btn = gr.Button(
-                        "🎯", scale=0, size="sm", elem_id="exp_pick_submittable_btn", min_width=0
+                        "🤖✓", scale=0, size="sm", elem_id="exp_pick_submittable_btn", min_width=0
                     )
                 results_dir_md = gr.Markdown(f"📂 `{state.results_dir}`")
                 exp_action_status = gr.Markdown("", visible=False)
