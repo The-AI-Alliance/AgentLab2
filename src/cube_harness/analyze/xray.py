@@ -514,13 +514,20 @@ html {
     padding: 2px 10px !important;
     white-space: nowrap !important;
 }
-/* gap between the Archive split-button and the Submit split-button */
-#exp_submit_btn {
+/* gap between the Archive split-button and the Submit cluster */
+#exp_submit_registry_btn {
     margin-left: 16px !important;
 }
-#exp_archive_btn button, #exp_submit_btn button {
+/* Submit cluster = [Registry | EEE | 🤖✓] joined into one unit. Left segment
+   (Registry) keeps its left radius; the middle (EEE) is square; the 🤖✓ keeps
+   the right radius (handled by the shared pick-button rule below). */
+#exp_archive_btn button, #exp_submit_registry_btn button {
     border-top-right-radius: 0 !important;
     border-bottom-right-radius: 0 !important;
+}
+#exp_submit_eee_btn button {
+    border-radius: 0 !important;
+    border-left: 1px solid rgba(0, 0, 0, 0.18) !important;
 }
 #exp_pick_archivable_btn button, #exp_pick_submittable_btn button {
     border-top-left-radius: 0 !important;
@@ -693,8 +700,9 @@ _INIT_JS = """
         '#exp_refresh_btn': 'Re-scan the results directory (cached — fast)',
         '#exp_archive_btn': 'Archive all checked experiments (moves them to _archive/)',
         '#exp_pick_archivable_btn': 'Auto-select broken + incomplete (partial/debug) + rejected experiments to archive',
-        '#exp_submit_btn': 'Submit checked experiments to the cube-registry — opens a PR that auto-validates + merges',
-        '#exp_pick_submittable_btn': 'Auto-select submittable, not-yet-submitted experiments',
+        '#exp_submit_registry_btn': 'Submit checked experiments to the cube-registry reproducibility journal — opens an auto-validating, auto-merging PR. For publishing REFERENCE values (cross-infra drift detection), NOT a leaderboard.',
+        '#exp_submit_eee_btn': 'Submit checked experiments to EEE (the eval results store) — for showcasing agent/model performance. Runs scripts/submit_to_eee.py.',
+        '#exp_pick_submittable_btn': 'Auto-select submittable, not-yet-submitted experiments (applies to whichever submit button you click next)',
     };
     const setTip = () => {
         for (const [sel, tip] of Object.entries(TIPS)) {
@@ -1305,11 +1313,11 @@ def run_xray(
                     elem_classes="help-content",
                 )
             with gr.Tab("Experiments", id="experiments_tab"):
-                # One toolbar row: directory controls on the left, the two action
-                # split-buttons (Archive 🤖✓ · Submit 🤖✓) pushed to the right by the
-                # growing directory label. Each 🤖✓ auto-selects the rows its action
-                # applies to; the user reviews, then clicks the action. Tooltips are
-                # set in _INIT_JS.
+                # One toolbar row: directory controls on the left, the action
+                # clusters (Archive 🤖✓ · Registry EEE 🤖✓) pushed to the right by
+                # the growing directory label. Each 🤖✓ auto-selects the rows its
+                # action applies to; the user reviews, then clicks Registry or EEE.
+                # Tooltips are set in _INIT_JS.
                 with gr.Row(elem_classes="xray-exp-toolbar"):
                     exp_browse_btn = gr.Button(
                         "📁 Browse…", scale=0, size="sm", variant="secondary", elem_id="exp_browse_btn"
@@ -1322,8 +1330,11 @@ def run_xray(
                     exp_pick_archivable_btn = gr.Button(
                         "🤖✓", scale=0, size="sm", elem_id="exp_pick_archivable_btn", min_width=0
                     )
-                    exp_submit_btn = gr.Button(
-                        "⬆️ Submit", scale=0, size="sm", variant="primary", elem_id="exp_submit_btn"
+                    exp_submit_registry_btn = gr.Button(
+                        "⬆️ Registry", scale=0, size="sm", variant="primary", elem_id="exp_submit_registry_btn"
+                    )
+                    exp_submit_eee_btn = gr.Button(
+                        "⬆️ EEE", scale=0, size="sm", variant="primary", elem_id="exp_submit_eee_btn"
                     )
                     exp_pick_submittable_btn = gr.Button(
                         "🤖✓", scale=0, size="sm", elem_id="exp_pick_submittable_btn", min_width=0
@@ -1583,8 +1594,11 @@ def run_xray(
         exp_refresh_btn.click(fn=_exp_table_value, outputs=exp_table)
         exp_pick_archivable_btn.click(fn=on_pick_archivable, outputs=[exp_table, exp_action_status])
         exp_pick_submittable_btn.click(fn=on_pick_submittable, outputs=[exp_table, exp_action_status])
-        exp_submit_btn.click(
+        exp_submit_registry_btn.click(
             fn=lambda t: on_submit(t, "journal"), inputs=exp_table, outputs=[exp_table, exp_action_status]
+        )
+        exp_submit_eee_btn.click(
+            fn=lambda t: on_submit(t, "eee"), inputs=exp_table, outputs=[exp_table, exp_action_status]
         )
         exp_archive_btn.click(fn=on_archive_selected, outputs=[exp_table, *_hierarchy_outputs, exp_action_status])
 
