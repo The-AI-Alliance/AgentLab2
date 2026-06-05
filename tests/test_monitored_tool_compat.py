@@ -1,14 +1,11 @@
 """Tests for MonitoredTool — drop-in compatibility,
 mixed toolbox dispatch, budget enforcement, and build_monitored_env_tool.
 
-Design note: the RFC originally specified a single async wrapper, but in
-practice every in-tree cube uses sync `Tool` subclasses (and
-`Toolbox.execute_action` asserts `isinstance(tool, AbstractTool)`), so
-we ship both sync and async wrappers with shared recording logic. See
-src/cube_harness/tool.py docstring.
-
-Post-Trajectory-removal: events stream to a Storage hook; tests inspect
-what was sent there rather than walking an in-memory list.
+Post-tool-consolidation: one `MonitoredTool` wraps any `cube.tool.Tool`,
+whether its `@tool_action` methods are sync, async, or a mix. The inner
+`Tool` handles per-method dispatch (bridging via thread+loop or
+`asyncio.to_thread` when needed); `MonitoredTool` just adds budget
+enforcement, `ToolCallEvent` emission, and the `Task.step` wrapping.
 """
 
 import asyncio
@@ -17,14 +14,13 @@ from typing import Callable
 import pytest
 from cube.core import Action, ActionSchema, Observation, StepError
 from cube.task import STOP_ACTION
-from cube.tool import AbstractAsyncTool, AbstractTool, AsyncToolbox, Toolbox
+from cube.tool import AbstractTool, Tool, Toolbox, tool_action
 
 from cube_harness.core import ToolCallEvent, TrajectoryEvent
 from cube_harness.tool import (
     Budget,
     BudgetExceeded,
     MonitoredTool,
-    as_async,
     build_monitored_env_tool,
     wrap_tool,
 )
@@ -51,14 +47,17 @@ class _SyncOtherTool(AbstractTool):
         return Observation.from_text("other")
 
 
-class _AsyncEchoTool(AbstractAsyncTool):
-    @property
-    def action_set(self) -> list[ActionSchema]:
-        return [ActionSchema(name="async_echo", description="echo", parameters={"type": "object", "properties": {}})]
+class _AsyncEchoTool(Tool):
+    """A `Tool` with an async `@tool_action` — the post-consolidation way
+    to express what used to be `AbstractAsyncTool`. Dispatch routes per
+    method's kind: `execute_action` bridges via thread+loop,
+    `async_execute_action` awaits directly."""
 
-    async def execute_action(self, action: Action) -> Observation | StepError:
+    @tool_action
+    async def async_echo(self, msg: str = "") -> str:
+        """Echo the given message."""
         await asyncio.sleep(0)
-        return Observation.from_text(f"async:{action.arguments.get('msg', '')}")
+        return f"async:{msg}"
 
 
 def _action(name: str, **args: object) -> Action:
@@ -88,13 +87,13 @@ class _FakeStorage:
 
 
 def _make_monitored(
-    inner: AbstractTool | AbstractAsyncTool,
+    inner: AbstractTool,
     budget: Budget,
     *,
     storage: _FakeStorage | None = None,
     parent_event_id_getter: Callable[[], str] | None = None,
 ) -> MonitoredTool:
-    """Construct a MonitoredTool. One class wraps any inner kind now."""
+    """Construct a MonitoredTool. One class wraps any inner kind."""
     storage = storage if storage is not None else _FakeStorage()
 
     def emit(te: TrajectoryEvent) -> str:
@@ -127,30 +126,30 @@ def test_sync_monitored_tool_returns_observation_unchanged() -> None:
     assert isinstance(result, Observation)
 
 
-def test_async_inner_via_async_execute_action() -> None:
-    """Async inner is supported via the dual `async_execute_action` API.
-    Calling sync `execute_action` on an async-inner MonitoredTool raises
-    a TypeError — the test below verifies the sync path's safety check."""
+def test_async_action_via_async_execute_action() -> None:
+    """A `Tool` with an async `@tool_action` is dispatched directly when
+    the caller goes through `async_execute_action` — no thread hop."""
     budget = Budget(max_agent_steps=5)
     tool = _make_monitored(_AsyncEchoTool(), budget)
     result = asyncio.run(tool.async_execute_action(_action("async_echo", msg="hi")))
     assert isinstance(result, Observation)
 
 
-def test_async_inner_sync_execute_action_raises() -> None:
-    """`MonitoredTool.execute_action` is sync — sync inners only. Calling
-    it with an async inner raises TypeError directing the caller to
-    `async_execute_action`."""
+def test_async_action_via_sync_execute_action_bridges() -> None:
+    """Calling sync `execute_action` on a tool with an async `@tool_action`
+    bridges through a one-shot worker thread + event loop. The caller
+    gets a normal `Observation` synchronously — no TypeError."""
     budget = Budget(max_agent_steps=5)
     tool = _make_monitored(_AsyncEchoTool(), budget)
-    with pytest.raises(TypeError, match="async_execute_action"):
-        tool.execute_action(_action("async_echo", msg="hi"))
+    result = tool.execute_action(_action("async_echo", msg="hi"))
+    assert isinstance(result, Observation)
 
 
-def test_sync_inner_via_async_execute_action() -> None:
-    """Sync inner works through async dispatch too — runs directly on
-    the current task with NO `to_thread` hop. Lets one code path serve
-    both inner kinds."""
+def test_sync_action_via_async_execute_action() -> None:
+    """Sync action through async dispatch hops through `asyncio.to_thread`
+    inside `Tool.async_execute_action`. Lets one code path serve both
+    method kinds; `asyncio.gather` over N sync actions runs them in real
+    OS-thread parallel."""
     budget = Budget(max_agent_steps=5)
     tool = _make_monitored(_SyncEchoTool(), budget)
     result = asyncio.run(tool.async_execute_action(_action("sync_echo", msg="hi")))
@@ -169,7 +168,7 @@ def test_monitored_tool_records_event_per_call() -> None:
 
 
 def test_wrong_inner_type_raises() -> None:
-    """MonitoredTool accepts sync OR async cube tools — but not arbitrary objects."""
+    """MonitoredTool accepts any `AbstractTool` — not arbitrary objects."""
 
     class _NotATool:
         pass
@@ -220,12 +219,12 @@ def test_budget_exceeded_is_base_exception() -> None:
 
 
 def test_sync_toolbox_with_mixed_monitored_and_unmonitored() -> None:
-    """A sync Toolbox can contain MonitoredTool wrappers AND bare tools
+    """A `Toolbox` can contain `MonitoredTool` wrappers AND bare tools
     side-by-side. Dispatch by action name routes each call correctly.
 
-    Validates the RFC design goal: MonitoredTool is API-identical to any
-    AbstractTool from the caller's perspective. The agent doesn't know
-    or care which tools are monitored."""
+    Validates the design goal: `MonitoredTool` is API-identical to any
+    `AbstractTool` from the caller's perspective. The agent doesn't
+    know or care which tools are monitored."""
     budget = Budget(max_agent_steps=10)
     storage = _FakeStorage()
     monitored = _make_monitored(_SyncEchoTool(), budget, storage=storage)
@@ -241,25 +240,25 @@ def test_sync_toolbox_with_mixed_monitored_and_unmonitored() -> None:
     assert events[0].action_id == "id-sync_echo"
 
 
-def test_async_toolbox_with_mixed_monitored_and_unmonitored() -> None:
-    """Symmetric check for AsyncToolbox containing async-inner MonitoredTool."""
+def test_toolbox_async_dispatch_over_mixed_leaves() -> None:
+    """A single `Toolbox` may hold a mix of sync-action and async-action
+    leaves; `async_execute_action` routes per the leaf's action method's
+    kind. Only the monitored leaf records a ToolCallEvent."""
 
-    class _AsyncOther(AbstractAsyncTool):
-        @property
-        def action_set(self) -> list[ActionSchema]:
-            return [ActionSchema(name="async_other", description="x", parameters={"type": "object", "properties": {}})]
-
-        async def execute_action(self, action: Action) -> Observation | StepError:
-            return Observation.from_text("other")
+    class _AsyncOther(Tool):
+        @tool_action
+        async def async_other(self) -> str:
+            """Bare async tool."""
+            return "other"
 
     budget = Budget(max_agent_steps=10)
     storage = _FakeStorage()
     monitored = _make_monitored(_AsyncEchoTool(), budget, storage=storage)
     bare = _AsyncOther()
-    box = AsyncToolbox([monitored, bare])
+    box = Toolbox([monitored, bare])
 
-    asyncio.run(box.execute_action(_action("async_echo", msg="m")))
-    asyncio.run(box.execute_action(_action("async_other")))
+    asyncio.run(box.async_execute_action(_action("async_echo", msg="m")))
+    asyncio.run(box.async_execute_action(_action("async_other")))
     assert len(storage.tool_call_events()) == 1
 
 
@@ -301,8 +300,8 @@ def _noop_emit(te: TrajectoryEvent) -> str:
     return te.output.id
 
 
-def test_wrap_tool_returns_monitored_tool_for_both_inner_kinds() -> None:
-    """One `MonitoredTool` class handles both sync and async inners."""
+def test_wrap_tool_returns_monitored_tool_for_both_action_kinds() -> None:
+    """One `MonitoredTool` class handles both sync-action and async-action inners."""
     budget = Budget(max_agent_steps=5)
     sync_wrapped = wrap_tool(_SyncEchoTool(), emit=_noop_emit, budget=budget)
     async_wrapped = wrap_tool(_AsyncEchoTool(), emit=_noop_emit, budget=budget)
@@ -323,7 +322,7 @@ def test_wrap_tool_is_idempotent() -> None:
 
 
 class _FakeTask:
-    def __init__(self, tools: list[AbstractTool | AbstractAsyncTool], *, attr: str = "toolbox") -> None:
+    def __init__(self, tools: list[AbstractTool], *, attr: str = "toolbox") -> None:
         setattr(self, attr, Toolbox(tools))
 
 
@@ -421,8 +420,8 @@ def test_build_monitored_env_tool_recurses_into_nested_toolboxes() -> None:
 
 def test_build_monitored_env_tool_surfaces_stop_once_for_multi_leaf() -> None:
     """F4: a multi-leaf monitored toolbox must advertise STOP_ACTION exactly
-    once. Otherwise AsyncToolbox (parallel_actions path) raises on the
-    duplicate 'stop', and the LLM gets duplicate stop tool schemas."""
+    once. Otherwise `Toolbox.__init__`'s duplicate-name guard trips, and
+    the LLM gets duplicate stop tool schemas."""
 
     class _StopTask:
         accept_agent_stop = True
@@ -434,9 +433,9 @@ def test_build_monitored_env_tool_surfaces_stop_once_for_multi_leaf() -> None:
     env_tool = build_monitored_env_tool(task, _make_streamer(Budget(max_agent_steps=5)))
     stop_count = sum(a.name == STOP_ACTION.name for a in env_tool.action_set)
     assert stop_count == 1, f"expected exactly one STOP_ACTION, got {stop_count}"
-    # Parallel path: converting to AsyncToolbox must not trip its duplicate
-    # action-name guard.
-    as_async(env_tool)
+    # Rebuilding a fresh Toolbox over the same leaves must not trip
+    # its duplicate action-name guard.
+    Toolbox(tools=env_tool.tools)
 
 
 def test_build_monitored_env_tool_with_parent_event_id_getter() -> None:

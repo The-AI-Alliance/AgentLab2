@@ -1,32 +1,18 @@
-"""MonitoredTool — single wrapper that records `ToolCallEvent`s.
+"""MonitoredTool — wraps any cube-standard `Tool` and records `ToolCallEvent`s.
 
-Part of RFC `agent-owns-loop`. One `MonitoredTool` class wraps ANY
-cube-standard tool (sync `AbstractTool` or async `AbstractAsyncTool`)
-and exposes a dual call surface:
+`MonitoredTool` is a thin pass-through that adds budget enforcement,
+ToolCallEvent emission, and the cube-standard `Task.step` semantics
+(STOP_ACTION, obs_postprocess, validate_per_step, finished). It exposes
+the same dual call surface as its inner `Tool`:
 
-  * `tool.execute_action(action)` — sync. Sync-inner only; raises
-    TypeError for async inner. Runs the inner on the calling thread
-    with NO `to_thread` hop. Pick this in sequential loops where
-    single-stack debuggability matters (default `Agent._run`).
+  * `tool.execute_action(action)` — sync.
+  * `await tool.async_execute_action(action)` — async.
 
-  * `await tool.async_execute_action(action)` — async. Works for BOTH
-    inner kinds. Sync inner is dispatched via `asyncio.to_thread` so
-    `asyncio.gather` over N calls runs them in real parallel. Async
-    inner is awaited directly. Pick this for parallel dispatch
-    (`Agent._arun` / `Genny[parallel_actions=True]`) or when the inner
-    may be async.
-
-The dual API lets agent authors pick the right call shape for their
-loop semantics. cube-harness internals route through the right one
-based on `Agent._run` vs `_arun`.
-
-The collapse to one class was enabled by cube-standard adding
-`async_execute_action` as a default method on `AbstractTool` /
-`AbstractAsyncTool` and relaxing `AsyncToolbox` to accept mixed sync +
-async leaves (see cube-standard PR #152).
+The inner `Tool` handles per-method sync/async routing itself, so
+`MonitoredTool` doesn't need to know whether the `@tool_action` method
+is sync or async — it just delegates and records.
 """
 
-import asyncio
 import copy
 import logging
 import time
@@ -34,13 +20,7 @@ from typing import Any, Callable
 
 from cube.core import Action, Observation, StepError
 from cube.task import STOP_ACTION
-from cube.tool import (
-    AbstractAsyncTool,
-    AbstractTool,
-    ActionSchema,
-    AsyncToolbox,
-    Toolbox,
-)
+from cube.tool import AbstractTool, ActionSchema, Toolbox
 
 from cube_harness.budget import Budget, BudgetExceeded
 from cube_harness.core import EvaluationEvent, ToolCallEvent, TrajectoryEvent
@@ -232,22 +212,16 @@ def _post_execute_wrapping(
 
 
 class MonitoredTool(AbstractTool):
-    """Single wrapper around a `cube.tool.AbstractTool` or `AbstractAsyncTool`.
+    """Wraps a `cube.tool.AbstractTool` to add budget enforcement,
+    `ToolCallEvent` emission, and the cube-standard `Task.step`
+    semantics (STOP_ACTION, obs_postprocess, validate_per_step,
+    finished).
 
-    Subclasses `AbstractTool` so it's structurally compatible with sync
-    `Toolbox` containment, but also exposes `async_execute_action` (the
-    one declared on `AbstractTool` by cube-standard) which works for
-    both inner kinds.
-
-    Dual call surface:
-
-      * `tool.execute_action(action)` — sync. Sync inner only; raises
-        TypeError if the inner is async.
-
-      * `await tool.async_execute_action(action)` — async. Works for
-        BOTH inner kinds. Sync inner is called synchronously on the
-        current task (no `to_thread` hop — debuggable). Async inner
-        is awaited.
+    Both `execute_action` (sync) and `async_execute_action` (async) are
+    available — each delegates to the inner tool's same-named dispatch
+    method. The inner `Tool` handles per-method sync/async routing,
+    bridging to a thread+loop or `asyncio.to_thread` when caller and
+    `@tool_action` method differ.
 
     Construction is per-episode. Re-using across episodes is a bug —
     the budget counter and trajectory are episode-scoped.
@@ -255,18 +229,15 @@ class MonitoredTool(AbstractTool):
 
     def __init__(
         self,
-        inner: AbstractTool | AbstractAsyncTool,
+        inner: AbstractTool,
         emit: "Callable[[TrajectoryEvent], str]",
         budget: Budget,
         parent_event_id_getter: Callable[[], str] | None = None,
         task: Any | None = None,
     ) -> None:
-        if not isinstance(inner, (AbstractTool, AbstractAsyncTool)):
-            raise TypeError(
-                f"MonitoredTool wraps a cube.tool.AbstractTool or AbstractAsyncTool; got {type(inner).__name__}."
-            )
+        if not isinstance(inner, AbstractTool):
+            raise TypeError(f"MonitoredTool wraps a cube.tool.AbstractTool; got {type(inner).__name__}.")
         self.inner = inner
-        self._inner_is_async = isinstance(inner, AbstractAsyncTool)
         self._state = _MonitorState(emit, budget, parent_event_id_getter, task)
         # TEMP (F4 / design-debt): when set, this leaf does NOT surface
         # STOP_ACTION. `_dedup_stop_actions` flips it on every monitored leaf
@@ -283,11 +254,10 @@ class MonitoredTool(AbstractTool):
 
         `STOP_ACTION` is the cube-standard sentinel an agent emits to
         signal graceful end-of-episode. `Task.action_set` includes it
-        (when `task.accept_agent_stop` is True), but `Toolbox` /
-        `AsyncToolbox` only see member-tool action sets. Surfacing it
-        here lets a containing toolbox dispatch `STOP_ACTION` to this
-        wrapper, where `_maybe_stop_action` translates it into
-        `TaskDone`.
+        (when `task.accept_agent_stop` is True), but `Toolbox` only
+        sees member-tool action sets. Surfacing it here lets a
+        containing toolbox dispatch `STOP_ACTION` to this wrapper,
+        where `_maybe_stop_action` translates it into `TaskDone`.
         """
         actions = list(self.inner.action_set)
         task = self._state.task
@@ -297,27 +267,10 @@ class MonitoredTool(AbstractTool):
         return actions
 
     def reset(self) -> None:
-        """Sync reset. Async inner returns a coroutine; we close it and
-        log a debug — callers wanting proper async cleanup should go
-        through `AsyncToolbox.reset` (which awaits) or the live agent
-        loop's shutdown path."""
-        r = self.inner.reset()
-        if asyncio.iscoroutine(r):
-            r.close()
-            logger.debug(
-                "MonitoredTool.reset: async inner returned a coroutine; "
-                "closed without awaiting. Use AsyncToolbox.reset for proper cleanup."
-            )
+        self.inner.reset()
 
     def close(self) -> None:
-        """Sync close. Same async-coroutine handling as `reset`."""
-        c = self.inner.close()
-        if asyncio.iscoroutine(c):
-            c.close()
-            logger.debug(
-                "MonitoredTool.close: async inner returned a coroutine; "
-                "closed without awaiting. Use AsyncToolbox.close for proper cleanup."
-            )
+        self.inner.close()
 
     # --- monitored execution ---
 
@@ -334,14 +287,10 @@ class MonitoredTool(AbstractTool):
              does NOT bleed reward/info back to the agent.
           6. task.finished() check — raises TaskDone on True.
 
-        Sync inner only. For async inner, use `async_execute_action`."""
-        if self._inner_is_async:
-            raise TypeError(
-                "MonitoredTool.execute_action (sync) does not support async inner tools. "
-                "Use `await tool.async_execute_action(action)` for async-shaped dispatch "
-                "(works for both sync and async inners), or wrap with asyncio.to_thread "
-                "inside asyncio.gather for parallel dispatch of sync inners."
-            )
+        Works for any inner `Tool`: a sync `@tool_action` runs directly
+        on the calling thread; an async `@tool_action` is bridged via a
+        one-shot worker thread inside `Tool.execute_action` (~2-5 ms).
+        """
         if _maybe_stop_action(self._state, action):
             raise TaskDone(action=action)
         if self._state.budget.exhausted:
@@ -361,20 +310,13 @@ class MonitoredTool(AbstractTool):
         return _post_execute_wrapping(self._state, action, result, tool_call_event_id)
 
     async def async_execute_action(self, action: Action) -> Observation | StepError:
-        """Async monitored dispatch — the parallel-safe call-site that
-        works for BOTH sync and async inners.
+        """Async monitored dispatch — the parallel-safe call-site.
 
-        Sync inner: dispatched via `asyncio.to_thread`. Lets
-        `asyncio.gather` over N sync-inner calls run them in real
-        parallel (each on its own OS thread). The lock on `Budget` +
-        `EventStreamer._lock` keeps stats coherent under that
-        concurrency.
-
-        Async inner: `await self.inner.execute_action(action)`.
-
-        For agents that want sync-on-main-thread dispatch (default
-        `Agent._run` — single-stack pdb, no thread hop), call the sync
-        `execute_action` directly instead.
+        Delegates to the inner tool's `async_execute_action`, which
+        routes per-method: an async `@tool_action` is awaited directly;
+        a sync `@tool_action` hops through `asyncio.to_thread` so
+        `asyncio.gather` over N calls runs them in real OS-thread
+        parallel.
 
         Same wrapping steps as `execute_action` (STOP, budget, record,
         obs_postprocess, step-eval, finished).
@@ -384,10 +326,7 @@ class MonitoredTool(AbstractTool):
         if self._state.budget.exhausted:
             raise BudgetExceeded(action=action)
         start = time.time()
-        if self._inner_is_async:
-            result = await self.inner.execute_action(action)
-        else:
-            result = await asyncio.to_thread(self.inner.execute_action, action)
+        result = await self.inner.async_execute_action(action)
         end = time.time()
         tool_call_event_id = _record_tool_call(
             self._state.emit,
@@ -423,7 +362,7 @@ class MonitoredTool(AbstractTool):
 
 
 def wrap_tool(
-    inner: AbstractTool | AbstractAsyncTool,
+    inner: AbstractTool,
     emit: "Callable[[TrajectoryEvent], str]",
     budget: Budget,
     parent_event_id_getter: Callable[[], str] | None = None,
@@ -439,7 +378,7 @@ def wrap_tool(
     return MonitoredTool(inner, emit, budget, parent_event_id_getter, task)
 
 
-def build_monitored_env_tool(task: Any, streamer: Any) -> AbstractTool | AbstractAsyncTool | None:
+def build_monitored_env_tool(task: Any, streamer: Any) -> AbstractTool | None:
     """Build the monitored ``env_tool`` the agent drives — WITHOUT mutating
     the task's own tool.
 
@@ -473,12 +412,12 @@ def build_monitored_env_tool(task: Any, streamer: Any) -> AbstractTool | Abstrac
     return env_tool
 
 
-def _dedup_stop_actions(env_tool: AbstractTool | AbstractAsyncTool) -> None:
+def _dedup_stop_actions(env_tool: AbstractTool) -> None:
     """TEMP (F4 / design-debt): surface STOP_ACTION on exactly one monitored leaf.
 
     `MonitoredTool.action_set` appends `STOP_ACTION` per leaf, so a multi-leaf
     monitored toolbox advertises `stop` N times — which both trips
-    `AsyncToolbox.__init__`'s duplicate-name guard (crashing `parallel_actions`
+    `Toolbox.__init__`'s duplicate-name guard (crashing `parallel_actions`
     on multi-tool cubes) and sends duplicate `stop` tool schemas to the LLM.
     Keep STOP on the first monitored leaf and suppress it on the rest.
 
@@ -491,7 +430,7 @@ def _dedup_stop_actions(env_tool: AbstractTool | AbstractAsyncTool) -> None:
     stack: list = [env_tool]
     while stack:
         node = stack.pop()
-        if isinstance(node, (Toolbox, AsyncToolbox)):
+        if isinstance(node, Toolbox):
             stack.extend(node.tools)
         elif isinstance(node, MonitoredTool):
             if seen_stop:
@@ -501,21 +440,21 @@ def _dedup_stop_actions(env_tool: AbstractTool | AbstractAsyncTool) -> None:
 
 
 def _monitored_view(
-    container: AbstractTool | AbstractAsyncTool,
+    container: AbstractTool,
     emit: "Callable[[TrajectoryEvent], str]",
     budget: Budget,
     parent_event_id_getter: Callable[[], str] | None,
     task: Any | None = None,
-) -> AbstractTool | AbstractAsyncTool:
+) -> AbstractTool:
     """Return a monitored view of `container` sharing its inner instances,
-    without mutating it. A `Toolbox` / `AsyncToolbox` is shallow-copied with
-    `MonitoredTool` leaves (nested toolboxes copied recursively); a single
-    tool is wrapped directly. Idempotent via `wrap_tool`."""
-    if isinstance(container, (Toolbox, AsyncToolbox)):
+    without mutating it. A `Toolbox` is shallow-copied with `MonitoredTool`
+    leaves (nested toolboxes copied recursively); a single tool is wrapped
+    directly. Idempotent via `wrap_tool`."""
+    if isinstance(container, Toolbox):
         view = copy.copy(container)  # same type + attrs; we replace tools below
         view.tools = [
             _monitored_view(leaf, emit, budget, parent_event_id_getter, task)
-            if isinstance(leaf, (Toolbox, AsyncToolbox))
+            if isinstance(leaf, Toolbox)
             else wrap_tool(leaf, emit, budget, parent_event_id_getter, task)
             for leaf in container.tools
         ]
@@ -525,29 +464,3 @@ def _monitored_view(
         view._action_name_to_tool = {action.name: tool for tool in view.tools for action in tool.action_set}
         return view
     return wrap_tool(container, emit, budget, parent_event_id_getter, task)
-
-
-# ---------------------------------------------------------------------------
-# as_async — expose any toolbox as `AbstractAsyncTool` for the agent
-# ---------------------------------------------------------------------------
-
-
-def as_async(tool: AbstractTool | AbstractAsyncTool) -> AbstractAsyncTool:
-    """Return `tool` as an `AbstractAsyncTool` for `Agent.run`.
-
-    `AbstractAsyncTool` instance passes through unchanged. A sync
-    `Toolbox` (post-`build_monitored_env_tool`, with `MonitoredTool` leaves)
-    is rebuilt as an `AsyncToolbox` containing the same leaves —
-    `AsyncToolbox` now accepts mixed sync + async leaves (cube-standard
-    PR #152) and dispatches each through `async_execute_action`,
-    running sync leaves synchronously on the current task without a
-    `to_thread` hop. A single sync tool (not wrapped in a Toolbox) is
-    wrapped in a one-element `AsyncToolbox`.
-    """
-    if isinstance(tool, AbstractAsyncTool):
-        return tool
-    if isinstance(tool, Toolbox):
-        return AsyncToolbox(tools=tool.tools)
-    if isinstance(tool, AbstractTool):
-        return AsyncToolbox(tools=[tool])
-    raise TypeError(f"as_async expects AbstractTool / AbstractAsyncTool; got {type(tool).__name__}")

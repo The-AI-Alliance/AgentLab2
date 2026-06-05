@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from cube.core import ActionSchema, Observation, StepError, ValidatedConfig
-from cube.tool import AbstractAsyncTool
 from pydantic import Field
 
 from cube_harness.core import AgentOutput
@@ -147,7 +146,7 @@ class Agent(ABC):
     def run(
         self,
         initial_obs: Observation,
-        env_tool: "AbstractTool | AbstractAsyncTool",
+        env_tool: "AbstractTool",
     ) -> None:
         """Episode's canonical entry point — dispatches to one of two loop bodies.
 
@@ -155,12 +154,15 @@ class Agent(ABC):
 
           * `False` (default) → `_run` (sync body, called directly). No event loop
             on the calling thread — sync tools (Playwright, shell) work natively and
-            pdb lands in a single stack with no thread hops. env_tool must be a sync
-            container (`Toolbox`, sync `MonitoredTool`, or any `AbstractTool`).
+            pdb lands in a single stack with no thread hops.
 
           * `True` → `_arun` (async body). Spins its own `asyncio.run` scoped to the
-            parallel gather — the event loop lives only here, not in Episode. env_tool
-            is auto-wrapped from sync if needed.
+            parallel gather — the event loop lives only here, not in Episode.
+
+        `env_tool` is any `AbstractTool` — `Tool.execute_action` and
+        `Tool.async_execute_action` both handle sync and async `@tool_action`
+        methods, bridging when caller and method differ. The agent picks the
+        dispatch shape; the tool doesn't need to know.
 
         The recorder is attached out-of-band via `attach_recorder()` before `run` is
         called; LLM/tool events auto-emit. `self._recorder.budget` is available for
@@ -176,20 +178,9 @@ class Agent(ABC):
           * `BudgetExceeded` from a MonitoredTool.
         """
         if self.config.parallel_actions:
-            # _arun needs an async-shaped env_tool. Convert sync → async.
-            from cube_harness.tool import as_async  # local import: avoid cycle
-
-            async_env = env_tool if isinstance(env_tool, AbstractAsyncTool) else as_async(env_tool)
             # Event loop scoped to just the parallel gather — not the whole episode.
-            asyncio.run(self._arun(initial_obs, async_env))
+            asyncio.run(self._arun(initial_obs, env_tool))
         else:
-            if isinstance(env_tool, AbstractAsyncTool):
-                raise TypeError(
-                    f"Agent._run (sync default) requires a sync env_tool; got "
-                    f"{type(env_tool).__name__}. Either set "
-                    f"`AgentConfig.parallel_actions=True` to use the async `_arun` body, "
-                    f"or override `run` to customize dispatch for async-only tools."
-                )
             self._run(initial_obs, env_tool)
 
     def _run(
@@ -232,11 +223,12 @@ class Agent(ABC):
     async def _arun(
         self,
         initial_obs: Observation,
-        env_tool: "AbstractAsyncTool",
+        env_tool: "AbstractTool",
     ) -> None:
         """Async gym-style loop — N actions per step fan out via
-        `asyncio.gather`. Tool calls run in real parallel (sync tools
-        via `asyncio.to_thread` inside `async_execute_action`).
+        `asyncio.gather`. Tool calls run in real parallel (sync
+        `@tool_action` methods hop to `asyncio.to_thread` inside
+        `Tool.async_execute_action`).
 
         The default observation-merge concatenates results in original
         action order (`Observation.__iadd__`). Subclasses with bespoke
@@ -257,10 +249,8 @@ class Agent(ABC):
                 raise RuntimeError(f"Agent step returned error: {agent_output.error.exception_str}")
             if not agent_output.actions:
                 return
-            # Parallel fan-out. AsyncToolbox routes through
-            # MonitoredTool.async_execute_action, which uses to_thread
-            # for sync inners — real OS-thread parallelism.
-            results = await asyncio.gather(*(env_tool.execute_action(a) for a in agent_output.actions))
+            # Parallel fan-out via the unified async call-site.
+            results = await asyncio.gather(*(env_tool.async_execute_action(a) for a in agent_output.actions))
             merged = self._merge_results(results)
             if merged is None:
                 return

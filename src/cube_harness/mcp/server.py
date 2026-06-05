@@ -1,13 +1,11 @@
 """MCP server that exposes cube-harness tools via the Model Context Protocol."""
 
-import asyncio
 import functools
-import inspect
 import logging
 from typing import Any, Literal
 
 from cube.core import Action, Observation, TypedBaseModel
-from cube.tool import AbstractAsyncTool, AbstractTool
+from cube.tool import AbstractTool
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ImageContent, TextContent
 
@@ -26,10 +24,10 @@ class McpServerConfig(TypedBaseModel):
 
 
 class McpServer:
-    """Adapts an cube-harness tool to serve its actions as MCP tools.
+    """Adapts a cube-harness tool to serve its actions as MCP tools.
 
-    Wraps any AbstractTool | AbstractAsyncTool (PlaywrightTool, BgymTool, Toolbox, etc.)
-    and exposes its action_set as MCP tools using FastMCP.
+    Wraps any `AbstractTool` (PlaywrightTool, BgymTool, Toolbox, etc.)
+    and exposes its `action_set` as MCP tools using FastMCP.
 
     Usage:
         tool = PlaywrightConfig(headless=True).make()
@@ -37,7 +35,7 @@ class McpServer:
         server.run()  # blocks, serving MCP over stdio
     """
 
-    def __init__(self, tool: AbstractTool | AbstractAsyncTool, config: McpServerConfig | None = None) -> None:
+    def __init__(self, tool: AbstractTool, config: McpServerConfig | None = None) -> None:
         self._tool = tool
         self._config = config or McpServerConfig()
         self._mcp = FastMCP(self._config.server_name)
@@ -60,26 +58,19 @@ class McpServer:
         self._mcp.run(transport=self._config.transport)
 
 
-def _make_async_handler(tool: AbstractTool | AbstractAsyncTool, method: Any, action_name: str) -> Any:
-    """Create an async MCP handler that dispatches to tool.execute_action.
+def _make_async_handler(tool: AbstractTool, method: Any, action_name: str) -> Any:
+    """Create an async MCP handler that dispatches to the tool through
+    `async_execute_action` — works for both sync and async `@tool_action`
+    methods (sync hops through `asyncio.to_thread` internally).
 
     The wrapper preserves the original method's signature via functools.wraps,
     allowing FastMCP to infer the parameter schema from type hints.
-
-    Async tools (e.g. AsyncPlaywrightTool) are awaited directly.
-    Sync tools are dispatched via asyncio.to_thread to avoid blocking the loop.
     """
-    is_async = inspect.iscoroutinefunction(tool.execute_action)
 
     @functools.wraps(method)
     async def handler(*args: Any, **kwargs: Any) -> list[TextContent | ImageContent]:
         action = Action(name=action_name, arguments=kwargs)
-        if is_async:
-            assert isinstance(tool, AbstractAsyncTool), f"Expected async tool, got {type(tool)}"
-            obs: Observation = await tool.execute_action(action)
-        else:
-            assert isinstance(tool, AbstractTool), f"Expected sync tool, got {type(tool)}"
-            obs: Observation = await asyncio.to_thread(tool.execute_action, action)
+        obs: Observation = await tool.async_execute_action(action)
         return observation_to_mcp_content(obs)
 
     # Override the return annotation so FastMCP treats the output as MCP content

@@ -247,9 +247,11 @@ class Episode:
                 # `find_tool`). The agent's monitored view shares the same
                 # inner tool instance(s), so env state is shared. `Agent.run`
                 # picks `_run` (sync) or `_arun` (async gather) by
-                # `AgentConfig.parallel_actions` and applies `as_async` to the
-                # env_tool when needed. The `task` reference never reaches the
-                # agent. Agent-private tools live on the agent itself.
+                # `AgentConfig.parallel_actions`; the unified `Tool` handles
+                # per-method sync/async routing internally, so the agent
+                # doesn't need to reshape the tool. The `task` reference
+                # never reaches the agent. Agent-private tools live on the
+                # agent itself.
                 env_tool = build_monitored_env_tool(task, streamer)
 
                 # 5. Record the initial obs as a synthetic ToolCallEvent
