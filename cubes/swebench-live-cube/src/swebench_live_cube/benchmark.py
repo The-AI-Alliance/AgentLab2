@@ -157,6 +157,10 @@ class SWEBenchLiveBenchmarkConfig(BenchmarkConfig[SWEBenchLiveTaskMetadata]):
             "lite": ("splits", "*'lite'*"),
             "verified": ("splits", "*'verified'*"),
             "full": ("splits", "*'full'*"),
+            # Official gold-solvable subset: the 275 lite tasks whose gold patch resolves
+            # under the root (Daytona) oracle. Tag stamped by create_task_metadata.py from
+            # gold_subset.LITE_GOLD_SOLVABLE_JSON. NB: "*'lite'*" won't match "'lite-gold'".
+            "lite-gold": ("splits", "*'lite-gold'*"),
         },
     )
     task_config_class: ClassVar[type[TaskConfig]] = SWEBenchLiveTaskConfig

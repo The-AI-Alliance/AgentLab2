@@ -41,6 +41,7 @@ from swebench_live_cube.benchmark import (
     _SPLIT_PRIORITY,
     _merge_rows_by_split,
 )
+from swebench_live_cube.gold_subset import tag_lite_gold
 from swebench_live_cube.task import SWEBenchLiveTaskMetadata
 
 logger = logging.getLogger(__name__)
@@ -128,8 +129,14 @@ def generate_task_metadata(
 
     metadata = _build_task_metadata(rows_by_split)
 
+    rows = [tm.model_dump() for tm in metadata.values()]
+    # Stamp the official lite-gold marker from the committed gold-solvable id list so
+    # named_subset("lite-gold") survives regeneration.
+    tagged = tag_lite_gold(rows)
+    logger.info("Tagged %d tasks with the 'lite-gold' split", tagged)
+
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps([tm.model_dump() for tm in metadata.values()], indent=2))
+    output_path.write_text(json.dumps(rows, indent=2) + "\n")
     logger.info("Saved %d tasks to %s", len(metadata), output_path)
     return len(metadata)
 

@@ -289,6 +289,34 @@ class MockCubeBenchmarkConfig(CubeBenchmarkConfig):
     benchmark_class = MockCubeBenchmark
 
 
+class MockNamedSubsetBenchmarkConfig(CubeBenchmarkConfig):
+    """Cube BenchmarkConfig with a registered named subset ('gold') globbed over a tag.
+
+    Two of three tasks carry the 'GOLD' marker, so named_subset('gold') selects {g1, g2}.
+    Used to exercise BenchmarkSubset's official-named-subset recognition.
+    """
+
+    benchmark_metadata = BenchmarkMetadata(
+        name="mock-cube",
+        version="0.1.0",
+        description="Mock cube benchmark with a named gold subset",
+        named_subsets={"gold": ("abstract_description", "GOLD")},
+    )
+    task_metadata = {
+        "g1": TaskMetadata(id="g1", abstract_description="GOLD"),
+        "g2": TaskMetadata(id="g2", abstract_description="GOLD"),
+        "t3": TaskMetadata(id="t3", abstract_description="other"),
+    }
+    task_config_class = MockCubeTaskConfig
+    benchmark_class = MockCubeBenchmark
+
+
+@pytest.fixture
+def mock_named_subset_benchmark_config() -> MockNamedSubsetBenchmarkConfig:
+    """Cube benchmark config exposing a registered named subset 'gold' (= {g1, g2})."""
+    return MockNamedSubsetBenchmarkConfig()
+
+
 @pytest.fixture
 def mock_cube_task_config() -> MockCubeTaskConfig:
     """Cube task config for mock_cube_task_1."""

@@ -2850,7 +2850,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -2875,7 +2876,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -2924,7 +2926,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -2948,7 +2951,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -2973,7 +2977,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3021,7 +3026,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3045,7 +3051,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3070,7 +3077,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3095,7 +3103,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3119,7 +3128,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3168,7 +3178,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3240,7 +3251,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3264,7 +3276,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3335,7 +3348,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3359,7 +3373,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3383,7 +3398,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3407,7 +3423,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3455,7 +3472,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3480,7 +3498,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3575,7 +3594,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3646,7 +3666,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3671,7 +3692,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3719,7 +3741,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3744,7 +3767,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3793,7 +3817,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3818,7 +3843,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3843,7 +3869,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3915,7 +3942,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3939,7 +3967,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -3963,7 +3992,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4011,7 +4041,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4036,7 +4067,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4085,7 +4117,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4110,7 +4143,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4134,7 +4168,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4159,7 +4194,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4232,7 +4268,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4256,7 +4293,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4281,7 +4319,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4354,7 +4393,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4379,7 +4419,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4404,7 +4445,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4428,7 +4470,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4477,7 +4520,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4501,7 +4545,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4597,7 +4642,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4621,7 +4667,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4646,7 +4693,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4671,7 +4719,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4742,7 +4791,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4767,7 +4817,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4816,7 +4867,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4841,7 +4893,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4939,7 +4992,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4964,7 +5018,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -4989,7 +5044,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5013,7 +5069,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5038,7 +5095,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5063,7 +5121,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5088,7 +5147,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5113,7 +5173,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5160,7 +5221,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5207,7 +5269,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5232,7 +5295,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5257,7 +5321,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5305,7 +5370,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5330,7 +5396,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5377,7 +5444,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5402,7 +5470,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5451,7 +5520,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5476,7 +5546,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5526,7 +5597,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5644,7 +5716,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5742,7 +5815,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5861,7 +5935,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5885,7 +5960,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5910,7 +5986,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5935,7 +6012,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -5960,7 +6038,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6008,7 +6087,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6197,7 +6277,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6222,7 +6303,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6246,7 +6328,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6317,7 +6400,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6411,7 +6495,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6482,7 +6567,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6600,7 +6686,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6625,7 +6712,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6649,7 +6737,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6698,7 +6787,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6793,7 +6883,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6841,7 +6932,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6890,7 +6982,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6938,7 +7031,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -6988,7 +7082,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7059,7 +7154,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7084,7 +7180,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7132,7 +7229,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7250,7 +7348,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7274,7 +7373,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7345,7 +7445,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7369,7 +7470,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7463,7 +7565,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7511,7 +7614,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7535,7 +7639,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7582,7 +7687,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7629,7 +7735,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7653,7 +7760,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7678,7 +7786,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7703,7 +7812,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7752,7 +7862,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7800,7 +7911,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7824,7 +7936,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7873,7 +7986,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -7992,7 +8106,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8040,7 +8155,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8088,7 +8204,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8136,7 +8253,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8184,7 +8302,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8233,7 +8352,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8258,7 +8378,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8305,7 +8426,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8329,7 +8451,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8353,7 +8476,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8474,7 +8598,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8498,7 +8623,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8546,7 +8672,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8641,7 +8768,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8690,7 +8818,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8737,7 +8866,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8784,7 +8914,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -8855,7 +8986,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9068,7 +9200,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9117,7 +9250,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9141,7 +9275,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9166,7 +9301,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9191,7 +9327,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9239,7 +9376,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9287,7 +9425,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9312,7 +9451,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9336,7 +9476,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9361,7 +9502,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9386,7 +9528,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9410,7 +9553,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9434,7 +9578,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9459,7 +9604,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9578,7 +9724,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9626,7 +9773,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9674,7 +9822,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9746,7 +9895,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9770,7 +9920,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9818,7 +9969,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9843,7 +9995,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9868,7 +10021,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9915,7 +10069,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -9985,7 +10140,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -10009,7 +10165,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -10058,7 +10215,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -10130,7 +10288,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -10201,7 +10360,8 @@
     "splits": [
       "verified",
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -10321,7 +10481,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -10393,7 +10554,8 @@
       "verified",
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -11941,7 +12103,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -12054,7 +12217,8 @@
     "base_commit": "4edefe3e56d1656298c3f9a767da2e5292551432",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -12328,7 +12492,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -12510,7 +12675,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -12647,7 +12813,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -12853,7 +13020,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -12967,7 +13135,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -13013,7 +13182,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -13059,7 +13229,8 @@
     "base_commit": "7186962a1607332682dc1dad4e2b0d7c97825b84",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -13243,7 +13414,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -13290,7 +13462,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -13336,7 +13509,8 @@
     "base_commit": "719b3462b58bd5c4fc12d93cb978f824bc7a610b",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -13450,7 +13624,8 @@
     "base_commit": "7405482fdf3eba989ceb27e6ea71968e356d0b33",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -13678,7 +13853,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -13837,7 +14013,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -13997,7 +14174,8 @@
     "base_commit": "3678ee1976d6a33af17462ddd0be2a8921077c8e",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -14226,7 +14404,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -14361,7 +14540,8 @@
     "base_commit": "b658ce261b56c02cb8635416d310ca8f30f4dc90",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -14384,7 +14564,8 @@
     "base_commit": "0ede84058e57a40260a93ae4f9abe08a572b23e0",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -14545,7 +14726,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -14681,7 +14863,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -15134,7 +15317,8 @@
     "base_commit": "d8db468afbac9410d0ba5209ac9c4a58224c3864",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -15293,7 +15477,8 @@
     "base_commit": "054f23363fd50efedaf54ee7fb0333824b0de41f",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -15317,7 +15502,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -15477,7 +15663,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -16155,7 +16342,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -16404,7 +16592,8 @@
     "base_commit": "c037052581a1caef3287332635ca73bcd3bb07ea",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -16698,7 +16887,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -16878,7 +17068,8 @@
     "base_commit": "59b23d379cfa8378490675021d20bf51dbee652d",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -17059,7 +17250,8 @@
     "base_commit": "9a834e069fd04cffadbb2d2e3ccc70342a872252",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -17510,7 +17702,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -17805,7 +17998,8 @@
     "base_commit": "fac5d8f740952485ce2c094e2826ed358fbe90fd",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -17874,7 +18068,8 @@
     "base_commit": "171f10ca1c2a73ea41a06e4c6ecf4de1f53523e7",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -18258,7 +18453,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -18462,7 +18658,8 @@
     "base_commit": "e9c3ef8d0de3080ca59f7f8dbabf9b52983adc7d",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -18732,7 +18929,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -18756,7 +18954,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -18872,7 +19071,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -19303,7 +19503,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -19327,7 +19528,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -19394,7 +19596,8 @@
     "base_commit": "3cb44431288dd143bed6ba67e9b13afc2cde1aa9",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -19417,7 +19620,8 @@
     "base_commit": "328b8dcaa5a5d69827a62c1062fdcaec91b3125e",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -19554,7 +19758,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -19871,7 +20076,8 @@
     "base_commit": "f1acb4f7c969b69a441da0c043fe5bbe6dbc3748",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -19987,7 +20193,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -20279,7 +20486,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -20640,7 +20848,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -21029,7 +21238,8 @@
     "base_commit": "2e3f51782056b6665560f9af6166e30d7c2801ab",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -21053,7 +21263,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -21619,7 +21830,8 @@
     "base_commit": "b5b5e10df55f0d153053f5e6fcb419dac89cd42d",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -21891,7 +22103,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -22029,7 +22242,8 @@
     "base_commit": "d8e988105fdff8c452e3cc73f7790db0b0b64c9d",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -22188,7 +22402,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -22618,7 +22833,8 @@
     "base_commit": "503d275ade85e04efed787ec421bdc55a5a77abf",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -22663,7 +22879,8 @@
     "base_commit": "bfe5f893f4f2bd7e8256fd229cbfefb27c2dddc1",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -22687,7 +22904,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -23075,7 +23293,8 @@
     "base_commit": "022947a2a587483ac897f403f52a1e0a50f53667",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -23190,7 +23409,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -23257,7 +23477,8 @@
     "base_commit": "2125765025c65fdd2aec89856bdc095dfb0fc826",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -23349,7 +23570,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -23531,7 +23753,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -23554,7 +23777,8 @@
     "base_commit": "af3e6670efd11b3eef6a47aef68eb644213db056",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -23670,7 +23894,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -23740,7 +23965,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -23856,7 +24082,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -23879,7 +24106,8 @@
     "base_commit": "801c9adb94b213fc5e8cacb0d9920a0ff7727c2e",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -24331,7 +24559,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -24558,7 +24787,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -24919,7 +25149,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -25032,7 +25263,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -25124,7 +25356,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -25440,7 +25673,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -25621,7 +25855,8 @@
     "base_commit": "39acdeef6424bf7e336ff71cf3a04540b92e2fcd",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -25803,7 +26038,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -25873,7 +26109,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -26032,7 +26269,8 @@
     "base_commit": "d8b5ebca42a32be615b938627a0601c2cb59e68f",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -26329,7 +26567,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -26489,7 +26728,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -26987,7 +27227,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -27123,7 +27364,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -27371,7 +27613,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -27508,7 +27751,8 @@
     "base_commit": "419b66158881af9da5b9b4d8f84b77f7a9c46105",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -27643,7 +27887,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -27868,7 +28113,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -28186,7 +28432,8 @@
     "base_commit": "000938414f46aeaff20256e63d84c96612ae014d",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -28347,7 +28594,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -28371,7 +28619,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -28416,7 +28665,8 @@
     "base_commit": "6c620e8ef8e2222f2e3c2d9cadb90b1527d4045a",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -28462,7 +28712,8 @@
     "base_commit": "9dc5ac4337b09df8c28b6d678485a4894d354970",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -28714,7 +28965,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -28760,7 +29012,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -28829,7 +29082,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -28942,7 +29196,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -28966,7 +29221,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -29079,7 +29335,8 @@
     "base_commit": "b8220b5b975e3f4e19d078033aa1e68da28e2c9b",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -29125,7 +29382,8 @@
     "base_commit": "b56e1ae626617a1e5982126302e0e4c2abd7e649",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -29193,7 +29451,8 @@
     "base_commit": "bf3686e59347320c95503573979a4fc3ad6be9ab",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -29217,7 +29476,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -29513,7 +29773,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -29537,7 +29798,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -29698,7 +29960,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -29788,7 +30051,8 @@
     "base_commit": "db50579bbfdd89aeaf17b73d0dcd50b5ea93f1dc",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -30128,7 +30392,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -30220,7 +30485,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -30244,7 +30510,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -30360,7 +30627,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -30565,7 +30833,8 @@
     "base_commit": "c4fafd9b04a6d0988a23ecda626c2473891ef7e5",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -30588,7 +30857,8 @@
     "base_commit": "d3e13462d0622d7cc20c383d976bf566b6b8ad76",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -30657,7 +30927,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -30837,7 +31108,8 @@
     "base_commit": "2fd5adb8fec09c51cbd607e4e852f2c1d4293348",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -30927,7 +31199,8 @@
     "base_commit": "46259b9f5b89a226d47e2119afb40ad7b4fa5e63",
     "splits": [
       "full",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -30997,7 +31270,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
@@ -31158,7 +31432,8 @@
     "splits": [
       "full",
       "test",
-      "lite"
+      "lite",
+      "lite-gold"
     ],
     "log_parser": "pytest",
     "_type": "swebench_live_cube.task.SWEBenchLiveTaskMetadata"
