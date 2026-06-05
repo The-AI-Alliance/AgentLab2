@@ -10,8 +10,6 @@ Post-Trajectory-removal: events stream to a Storage hook; tests inspect
 the captured event stream rather than walking an in-memory list.
 """
 
-import asyncio
-
 from cube.core import Action, ActionSchema, Observation
 from cube.tool import AbstractTool
 
@@ -135,7 +133,7 @@ def test_default_run_completes_when_task_signals_done() -> None:
     agent = _CounterAgent(_CounterAgentConfig())
     agent.attach_recorder(recorder)
     try:
-        asyncio.run(agent.run(initial_obs=Observation(), env_tool=task.toolbox))
+        agent.run(initial_obs=Observation(), env_tool=task.toolbox)
     except TaskDone:
         pass  # expected: task.finished() returned True after 3 counter increments
 
@@ -166,7 +164,7 @@ def test_default_run_terminates_on_empty_actions() -> None:
     recorder, storage = _setup(task, budget)
     agent = _NoopAgent(_CounterAgentConfig())
     agent.attach_recorder(recorder)
-    asyncio.run(agent.run(initial_obs=Observation(), env_tool=task.toolbox))
+    agent.run(initial_obs=Observation(), env_tool=task.toolbox)
     outputs = storage.outputs()
     # No LLM call + empty actions => nothing was emitted by the agent
     # loop (LLM auto-emit doesn't fire; ToolCallEvent dispatch doesn't fire).
@@ -185,7 +183,7 @@ def test_default_run_records_parent_event_id_on_tool_calls() -> None:
     agent = _CounterAgent(_CounterAgentConfig())
     agent.attach_recorder(recorder)
     try:
-        asyncio.run(agent.run(Observation(), task.toolbox))
+        agent.run(Observation(), task.toolbox)
     except TaskDone:
         pass
 
@@ -212,7 +210,7 @@ def test_default_run_propagates_budget_exceeded() -> None:
     # The second tool call (turn 2) raises.
     raised: list[BaseException] = []
     try:
-        asyncio.run(agent.run(initial_obs=Observation(), env_tool=task.toolbox))
+        agent.run(initial_obs=Observation(), env_tool=task.toolbox)
     except BaseException as e:  # noqa: BLE001
         raised.append(e)
     assert any(isinstance(e, BudgetExceeded) for e in raised)

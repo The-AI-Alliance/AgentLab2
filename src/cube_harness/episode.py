@@ -1,4 +1,3 @@
-import asyncio
 import logging
 import time
 from pathlib import Path
@@ -109,14 +108,16 @@ class Episode:
         )
 
     def run(self) -> TrajectoryView:
-        """Sync entry point: drives the async loop via asyncio.run.
+        """Sync entry point — runs the episode body directly on the calling thread.
+
+        No event loop on the calling thread for sequential agents: sync tools
+        (Playwright browser sessions, shell containers) work natively, and pdb
+        lands in a single stack. The parallel agent path (`parallel_actions=True`)
+        opens its own `asyncio.run` scoped only to the gather inside `Agent.run`.
 
         Returns a lazy `TrajectoryView` onto the just-finalized episode dir.
-        The view's metadata is loaded eagerly; events decode from disk
-        on demand. Per the RFC `agent-owns-loop` scope expansion no
-        full trajectory is held in memory at any point.
         """
-        return asyncio.run(self._arun())
+        return self._run_episode()
 
     def _open_status(self, trajectory_id: str) -> EpisodeStatus:
         """Initialise `status.json` for this attempt.
@@ -145,16 +146,17 @@ class Episode:
         self.storage.write_episode_status(trajectory_id, ep_status)
         return ep_status
 
-    async def _arun(self) -> TrajectoryView:
-        """Agent-owns-loop body. Sync `run()` wraps this with asyncio.run.
+    def _run_episode(self) -> TrajectoryView:
+        """Sync episode body — runs directly on the calling thread.
 
         Flow:
             1. setup (status, task, action_set, agent, trajectory, dirs).
             2. wrap task.toolbox with MonitoredTool (install_monitoring).
             3. build EventStreamer bound to trajectory + storage + summary.
             4. record initial obs (streamer.record_reset).
-            5. `await agent.run(initial.obs, task, streamer)` — the agent
-               drives its own loop now.
+            5. agent.run(initial.obs, env_tool) — sync dispatch. For
+               parallel_actions=True the agent opens its own asyncio.run
+               scoped to the gather; for sequential it runs inline.
             6. finalize:
                - terminal task.evaluate() → streamer.record_evaluation.
                - summary_stats + save_trajectory.
@@ -265,7 +267,7 @@ class Episode:
 
                 # 7. Drive the agent. agent.run is the canonical entry.
                 try:
-                    await agent.run(initial.obs, env_tool)
+                    agent.run(initial.obs, env_tool)
                 except BudgetExceeded as e:
                     logger.info(colored(f"Budget exceeded: {e}", "yellow"))
                     streamer.record_failure(e)

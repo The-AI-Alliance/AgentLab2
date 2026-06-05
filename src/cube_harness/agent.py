@@ -144,7 +144,7 @@ class Agent(ABC):
         bundle LLM calls into its return value.
         """
 
-    async def run(
+    def run(
         self,
         initial_obs: Observation,
         env_tool: "AbstractTool | AbstractAsyncTool",
@@ -153,36 +153,35 @@ class Agent(ABC):
 
         Selection is by `self.config.parallel_actions`:
 
-          * `False` (default) → `_run` (sync body). Fully synchronous
-            action dispatch with NO `await` on tool calls. Single-stack
-            pdb; what you `step` is what you debug. env_tool must be a
-            sync container (a `Toolbox`, a sync `MonitoredTool`, or any
-            `AbstractTool` subclass).
+          * `False` (default) → `_run` (sync body, called directly). No event loop
+            on the calling thread — sync tools (Playwright, shell) work natively and
+            pdb lands in a single stack with no thread hops. env_tool must be a sync
+            container (`Toolbox`, sync `MonitoredTool`, or any `AbstractTool`).
 
-          * `True` → `_arun` (async body). N actions per step fan out
-            via `asyncio.gather` for real parallelism. env_tool must
-            be an async container (auto-wrapped from sync if needed).
+          * `True` → `_arun` (async body). Spins its own `asyncio.run` scoped to the
+            parallel gather — the event loop lives only here, not in Episode. env_tool
+            is auto-wrapped from sync if needed.
 
-        The recorder is attached out-of-band via `attach_recorder()`
-        before `run` is called; LLM/tool events auto-emit.
-        `self._recorder.budget` is available for self-stop.
+        The recorder is attached out-of-band via `attach_recorder()` before `run` is
+        called; LLM/tool events auto-emit. `self._recorder.budget` is available for
+        self-stop.
 
-        Override `_run` / `_arun` to customize loop behavior; override
-        `run` only when you need a fundamentally different dispatch
-        (streaming LLM, custom backoff, …).
+        Override `_run` / `_arun` to customize loop behavior; override `run` only
+        when you need a fundamentally different dispatch (streaming LLM, custom
+        backoff, …).
 
         Termination (shared by both bodies):
           * Graceful: `step` returns empty actions with no error.
-          * `TaskDone` from a MonitoredTool (task `finished()` or
-            STOP_ACTION) — propagates; do NOT catch BaseException.
-          * `BudgetExceeded` from a MonitoredTool — propagates.
+          * `TaskDone` from a MonitoredTool (task `finished()` or STOP_ACTION).
+          * `BudgetExceeded` from a MonitoredTool.
         """
         if self.config.parallel_actions:
             # _arun needs an async-shaped env_tool. Convert sync → async.
             from cube_harness.tool import as_async  # local import: avoid cycle
 
             async_env = env_tool if isinstance(env_tool, AbstractAsyncTool) else as_async(env_tool)
-            await self._arun(initial_obs, async_env)
+            # Event loop scoped to just the parallel gather — not the whole episode.
+            asyncio.run(self._arun(initial_obs, async_env))
         else:
             if isinstance(env_tool, AbstractAsyncTool):
                 raise TypeError(
