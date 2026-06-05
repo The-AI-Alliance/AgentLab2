@@ -79,13 +79,46 @@ Legacy V1/V2 trajectories are adapted into this same event stream by the
 storage loader (`TrajectoryView._step_to_event`); the viewer never sees the old
 `EnvironmentOutput | AgentOutput` step shape.
 
+## Experiment eligibility — clean + submit
+
+The Experiments table adds a reproducibility-journal **eligibility** column and
+two auto-select actions, all backed by `reproducibility.scan.classify` — the same
+classifier the `scripts/scan_experiments.py` CLI uses, so XRay and the CLI never
+disagree.
+
+- **Eligibility badge** (`xray_utils.eligibility_badge`) — the cached scan
+  `category` (`submittable` / `subset_review` / `unfinished` / `broken` /
+  `already_submitted`) with a *fresh* `submissions.json` overlay that always wins:
+  ✅ submitted, 🚫 rejected, 📤 submitting, ❌ submit-failed.
+- **Archive 🤖✓** (`xray_utils.is_archivable`) — ticks non-keepers: `broken`, a
+  recorded rejection, or an explicit-debug run (`is_official is False`).
+  `is_official is True` is an **absolute keep** — a pinned reference run is never
+  auto-archived, even if broken/rejected. A bare `subset_review` is kept (it may
+  be a legit subset awaiting `--yes`).
+- **Submit 🤖✓ → Registry / EEE** (`xray_utils.is_submittable_pick`) — ticks
+  `submittable` runs not already submitted or mid-submission; the two buttons shell
+  out to `scripts/submit_to_journal.py` / `submit_to_eee.py`.
+- **Submission lifecycle** (`reproducibility.submissions`): absent → `pending`
+  (stamped on submit) → `submitted` | `failed`; `rejected` is a permanent decision.
+  `pending`/`failed` are transient and retryable — only `submitted`/`rejected`
+  count as a `has_decision`.
+
+Row data is cached per experiment in `.xray_summary.json` (`_v`), invalidated by
+episode-dir mtime **and** the recorded `submissions.json` mtime (so a submit or a
+rollback that clears it forces a reclassify); the eligibility badge is always
+recomputed fresh on top of the cache.
+
 ## Invariants
 
 1. Read-only for *trajectory* data — the viewer never modifies trajectories,
-   logs, or configs. The single exception is `_promote_ghost_episodes` writing
-   `STALE` into `status.json` files for in-flight episodes whose driver is
-   provably dead (see `xray_utils` above). This is gated by
-   `experiment_status.json` so the viewer cannot accidentally kill live work.
+   logs, or configs. Three scoped exceptions, none of which touch trajectory data:
+   (a) `_promote_ghost_episodes` writes `STALE` into `status.json` for in-flight
+   episodes whose driver is provably dead (gated by `experiment_status.json` so it
+   cannot kill live work); (b) the clean+submit actions move whole experiment dirs
+   into `_archive/` and write `submissions.json` (pending / failed / submitted, and
+   a `rejected` stamp when archiving a broken run); (c) the submit buttons invoke
+   the submit scripts. All are explicit, user-triggered actions on whole
+   experiments, never edits to recorded run data.
 2. Consumes events only; V1/V2 legacy layouts are adapted to events in the
    loader (`TrajectoryView`), never in the viewer.
 3. Live polling: a `gr.Timer.tick` handler refreshes in-flight trajectories and
