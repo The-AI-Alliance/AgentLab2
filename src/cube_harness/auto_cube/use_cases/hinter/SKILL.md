@@ -178,4 +178,5 @@ Shared Auto-CUBE templates live in
 `fix_report.md`, `report.md`). This use-case ships its own
 [`templates/exp_config.py`](templates/exp_config.py), pre-wired with
 `with_benchmark_clarifications(...)` and `description_overrides` so a round can
-apply both the curated overlay and an experimental action-wording change.
+apply both the curated overlay and an experimental action-wording change. Keep
+`is_official=False`: hinter rounds are iteration, never submittable evaluations.

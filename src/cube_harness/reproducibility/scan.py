@@ -21,6 +21,13 @@ Categories (more restrictive than the original sketch — the philosophy is
     operator can submit with ``--yes`` after eyeballing the diagnosis.
   • ``submittable``        — clean run of a complete named subset or the full
     benchmark. Hand off to ``submit_to_journal.py``.
+
+The ``is_official`` field on ``ExperimentRecord`` is an explicit operator override
+of the subset_review/submittable inference (it never overrides the integrity
+checks): ``True`` ⇒ submittable when complete and clean, ``False`` ⇒ never
+submittable, ``None`` (default) ⇒ infer from debug_limit + subset shape. Editing
+that one field in ``experiment_record.json`` and re-scanning reclassifies a run
+without re-running it.
 """
 
 from __future__ import annotations
@@ -122,6 +129,7 @@ class ScanResult:
     benchmark_subset_name: str = ""
     benchmark_subset_filter: str | None = None
     has_explicit_task_list: bool = False
+    is_official: bool | None = None
 
 
 def _load_experiment_record(experiment_dir: Path) -> ExperimentRecord | None:
@@ -228,6 +236,7 @@ def classify(
         benchmark_subset_name=bench_subset.name,
         benchmark_subset_filter=bench_subset.filter,
         has_explicit_task_list=has_explicit_task_list,
+        is_official=record.is_official,
     )
 
     # ── In-flight episodes mean the experiment is still running ──────────
@@ -266,7 +275,20 @@ def classify(
             reasons=(f"{n_missing}/{n_tasks} task(s) have no status file — experiment may have stopped early",),
         )
 
-    # ── Subset-shape gate: more restrictive than the original sketch ─────
+    # ── Explicit run-intent override ─────────────────────────────────────
+    # is_official is the operator's stated intent; it overrides the subset-shape
+    # inference below but never the integrity checks above (a run must still be
+    # complete and non-broken). None ⇒ fall through to inference.
+    if record.is_official is False:
+        return ScanResult(
+            **base,
+            category=ScanCategory.subset_review,
+            reasons=("is_official=False — run marked debug, not for submission",),
+        )
+    if record.is_official is True:
+        return ScanResult(**base, category=ScanCategory.submittable)
+
+    # ── Subset-shape gate (is_official is None ⇒ infer) ──────────────────
     review_reasons: list[str] = []
     if debug_limit:
         review_reasons.append(f"debug_limit={debug_limit} was applied — not a full subset")

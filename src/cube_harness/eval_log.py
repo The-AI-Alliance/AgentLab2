@@ -634,6 +634,16 @@ class ExperimentRecord(TypedBaseModel):
             "code path that didn't propagate the value into the record)."
         ),
     )
+    is_official: bool | None = Field(
+        default=None,
+        description=(
+            "Explicit run-intent override for the journal-eligibility scan. None: infer from "
+            "debug_limit + subset shape (default). True: official evaluation — bypasses the "
+            "subset-review gate, so a complete, clean run is submittable. False: debug run — "
+            "never submittable. Edit this one field and re-scan to reclassify without re-running; "
+            "it never affects execution."
+        ),
+    )
     investigator_llm_config: InvestigatorLLMConfig | None = Field(
         default=None,
         description="Investigator configuration if a post-hoc LLM investigator was run on these episodes.",
@@ -648,6 +658,7 @@ class ExperimentRecord(TypedBaseModel):
         benchmark_config: BenchmarkConfig,
         git_cwd: str | None = None,
         debug_limit: int | None = None,
+        is_official: bool | None = None,
     ) -> "ExperimentRecord":
         """Build ExperimentRecord from experiment parameters."""
         harness_version = _get_package_version("cube-harness") or "unknown"
@@ -666,6 +677,7 @@ class ExperimentRecord(TypedBaseModel):
             benchmark_version=bm_version,
             benchmark_subset=BenchmarkSubset.from_benchmark_config(benchmark_config),
             debug_limit=debug_limit,
+            is_official=is_official,
         )
 
     def write(self, output_dir: Path) -> None:

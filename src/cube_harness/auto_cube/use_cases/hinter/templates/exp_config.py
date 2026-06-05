@@ -53,6 +53,7 @@ exp = Experiment(
     agent_config=agent,
     benchmark_config=benchmark,
     max_steps=10,
+    is_official=False,  # Auto-CUBE iteration run — never a submittable evaluation.
 )
 
 if __name__ == "__main__":

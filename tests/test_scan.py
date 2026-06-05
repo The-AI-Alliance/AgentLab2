@@ -192,6 +192,42 @@ class TestClassifierSubsetReview:
         assert result.category is ScanCategory.subset_review
         assert any("hand-picked" in r for r in result.reasons)
 
+    def test_is_official_false_blocks_clean_full_run(self, tmp_path: Path) -> None:
+        # A clean full run that would be submittable is held back when marked debug.
+        exp_dir = tmp_path / "marked_debug"
+        _populate_clean_run(exp_dir, n_tasks=3, n_success=3)
+        _set_record_field(exp_dir, is_official=False)
+        result = classify(exp_dir)
+        assert result.category is ScanCategory.subset_review
+        assert any("is_official=False" in r for r in result.reasons)
+
+    def test_is_official_true_promotes_hand_picked_subset(self, tmp_path: Path) -> None:
+        # is_official=True overrides the subset-shape gate: a hand-picked list becomes
+        # submittable (the operator vouches it's an official eval).
+        exp_dir = tmp_path / "vouched"
+        _populate_clean_run(exp_dir, n_tasks=3, n_success=3)
+        _set_subset_field(exp_dir, task_ids=["t0", "t1", "t2"])
+        _set_record_field(exp_dir, is_official=True)
+        result = classify(exp_dir)
+        assert result.category is ScanCategory.submittable
+
+    def test_is_official_true_does_not_override_unfinished(self, tmp_path: Path) -> None:
+        # Intent never overrides integrity: a run still missing tasks stays unfinished.
+        exp_dir = tmp_path / "vouched_incomplete"
+        _populate_clean_run(exp_dir, n_tasks=3, n_success=3)
+        _set_subset_field(exp_dir, n_tasks=5)  # 2 tasks have no status file
+        _set_record_field(exp_dir, is_official=True)
+        result = classify(exp_dir)
+        assert result.category is ScanCategory.unfinished
+
+    def test_is_official_none_falls_back_to_inference(self, tmp_path: Path) -> None:
+        # Default None → existing inference: clean full run is submittable.
+        exp_dir = tmp_path / "inferred"
+        _populate_clean_run(exp_dir, n_tasks=3, n_success=3)
+        _set_record_field(exp_dir, is_official=None)
+        result = classify(exp_dir)
+        assert result.category is ScanCategory.submittable
+
 
 class TestClassifierIdempotency:
     def test_already_submitted_takes_priority(self, tmp_path: Path) -> None:

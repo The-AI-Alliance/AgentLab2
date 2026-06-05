@@ -93,6 +93,13 @@ class Experiment(TypedBaseModel):
     ``run_sequentially`` / ``run_with_ray`` need the runner to propagate it
     here before ``save_config()`` if they want the same coverage.
     """
+    is_official: bool | None = None
+    """Run-intent override for the reproducibility-journal scan. ``None`` (default)
+    lets the scan infer intent from ``debug_limit`` and the subset shape. ``True``
+    asserts an official evaluation (bypasses the subset-review gate → submittable when
+    complete and clean); ``False`` marks a debug run (never submittable). Recorded into
+    ``experiment_record.json`` — flip it there and re-scan to reclassify without
+    re-running. Read only by the scan; it never affects execution."""
 
     @model_validator(mode="after")
     def _ensure_unique_output_dir(self) -> "Experiment":
@@ -226,6 +233,7 @@ class Experiment(TypedBaseModel):
             benchmark_config=self.benchmark_config,
             git_cwd=self.git_cwd,
             debug_limit=self.debug_limit,
+            is_official=self.is_official,
         )
         exp_record.write(output_path)
 

@@ -45,6 +45,7 @@ exp = Experiment(
     benchmark_config=benchmark,
     infra=INFRA_CONFIGS["local"],
     max_steps=agent.budget.max_actions or 60,
+    is_official=False,  # Auto-CUBE iteration run — never a submittable evaluation.
 )
 
 if __name__ == "__main__":
