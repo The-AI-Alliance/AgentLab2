@@ -1231,19 +1231,6 @@ def run_xray(
             return pd.DataFrame(columns=["parameter", "value"]), pd.DataFrame(columns=["parameter"])
         return inspect_results.format_agent_comparison(df)
 
-    def _render_global_report() -> list[list]:
-        if not state.trajectories:
-            return []
-        df = inspect_results.trajectories_to_df(state.trajectories)
-        if df is None:
-            return []
-        inspect_results.set_index_from_variables(df)
-        report = inspect_results.global_report(df)
-        report = report.reset_index()
-        for col in report.columns:
-            report[col] = report[col].astype(str)
-        return report.values.tolist()
-
     def _render_error_report() -> str:
         if not state.trajectories:
             return "No trajectories loaded."
@@ -1425,12 +1412,6 @@ def run_xray(
                             show_label=False,
                             interactive=False,
                         )
-            with gr.Tab("Global Report") as report_tab:
-                report_table = gr.DataFrame(
-                    max_height=400,
-                    show_label=False,
-                    interactive=False,
-                )
             with gr.Tab("Error Report") as err_report_tab:
                 err_report_md = gr.Markdown()
 
@@ -1778,7 +1759,6 @@ def run_xray(
         debug_tab.select(fn=_render_debug, outputs=debug_code)
 
         cv_tab.select(fn=_render_constants_variables, outputs=[cv_const_table, cv_var_table])
-        report_tab.select(fn=_render_global_report, outputs=report_table)
         err_report_tab.select(fn=_render_error_report, outputs=err_report_md)
 
         def _auto_load_first_experiment() -> tuple:

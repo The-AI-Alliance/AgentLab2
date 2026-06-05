@@ -10,10 +10,6 @@ from cube_harness.analyze.inspect_results import (
     error_report,
     format_agent_comparison,
     get_constants_and_variables,
-    global_report,
-    load_and_analyze,
-    set_index_from_variables,
-    summarize,
     trajectories_to_df,
 )
 from cube_harness.core import (
@@ -142,48 +138,6 @@ class TestGetConstantsAndVariables:
         assert "agent_name" not in filtered.columns
 
 
-class TestSetIndexFromVariables:
-    def test_task_name_in_index(self, single_agent_trajectories):
-        df = trajectories_to_df(single_agent_trajectories)
-        set_index_from_variables(df)
-        assert "task_name" in df.index.names
-
-    def test_sorted(self, single_agent_trajectories):
-        df = trajectories_to_df(single_agent_trajectories)
-        set_index_from_variables(df)
-        assert df.index.is_monotonic_increasing
-
-
-class TestSummarize:
-    def test_basic_summary(self, single_agent_trajectories):
-        df = trajectories_to_df(single_agent_trajectories)
-        result = summarize(df)
-        assert result is not None
-        assert result["avg_reward"] == 0.75
-        assert "4/4" in result["n_completed"]
-
-    def test_returns_none_when_no_completions(self):
-        steps = [TrajectoryStep(output=EnvironmentOutput(obs=Observation.from_text("x"), reward=0.0, done=False))]
-        traj = Trajectory(id="t", steps=steps, metadata={"agent_name": "a", "task_name": "t"})
-        df = trajectories_to_df([traj])
-        result = summarize(df)
-        assert result is None
-
-
-class TestGlobalReport:
-    def test_single_agent_per_task_report(self, single_agent_trajectories):
-        df = load_and_analyze(single_agent_trajectories)
-        report = global_report(df)
-        assert "miniwob.click-test" in report.index
-        assert "miniwob.login" in report.index
-        assert "[ALL TASKS]" in report.index
-
-    def test_multi_agent_has_multiple_rows(self, multi_agent_trajectories):
-        df = load_and_analyze(multi_agent_trajectories, index_white_list=("*",))
-        report = global_report(df)
-        assert len(report) >= 2
-
-
 class TestErrorReport:
     def test_no_errors(self, single_agent_trajectories):
         df = trajectories_to_df(single_agent_trajectories)
@@ -262,13 +216,3 @@ class TestFormatAgentComparison:
         row = var_df[var_df["parameter"] == "llm_config.model_name"].iloc[0]
         assert row["Agent-gpt-4o"] == "gpt-4o"
         assert row["Agent-gpt-4o-mini"] == "gpt-4o-mini"
-
-
-class TestLoadAndAnalyze:
-    def test_returns_indexed_df(self, single_agent_trajectories):
-        df = load_and_analyze(single_agent_trajectories)
-        assert df is not None
-        assert "task_name" in df.index.names
-
-    def test_returns_none_for_empty(self):
-        assert load_and_analyze([]) is None
