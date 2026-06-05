@@ -1504,7 +1504,7 @@ def run_xray(
             (partial / debug) subsets, and runs already recorded as rejected
             (e.g. all-ghost runs). The user reviews the ticks before archiving
             (e.g. to spare an intentional small subset)."""
-            return _select_rows(xray_utils.is_archivable, "broken / incomplete / rejected")
+            return _select_rows(lambda c, d: xray_utils.is_archivable(d, c), "broken / incomplete / rejected")
 
         def on_pick_submittable() -> tuple[list[list[Any]], Any]:
             """Auto-tick submittable, not-yet-submitted experiments for Submit."""
