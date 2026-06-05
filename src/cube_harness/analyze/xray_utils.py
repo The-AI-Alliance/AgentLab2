@@ -647,12 +647,16 @@ def eligibility_badge(exp_dir: Path, category: str) -> str:
 
 
 def is_archivable(exp_dir: Path, category: str, is_official: bool | None = None) -> bool:
-    """True for runs not worth keeping, so the Archive auto-select ticks them:
-    a broken scan, a run already recorded as rejected (e.g. an all-ghost run),
-    or one the operator explicitly marked debug (``is_official is False``).
+    """True for runs the Archive auto-select should tick: a broken scan, a run
+    recorded as rejected (e.g. an all-ghost run), or one explicitly marked debug
+    (``is_official is False``).
 
-    A bare ``subset_review`` is *not* archived — it may be a legit subset awaiting
-    a `--yes` submission; only an explicit ``is_official=False`` flags it as junk."""
+    ``is_official is True`` is an absolute keep — the operator vouched for / pinned
+    the run (e.g. a reference submission), so it is *never* auto-archived, even if
+    broken or rejected. A bare ``subset_review`` is also kept (it may be a legit
+    subset awaiting a `--yes` submission)."""
+    if is_official is True:
+        return False
     if category == "broken" or is_official is False:
         return True
     subs = submissions.read(exp_dir)

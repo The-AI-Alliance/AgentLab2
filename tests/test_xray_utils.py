@@ -862,6 +862,14 @@ class TestIsArchivable:
         # category is already_submitted (a journal decision exists) — but it's a rejection.
         assert xray_utils.is_archivable(tmp_path, "already_submitted")
 
+    def test_official_is_an_absolute_keep(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        # is_official=True pins the run — never archived, even broken or rejected.
+        assert not xray_utils.is_archivable(tmp_path, "broken", is_official=True)
+        submissions.record_rejected(tmp_path, "journal", reason="broken: errors")
+        assert not xray_utils.is_archivable(tmp_path, "already_submitted", is_official=True)
+
     def test_successfully_submitted_run_is_not_archivable(self, tmp_path: Path) -> None:
         from cube_harness.reproducibility import submissions  # noqa: PLC0415
 
