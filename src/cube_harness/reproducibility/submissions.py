@@ -39,9 +39,16 @@ Or for a broken experiment:
       }
     }
 
-The scan script treats both ``"status": "submitted"`` and
-``"status": "rejected"`` as "do not consider for re-submission." Only the
-absence of a destination key triggers a fresh eligibility check.
+Status values:
+  • ``submitted`` / ``rejected`` — permanent *decisions*. ``has_decision`` is
+    True; the scan script treats both as "do not consider for re-submission."
+  • ``pending`` — a submit attempt is in progress (transient). Not a decision;
+    the auto-selector skips it but a retry is still allowed.
+  • ``failed`` — the last submit attempt failed (transient, *retryable*, unlike
+    ``rejected``). The run stays submittable; the note is preserved for the UI.
+
+Only the absence of a destination key — or a ``pending`` / ``failed`` entry —
+triggers a fresh eligibility check / allows a (re)submission.
 """
 
 from __future__ import annotations
@@ -122,6 +129,34 @@ def record_submitted(
     if local_path:
         entry["local_path"] = local_path
     payload[destination] = entry
+    _write_atomic(_path(experiment_dir), payload)
+
+
+def record_pending(experiment_dir: Path, destination: SubmissionDestination) -> None:
+    """Mark a submission to *destination* as in-progress.
+
+    Written at the start of a submit attempt and overwritten by
+    :func:`record_submitted` (success) or :func:`record_failed` (failure) once it
+    resolves. Lets the UI show "submitting…" and keeps the auto-selector from
+    re-picking a run whose submission is already underway. Not a permanent
+    decision — :func:`has_decision` ignores it, so a crashed/abandoned pending
+    entry never blocks a later retry.
+    """
+    payload = read(experiment_dir)
+    payload[destination] = {"status": "pending", "started_at": _now_iso()}
+    _write_atomic(_path(experiment_dir), payload)
+
+
+def record_failed(experiment_dir: Path, destination: SubmissionDestination, *, reason: str) -> None:
+    """Record a FAILED submission attempt for *destination* with its *reason*.
+
+    Distinct from :func:`record_rejected`: a failure is *retryable* (a flaky PR
+    push, a transient network error), so :func:`has_decision` ignores it and the
+    run stays submittable. The note persists so the row shows "submit failed"
+    instead of silently reverting to a plain submittable badge.
+    """
+    payload = read(experiment_dir)
+    payload[destination] = {"status": "failed", "reason": reason, "failed_at": _now_iso()}
     _write_atomic(_path(experiment_dir), payload)
 
 

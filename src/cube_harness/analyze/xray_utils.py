@@ -146,7 +146,7 @@ _STATUS_HTML: dict[str, str] = {
     "max_steps": "<span title='Max steps reached — step budget exhausted'>🎬</span>",
     "failed": "<span title='Failed — worker crashed'>⛔</span>",
     "stale": "<span title='Stale — heartbeat lost, dead worker'>👻</span>",
-    "cancelled": "<span title='Cancelled'>🚫</span>",
+    "cancelled": "<span title='Cancelled — deliberately stopped'>⏹️</span>",
     # Legacy heuristic (no status.json — pre-PR#315 experiments)
     "system_error": "<span title='System error — crashed (legacy inferred status)' style='color:#dc3545;font-weight:bold;font-size:14px'>✕</span>",
 }
@@ -160,7 +160,7 @@ _STATUS_LABEL: dict[str, str] = {
     "max_steps": "🎬 Max steps reached",
     "failed": "⛔ Failed",
     "stale": "👻 Stale",
-    "cancelled": "🚫 Cancelled",
+    "cancelled": "⏹️ Cancelled",
     "system_error": "✕ System error (legacy)",
 }
 
@@ -562,7 +562,13 @@ def _is_cache_valid(exp_dir: Path, cache_mtime: float) -> bool:
     - Episode relaunched: runner archives old dir and creates new one → episodes/ mtime.
     - Status.json written: EpisodeStatus.write() creates a .tmp sibling first, which
       updates the episode dir mtime via the tmp-file creation step.
+    - A submission/rejection recorded: submissions.json lives at the experiment
+      root (outside episodes/), so stat it too — otherwise the cached scan
+      `_category` would keep saying "submittable" after a successful submit.
     """
+    subs_path = exp_dir / submissions.SUBMISSIONS_FILENAME
+    if subs_path.exists() and subs_path.stat().st_mtime > cache_mtime:
+        return False
     episodes_dir = exp_dir / "episodes"
     if not episodes_dir.exists():
         return True
@@ -585,8 +591,12 @@ _ELIGIBILITY_BADGES: dict[str, str] = {
     "subset_review": "<span title='Passed integrity checks but the subset shape needs a human look'>🔍 review</span>",
     "unfinished": "<span title='Episodes still queued/running — state may change'>⏳ unfinished</span>",
     "incomplete": "<span title='Finished, but ran only a subset of the declared benchmark (partial / debug slice) — not submittable'>🧪 incomplete</span>",
-    "broken": "<span title='Cannot produce a meaningful score'>🚫 broken</span>",
-    "already_submitted": "<span title='Has a prior submission/rejection decision'>✅ decided</span>",
+    "broken": "<span title='Cannot produce a meaningful score'>💥 broken</span>",
+    # Neutral fallback only: a real journal decision is always resolved to ✅
+    # submitted or 🚫 rejected by eligibility_badge's fresh submissions read, so
+    # this never renders in practice — keep it neutral (not a green ✅) so a
+    # stray decided-but-unresolved state can't be mistaken for a success.
+    "already_submitted": "<span title='Has a prior submission decision' style='color:#888'>• decided</span>",
 }
 
 
@@ -617,6 +627,12 @@ def eligibility_badge(exp_dir: Path, category: str, ran: int | None = None, tota
     if rejected is not None:
         reason = html_lib.escape(rejected.get("reason", "previously rejected"))
         return f"<span title='{reason}'>🚫 rejected</span>"
+    if any(subs.get(d, {}).get("status") == "pending" for d in ("journal", "eee")):
+        return "<span title='Submission in progress'>📤 submitting…</span>"
+    failed = next((subs[d] for d in ("journal", "eee") if subs.get(d, {}).get("status") == "failed"), None)
+    if failed is not None:
+        reason = html_lib.escape(failed.get("reason", "submission failed"))
+        return f"<span title='Last submit attempt failed (retryable): {reason}'>❌ submit failed</span>"
     if category == "incomplete" and ran is not None and total:
         return (
             f"<span title='Ran only {ran} of {total} declared tasks — partial / debug subset, not submittable'>"
@@ -633,6 +649,33 @@ def is_archivable(exp_dir: Path, category: str) -> bool:
         return True
     subs = submissions.read(exp_dir)
     return any(subs.get(d, {}).get("status") == "rejected" for d in ("journal", "eee"))
+
+
+def is_submittable_pick(exp_dir: Path, category: str) -> bool:
+    """True for the Submit auto-select: a submittable run that has NOT already
+    been submitted and is NOT mid-submission. Reads submissions.json *fresh* so a
+    run submitted earlier in this session is never re-ticked — the cached scan
+    `category` can lag a submit (submissions.json lives outside episodes/)."""
+    if category != "submittable":
+        return False
+    subs = submissions.read(exp_dir)
+    return not any(subs.get(d, {}).get("status") in ("submitted", "pending") for d in ("journal", "eee"))
+
+
+def persist_broken_rejection(exp_dir: Path) -> bool:
+    """If *exp_dir* classifies as broken and has no prior journal decision, stamp
+    a rejection into submissions.json (mirrors ``scan_experiments.py
+    --persist-broken``). Called on archive so a broken run's verdict is durable
+    and travels with the dir into ``_archive/``. Returns True when newly written."""
+    try:
+        result = scan.classify(exp_dir, sweep_stale=False)
+    except Exception:  # pragma: no cover - defensive
+        return False
+    if result.category is not scan.ScanCategory.broken or submissions.has_decision(exp_dir, "journal"):
+        return False
+    reason = result.reasons[0] if result.reasons else "broken (archived from XRay)"
+    submissions.record_rejected(exp_dir, "journal", reason=f"broken: {reason}")
+    return True
 
 
 def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:

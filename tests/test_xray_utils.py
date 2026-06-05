@@ -639,7 +639,7 @@ class TestBuildStatusCell:
 
     def test_cancelled_symbol(self) -> None:
         cell = xray_utils._build_status_cell(["cancelled"])
-        assert "🚫" in cell
+        assert "⏹️" in cell
 
 
 # ---------------------------------------------------------------------------
@@ -839,3 +839,69 @@ class TestIsArchivable:
 
         submissions.record_submitted(tmp_path, "journal", evaluation_id="a", schema_version="1.0")
         assert not xray_utils.is_archivable(tmp_path, "already_submitted")
+
+
+class TestIsSubmittablePick:
+    """Submit auto-select: submittable AND not already submitted / mid-submission."""
+
+    def test_clean_submittable_is_picked(self, tmp_path: Path) -> None:
+        assert xray_utils.is_submittable_pick(tmp_path, "submittable")
+
+    def test_non_submittable_category_is_not(self, tmp_path: Path) -> None:
+        assert not xray_utils.is_submittable_pick(tmp_path, "broken")
+        assert not xray_utils.is_submittable_pick(tmp_path, "subset_review")
+
+    def test_already_submitted_is_not_re_picked(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        submissions.record_submitted(tmp_path, "journal", evaluation_id="a", schema_version="1.0")
+        # Even if the cached category still says submittable, a submitted run is skipped.
+        assert not xray_utils.is_submittable_pick(tmp_path, "submittable")
+
+    def test_pending_is_not_re_picked(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        submissions.record_pending(tmp_path, "journal")
+        assert not xray_utils.is_submittable_pick(tmp_path, "submittable")
+
+    def test_failed_is_still_picked_for_retry(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        submissions.record_failed(tmp_path, "journal", reason="transient")
+        assert xray_utils.is_submittable_pick(tmp_path, "submittable")
+
+
+class TestSubmissionBadges:
+    def test_pending_badge(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        submissions.record_pending(tmp_path, "journal")
+        assert "submitting" in xray_utils.eligibility_badge(tmp_path, "submittable")
+
+    def test_failed_badge_shows_reason(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        submissions.record_failed(tmp_path, "journal", reason="push timed out")
+        badge = xray_utils.eligibility_badge(tmp_path, "submittable")
+        assert "submit failed" in badge and "push timed out" in badge
+
+
+class TestPersistBrokenRejection:
+    def test_broken_dir_gets_durable_rejection(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        exp = tmp_path / "broken_run"
+        exp.mkdir()  # no experiment_record.json → classifies broken
+        assert xray_utils.persist_broken_rejection(exp) is True
+        assert submissions.read(exp)["journal"]["status"] == "rejected"
+        # Idempotent: a second call sees the prior decision and does nothing new.
+        assert xray_utils.persist_broken_rejection(exp) is False
+
+    def test_decided_dir_is_left_alone(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        exp = tmp_path / "submitted_run"
+        exp.mkdir()
+        submissions.record_submitted(exp, "journal", evaluation_id="a", schema_version="1.0")
+        assert xray_utils.persist_broken_rejection(exp) is False
+        assert submissions.read(exp)["journal"]["status"] == "submitted"

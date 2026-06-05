@@ -29,6 +29,7 @@ from cube_harness.analyze import inspect_results, xray_utils
 from cube_harness.analyze.xray_events import EpisodeEvents
 from cube_harness.core import Trajectory
 from cube_harness.experiment_status import EXPERIMENT_STATUS_FILENAME, ExperimentStatus
+from cube_harness.reproducibility import submissions
 from cube_harness.storage import FileStorage
 
 # ---------------------------------------------------------------------------
@@ -858,6 +859,9 @@ def run_xray(
         """Archive all currently selected experiments and reset state."""
         names = list(state._selected_exp_names)
         for name in names:
+            # Stamp a durable rejection for broken runs before moving them, so the
+            # verdict travels into _archive/ (mirrors scan_experiments --persist-broken).
+            xray_utils.persist_broken_rejection(state.results_dir / name)
             xray_utils.archive_experiment(state.results_dir, name)
         state._selected_exp_names = []
         state.trajectories = []
@@ -1507,8 +1511,10 @@ def run_xray(
             return _select_rows(lambda c, d: xray_utils.is_archivable(d, c), "broken / incomplete / rejected")
 
         def on_pick_submittable() -> tuple[list[list[Any]], Any]:
-            """Auto-tick submittable, not-yet-submitted experiments for Submit."""
-            return _select_rows(lambda c, _d: c == "submittable", "submittable")
+            """Auto-tick submittable experiments that aren't already submitted or
+            mid-submission (reads submissions.json fresh, so a just-submitted run
+            is not re-ticked even if its cached category lags)."""
+            return _select_rows(lambda c, d: xray_utils.is_submittable_pick(d, c), "submittable")
 
         def _selected_exp_dirs(table: Any) -> list[Path]:
             """Experiment dirs whose checkbox is ticked in the current table value."""
@@ -1531,9 +1537,17 @@ def run_xray(
                 script, extra = "submit_to_eee.py", []
             else:
                 script, extra = "submit_to_journal.py", ["--auto-pr", "--i-understand-this-is-not-a-leaderboard"]
+            dest_key = "eee" if destination == "eee" else "journal"
             lines = [f"### Submit → {destination.upper()} ({len(dirs)} experiment(s))"]
             for d in dirs:
+                # Mark in-progress so the row reads "submitting…" and the auto-
+                # selector won't re-tick it. The submitter writes `submitted` on
+                # success (overwriting pending); we record `failed` otherwise so
+                # the failure persists in submissions.json instead of vanishing.
+                submissions.record_pending(d, dest_key)
                 ok, tail = _run_submitter(script, d, extra)
+                if not ok:
+                    submissions.record_failed(d, dest_key, reason=tail or "submission failed")
                 lines.append(f"- {'✅' if ok else '❌'} `{d.name}` — {tail or ('done' if ok else 'failed')}")
             return _exp_table_value(), gr.update(value="\n".join(lines), visible=True)
 

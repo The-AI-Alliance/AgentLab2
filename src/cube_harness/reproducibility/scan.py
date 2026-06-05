@@ -50,15 +50,6 @@ than about the model — the run is marked BROKEN. 10% is intentionally tight
 ("be restrictive about what gets pushed"). Tunable per scan invocation.
 """
 
-STALE_ABANDONED_FRACTION = 0.5
-"""Fraction of STALE (dead-worker) episodes above which a run is abandoned.
-
-A run this full of stale episodes won't recover — the driver/workers died.
-We mark it BROKEN even when a few episodes still read as in-flight (so it is
-archivable instead of stuck forever in ``unfinished``); the live stragglers
-can't revive a half-dead run.
-"""
-
 
 def sweep_stale_in_dir(experiment_dir: Path) -> list[str]:
     """Mark dead RUNNING/QUEUED episodes as STALE in *experiment_dir*.
@@ -253,23 +244,12 @@ def classify(
         has_explicit_task_list=has_explicit_task_list,
     )
 
-    # ── A stale-dominated run is abandoned, not running ─────────────────
-    # Checked before the in-flight gate: a high stale fraction means the
-    # driver/workers died, so the run is broken (archivable) even if a few
-    # episodes still read as in-flight — those stragglers won't revive it.
-    n_episodes = n_terminal + n_in_flight
-    n_stale = status_counts.get("STALE", 0)
-    if n_in_flight > 0 and n_episodes and n_stale / n_episodes >= STALE_ABANDONED_FRACTION:
-        return ScanResult(
-            **base,
-            category=ScanCategory.broken,
-            reasons=(
-                f"{n_stale}/{n_episodes} episodes stale "
-                f"({n_stale / n_episodes * 100:.0f}%) — run abandoned (dead workers)",
-            ),
-        )
-
     # ── In-flight episodes mean the experiment is still running ──────────
+    # "In-flight" is determined per-episode after the heartbeat sweep: a dead
+    # worker/driver leaves STALE (terminal) episodes, so a truly abandoned run
+    # reaches zero in-flight and falls through to the broken/err-rate rules
+    # below. A run that still has a *live* episode heartbeat stays unfinished —
+    # even in ray mode where workers can outlive a crashed driver.
     if n_in_flight > 0:
         return ScanResult(
             **base,
