@@ -249,6 +249,17 @@ class EpisodeEvents:
         pos = roots.index(self._root_of[i])
         return roots[max(pos - 1, 0)]
 
+    def first_group_root(self) -> int:
+        """Root of the first *step* — the group right after the initial-observation
+        group (group_roots()[0] is the task-reset observation). Falls back to the
+        very first group when the reset is the only group."""
+        roots = self.group_roots()
+        return roots[1] if len(roots) > 1 else roots[0]
+
+    def last_group_root(self) -> int:
+        """Root of the last group (the end of the episode)."""
+        return self.group_roots()[-1]
+
     # --- parent-link pairing ----------------------------------------------
 
     def parent_index(self, i: int) -> int | None:

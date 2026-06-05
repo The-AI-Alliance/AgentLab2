@@ -464,8 +464,9 @@ html {
     border-radius: 8px;
     border: 1px solid #e2e8f0;
 }
-/* Tiny, tight prev/next nav buttons, centred and hugging the rail. */
-#xray_prev_btn, #xray_next_btn {
+/* Tiny, tight nav buttons (jump-to-first ⤒ · prev ◀ · next ▶ · jump-to-last ⤓),
+   centred and hugging the rail. */
+#xray_first_btn, #xray_prev_btn, #xray_next_btn, #xray_last_btn {
     min-width: 28px !important;
     max-width: 34px;
     padding: 2px 6px !important;
@@ -682,8 +683,9 @@ th {
 """
 
 # Runs once on app load (Blocks js=): force light theme + bind keyboard event
-# navigation. Arrow keys (←/→ or ↑/↓) move to the previous/next event — plain
-# arrows, not Shift+arrow (which the browser steals for text selection). Gradio
+# navigation. Plain arrows (←/→ or ↑/↓) step to the previous/next event; Shift+↑/↓
+# (or Home/End) jump to the first/last step. preventDefault + the input/textarea
+# guard keep Shift+arrow from extending a browser text selection. Gradio
 # puts `elem_id` on the <button> itself, so the selectors are `#xray_prev_btn`,
 # NOT `#xray_prev_btn button`. Tooltips advertise the shortcut. (Rail scroll is
 # preserved by the CSS overflow living on the stable `#xray_rail` container, so
@@ -694,8 +696,10 @@ _INIT_JS = """
     if (window.__xrayInit) return;
     window.__xrayInit = true;
     const TIPS = {
+        '#xray_first_btn': 'Jump to first step (Shift+↑ or Home)',
         '#xray_prev_btn': 'Previous event (← or ↑)',
         '#xray_next_btn': 'Next event (→ or ↓)',
+        '#xray_last_btn': 'Jump to last step / end (Shift+↓ or End)',
         '#exp_browse_btn': 'Pick a different results directory',
         '#exp_refresh_btn': 'Re-scan the results directory (cached — fast)',
         '#exp_archive_btn': 'Archive all checked experiments (moves them to _archive/)',
@@ -717,7 +721,13 @@ _INIT_JS = """
         if (tag === 'input' || tag === 'textarea' || tag === 'select' || t.isContentEditable) return;
         if (e.metaKey || e.ctrlKey || e.altKey) return;
         let sel = null;
-        if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') sel = '#xray_prev_btn';
+        // Shift+↑/↓ and Home/End jump to the first/last step; plain arrows step.
+        if (e.shiftKey) {
+            if (e.key === 'ArrowUp') sel = '#xray_first_btn';
+            else if (e.key === 'ArrowDown') sel = '#xray_last_btn';
+        } else if (e.key === 'Home') sel = '#xray_first_btn';
+        else if (e.key === 'End') sel = '#xray_last_btn';
+        else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') sel = '#xray_prev_btn';
         else if (e.key === 'ArrowDown' || e.key === 'ArrowRight') sel = '#xray_next_btn';
         if (!sel) return;
         const b = document.querySelector(sel);
@@ -1015,6 +1025,20 @@ def run_xray(
         if state.current_events is None:
             return StepId(step=state.selected)
         state.selected = state.current_events.next_group_root(state.selected)
+        return StepId(step=state.selected)
+
+    def navigate_first() -> StepId:
+        """Jump to the first step (group after the initial observation)."""
+        if state.current_events is None or len(state.current_events) == 0:
+            return StepId(step=state.selected)
+        state.selected = state.current_events.first_group_root()
+        return StepId(step=state.selected)
+
+    def navigate_last() -> StepId:
+        """Jump to the last group (end of the episode)."""
+        if state.current_events is None or len(state.current_events) == 0:
+            return StepId(step=state.selected)
+        state.selected = state.current_events.last_group_root()
         return StepId(step=state.selected)
 
     def handle_timeline_click(clicked_index: int | None) -> StepId:
@@ -1432,8 +1456,10 @@ def run_xray(
         with gr.Row(equal_height=False):
             with gr.Column(scale=1, min_width=240):
                 with gr.Row(elem_classes="xray-nav-row"):
+                    first_btn = gr.Button("⤒", size="sm", elem_id="xray_first_btn", min_width=0, scale=0)
                     prev_btn = gr.Button("◀", size="sm", elem_id="xray_prev_btn", min_width=0, scale=0)
                     next_btn = gr.Button("▶", size="sm", elem_id="xray_next_btn", min_width=0, scale=0)
+                    last_btn = gr.Button("⤓", size="sm", elem_id="xray_last_btn", min_width=0, scale=0)
                 timeline_html = gr.HTML(elem_id="xray_rail")
             with gr.Column(scale=3):
                 # Reasoning (the LLM's thinking) beside the dispatched action.
@@ -1673,8 +1699,10 @@ def run_xray(
 
         # Navigation buttons — handlers read state.step from closure (inputs=[]) so that
         # JS button.click() also works without Gradio losing the gr.State value.
+        first_btn.click(fn=navigate_first, inputs=[], outputs=step_id)
         prev_btn.click(fn=navigate_prev, inputs=[], outputs=step_id)
         next_btn.click(fn=navigate_next, inputs=[], outputs=step_id)
+        last_btn.click(fn=navigate_last, inputs=[], outputs=step_id)
 
         # Always-rendered on step change
         step_id.change(fn=get_compact_header_info, outputs=header_info)

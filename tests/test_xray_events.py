@@ -146,6 +146,23 @@ def test_group_navigation_moves_one_step_per_press() -> None:
     assert ep.prev_group_root(0) == 0  # first group, clamped
 
 
+def test_first_and_last_group_root() -> None:
+    # groups: {0:reset}, {1:llm,2:obs}, {3:llm,4:obs,5:terminal-eval}.
+    ep = _gym_stream()
+    assert ep.group_roots() == [0, 1, 3]
+    # "First step" skips the initial-observation group (root 0) → first real step.
+    assert ep.first_group_root() == 1
+    # "End" → the last group's root.
+    assert ep.last_group_root() == 3
+
+
+def test_first_group_root_falls_back_when_only_reset() -> None:
+    ep = xe.EpisodeEvents([_tool("obs0", xe.RESET_PARENT)])
+    assert ep.group_roots() == [0]
+    assert ep.first_group_root() == 0  # nothing after the reset → clamp to it
+    assert ep.last_group_root() == 0
+
+
 def test_terminal_eval_attaches_to_last_group() -> None:
     # No parent link on the terminal eval -> it joins the most recent group.
     ep = xe.EpisodeEvents([_llm("llm1"), _tool("obs1", "llm1"), _eval(1.0, terminal=True)])
