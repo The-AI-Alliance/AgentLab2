@@ -7,6 +7,7 @@ moved to `tests/test_episode_view.py`, which exercises the canonical
 low-level `save_event` / `load_event` storage methods directly.
 """
 
+import warnings
 from pathlib import Path
 
 import pytest
@@ -109,3 +110,25 @@ def test_load_event_missing_raises(tmp_path: Path) -> None:
     _prime(storage, "t")
     with pytest.raises(FileNotFoundError):
         storage.load_event("t", 99)
+
+
+def test_serialize_event_emits_no_spurious_union_warnings() -> None:
+    """Regression: persisting a TrajectoryEvent must not flood stdout.
+
+    `TrajectoryEvent.output` is a polymorphic `TypedBaseModel` union
+    (LLMCall/Tool/Eval/AgentError), with further nested unions inside
+    `LLMCall`/`Message`. Without `serialize_as_any=True`, pydantic's
+    smart-union serializer trials every member and emits a
+    `PydanticSerializationUnexpectedValue` warning per non-match —
+    ~24 warning lines for a single LLMCallEvent, on *every* event persist.
+    The on-disk payload is unchanged (`_type` still round-trips); only
+    the noise must be gone.
+    """
+    from cube_harness.storage import _serialize_event
+
+    ev = TrajectoryEvent(output=_agent_event(), start_time=0.0, end_time=0.1)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _serialize_event(ev)
+    spurious = [w for w in caught if "PydanticSerializationUnexpectedValue" in str(w.message)]
+    assert not spurious, f"event serialization emitted {len(spurious)} spurious union warning(s)"
