@@ -1545,11 +1545,22 @@ def run_xray(
             tail = next((ln for ln in reversed(stream.strip().splitlines()) if ln.strip()), "")
             return ok, tail
 
-        def on_submit(table: Any, destination: str) -> tuple[list[list[Any]], Any]:
-            """Submit the checked experiments to EEE or the cube-registry journal."""
+        def on_submit(table: Any, destination: str) -> tuple[Any, ...]:
+            """Submit the checked experiments to EEE or the cube-registry journal.
+
+            Outputs: [exp_table, *_hierarchy_outputs, exp_action_status]. After
+            submitting, the just-submitted rows are no longer ticked, so we re-
+            select the first experiment and rebuild the detail panel — otherwise
+            the table would show no selection while the panel still displays the
+            previous experiment."""
             dirs = _selected_exp_dirs(table)
             if not dirs:
-                return _exp_table_value(), gr.update(value="Nothing selected to submit.", visible=True)
+                skip_hierarchy = tuple(gr.skip() for _ in _hierarchy_outputs)
+                return (
+                    _exp_table_value(),
+                    *skip_hierarchy,
+                    gr.update(value="Nothing selected to submit.", visible=True),
+                )
             if destination == "eee":
                 script, extra = "submit_to_eee.py", []
             else:
@@ -1566,7 +1577,30 @@ def run_xray(
                 if not ok:
                     submissions.record_failed(d, dest_key, reason=tail or "submission failed")
                 lines.append(f"- {'✅' if ok else '❌'} `{d.name}` — {tail or ('done' if ok else 'failed')}")
-            return _exp_table_value(), gr.update(value="\n".join(lines), visible=True)
+            status = gr.update(value="\n".join(lines), visible=True)
+            # Re-select the first experiment so the table + detail panel stay in sync.
+            rows = xray_utils.get_experiments_table_rows(state.results_dir)
+            if not rows:
+                state._selected_exp_names = []
+                state.trajectories = []
+                state.selected_agent_key = None
+                empty_hierarchy = (
+                    "",
+                    None,
+                    None,
+                    StepId(),
+                    gr.Tab(label="Agents (0)"),
+                    gr.Tab(label="Trajectories (0)"),
+                    "",
+                    "",
+                    gr.Timer(active=False),
+                )
+                return (_to_exp_table(rows), *empty_hierarchy, status)
+            rows[0]["selected"] = True
+            first = rows[0]["experiment"]
+            state._selected_exp_names = [first]
+            state.load_experiments([state.results_dir / first])
+            return (_to_exp_table(rows), *_load_and_build_hierarchy(), gr.Timer(active=state.should_poll()), status)
 
         def on_browse_dir() -> tuple[list[list[Any]], str]:
             """Open a native folder picker; on choice, switch the results dir and
@@ -1595,10 +1629,14 @@ def run_xray(
         exp_pick_archivable_btn.click(fn=on_pick_archivable, outputs=[exp_table, exp_action_status])
         exp_pick_submittable_btn.click(fn=on_pick_submittable, outputs=[exp_table, exp_action_status])
         exp_submit_registry_btn.click(
-            fn=lambda t: on_submit(t, "journal"), inputs=exp_table, outputs=[exp_table, exp_action_status]
+            fn=lambda t: on_submit(t, "journal"),
+            inputs=exp_table,
+            outputs=[exp_table, *_hierarchy_outputs, exp_action_status],
         )
         exp_submit_eee_btn.click(
-            fn=lambda t: on_submit(t, "eee"), inputs=exp_table, outputs=[exp_table, exp_action_status]
+            fn=lambda t: on_submit(t, "eee"),
+            inputs=exp_table,
+            outputs=[exp_table, *_hierarchy_outputs, exp_action_status],
         )
         exp_archive_btn.click(fn=on_archive_selected, outputs=[exp_table, *_hierarchy_outputs, exp_action_status])
 

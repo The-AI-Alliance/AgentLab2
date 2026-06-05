@@ -483,7 +483,19 @@ GHOST_TIMEOUT = DEFAULT_STEP_TIMEOUT_S + DEFAULT_CANCEL_GRACE_S  # mirrors runne
 _XRAY_CACHE_FILENAME = ".xray_summary.json"
 # Bump when the cached row schema/semantics change so stale caches recompute.
 # v3: added _category (eligibility) + _ran/_total for the incomplete badge.
-_EXP_ROW_VERSION = 3
+# v4: added _subs_mtime so the cache invalidates when submissions.json is
+#     written, updated, OR deleted (a submit, or a rollback that clears it).
+_EXP_ROW_VERSION = 4
+
+
+def _subs_mtime(exp_dir: Path) -> float:
+    """mtime of submissions.json, or 0.0 when absent. Stored on the cached row so
+    it invalidates whenever the submission state changes — including deletion
+    (absent → 0.0 ≠ the stored mtime), which an mtime-vs-cache check would miss."""
+    try:
+        return (exp_dir / submissions.SUBMISSIONS_FILENAME).stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _promote_ghost_episodes(exp_dir: Path) -> None:
@@ -562,13 +574,11 @@ def _is_cache_valid(exp_dir: Path, cache_mtime: float) -> bool:
     - Episode relaunched: runner archives old dir and creates new one → episodes/ mtime.
     - Status.json written: EpisodeStatus.write() creates a .tmp sibling first, which
       updates the episode dir mtime via the tmp-file creation step.
-    - A submission/rejection recorded: submissions.json lives at the experiment
-      root (outside episodes/), so stat it too — otherwise the cached scan
-      `_category` would keep saying "submittable" after a successful submit.
+
+    Does NOT cover submissions.json (it lives outside episodes/ and can be
+    *deleted*, which an mtime-vs-cache comparison misses) — that's handled
+    separately in get_experiments_table_rows via the cached `_subs_mtime`.
     """
-    subs_path = exp_dir / submissions.SUBMISSIONS_FILENAME
-    if subs_path.exists() and subs_path.stat().st_mtime > cache_mtime:
-        return False
     episodes_dir = exp_dir / "episodes"
     if not episodes_dir.exists():
         return True
@@ -720,6 +730,9 @@ def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:
         # Ran/declared task counts — used to annotate the incomplete badge (3/500).
         "_ran": result.n_terminal,
         "_total": result.n_tasks,
+        # Submission state at compute time, so the cache invalidates on a later
+        # submit / rollback (see _subs_mtime).
+        "_subs_mtime": _subs_mtime(exp_dir),
         "_v": _EXP_ROW_VERSION,
     }
 
@@ -792,7 +805,10 @@ def get_experiments_table_rows(results_dir: Path) -> list[dict[str, Any]]:
                 if _is_cache_valid(dir_path, cache_mtime):
                     with open(cache_path) as f:
                         cached = json.load(f)
-                    if cached.get("_v") == _EXP_ROW_VERSION:
+                    # Valid only if the schema matches AND the submission state is
+                    # unchanged since the cache was written (a submit or a rollback
+                    # that deletes submissions.json must force a reclassify).
+                    if cached.get("_v") == _EXP_ROW_VERSION and cached.get("_subs_mtime") == _subs_mtime(dir_path):
                         row = {"selected": False, "experiment": dir_path.name, **cached}
             except Exception as exc:
                 logger.debug("Cache read failed for %s: %s", cache_path, exc)

@@ -175,6 +175,28 @@ class TestGetExperimentsTableRows:
         os.utime(ep_dir, (future, future))
         assert not xray_utils._is_cache_valid(tmp_path / "exp_e", cache.stat().st_mtime)
 
+    def test_cache_invalidated_when_submission_recorded_then_cleared(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility import submissions  # noqa: PLC0415
+
+        now = time.time()
+        exp = tmp_path / "exp_subs"
+        ep_dir = exp / "episodes" / "ep0"
+        ep_dir.mkdir(parents=True)
+        (ep_dir / "status.json").write_text(
+            json.dumps({"status": "COMPLETED", "task_id": "t0", "episode_id": 0, "started_at": now, "ended_at": now})
+        )
+        # No experiment_record.json → classifies broken; that's fine, we only care
+        # that _category tracks the submission state across cache reads.
+        cat = lambda: xray_utils.get_experiments_table_rows(tmp_path)[0]["_category"]  # noqa: E731
+        assert cat() == "broken"
+        # Record a submission: a journal decision short-circuits classify.
+        submissions.record_submitted(exp, "journal", evaluation_id="a", schema_version="1.0")
+        assert cat() == "already_submitted"  # cache must NOT serve the stale 'broken'
+        # Roll back: deleting submissions.json must invalidate the cache too
+        # (the bug — an mtime-vs-cache check misses deletion).
+        (exp / submissions.SUBMISSIONS_FILENAME).unlink()
+        assert cat() == "broken"
+
     def test_ghost_episode_promoted_to_stale(self, tmp_path: Path) -> None:
         old_ts = time.time() - xray_utils.GHOST_TIMEOUT - 100
         ep_dir = tmp_path / "exp_f" / "episodes" / "ep0"
