@@ -485,7 +485,9 @@ _XRAY_CACHE_FILENAME = ".xray_summary.json"
 # v3: added _category (eligibility) + _ran/_total for the incomplete badge.
 # v4: added _subs_mtime so the cache invalidates when submissions.json is
 #     written, updated, OR deleted (a submit, or a rollback that clears it).
-_EXP_ROW_VERSION = 4
+# v5: dropped the `incomplete` category (#491 records subset n_tasks at the
+#     source); replaced _ran/_total with _is_official (drives Archive auto-select).
+_EXP_ROW_VERSION = 5
 
 
 def _subs_mtime(exp_dir: Path) -> float:
@@ -598,9 +600,8 @@ def _is_cache_valid(exp_dir: Path, cache_mtime: float) -> bool:
 
 _ELIGIBILITY_BADGES: dict[str, str] = {
     "submittable": "<span title='Clean run — ready to submit'>🟢 submittable</span>",
-    "subset_review": "<span title='Passed integrity checks but the subset shape needs a human look'>🔍 review</span>",
-    "unfinished": "<span title='Episodes still queued/running — state may change'>⏳ unfinished</span>",
-    "incomplete": "<span title='Finished, but ran only a subset of the declared benchmark (partial / debug slice) — not submittable'>🧪 incomplete</span>",
+    "subset_review": "<span title='Passed integrity checks but the subset shape needs a human look (submit with review / mark is_official)'>🔍 review</span>",
+    "unfinished": "<span title='Episodes still queued/running, or tasks missing a status file — state may change'>⏳ unfinished</span>",
     "broken": "<span title='Cannot produce a meaningful score'>💥 broken</span>",
     # Neutral fallback only: a real journal decision is always resolved to ✅
     # submitted or 🚫 rejected by eligibility_badge's fresh submissions read, so
@@ -622,12 +623,11 @@ def scan_category(exp_dir: Path, *, sweep_stale: bool = False) -> str:
         return "broken"
 
 
-def eligibility_badge(exp_dir: Path, category: str, ran: int | None = None, total: int | None = None) -> str:
+def eligibility_badge(exp_dir: Path, category: str) -> str:
     """Badge for the eligibility column. The persisted submission state (read
     fresh, cheap) takes precedence over the cached scan `category`: a successful
     submission shows ✅; a recorded rejection shows 🚫 rejected (with its reason),
-    so a previously-rejected/broken run is never mistaken for a success.
-    `incomplete` is annotated with ran/declared task counts (e.g. 🧪 3/500 incomplete)."""
+    so a previously-rejected/broken run is never mistaken for a success."""
     subs = submissions.read(exp_dir)
     submitted = [d for d in ("journal", "eee") if subs.get(d, {}).get("status") == "submitted"]
     if submitted:
@@ -643,19 +643,17 @@ def eligibility_badge(exp_dir: Path, category: str, ran: int | None = None, tota
     if failed is not None:
         reason = html_lib.escape(failed.get("reason", "submission failed"))
         return f"<span title='Last submit attempt failed (retryable): {reason}'>❌ submit failed</span>"
-    if category == "incomplete" and ran is not None and total:
-        return (
-            f"<span title='Ran only {ran} of {total} declared tasks — partial / debug subset, not submittable'>"
-            f"🧪 {ran}/{total} incomplete</span>"
-        )
     return _ELIGIBILITY_BADGES.get(category, f"<span>{html_lib.escape(category)}</span>")
 
 
-def is_archivable(exp_dir: Path, category: str) -> bool:
-    """True for runs not worth keeping / not submittable, so the Archive
-    auto-select ticks them: a broken or incomplete (partial/debug) scan, or a run
-    already recorded as rejected (e.g. an all-ghost run decided broken earlier)."""
-    if category in ("broken", "incomplete"):
+def is_archivable(exp_dir: Path, category: str, is_official: bool | None = None) -> bool:
+    """True for runs not worth keeping, so the Archive auto-select ticks them:
+    a broken scan, a run already recorded as rejected (e.g. an all-ghost run),
+    or one the operator explicitly marked debug (``is_official is False``).
+
+    A bare ``subset_review`` is *not* archived — it may be a legit subset awaiting
+    a `--yes` submission; only an explicit ``is_official=False`` flags it as junk."""
+    if category == "broken" or is_official is False:
         return True
     subs = submissions.read(exp_dir)
     return any(subs.get(d, {}).get("status") == "rejected" for d in ("journal", "eee"))
@@ -727,9 +725,9 @@ def _compute_exp_row(exp_dir: Path) -> dict[str, Any]:
         # Cached scan category (stable for terminal runs); the displayed badge is
         # derived fresh in get_experiments_table_rows so submissions stay current.
         "_category": result.category.value,
-        # Ran/declared task counts — used to annotate the incomplete badge (3/500).
-        "_ran": result.n_terminal,
-        "_total": result.n_tasks,
+        # Operator run-intent (None/True/False) — drives the Archive auto-select
+        # (is_official=False ⇒ explicit debug ⇒ archivable).
+        "_is_official": result.is_official,
         # Submission state at compute time, so the cache invalidates on a later
         # submit / rollback (see _subs_mtime).
         "_subs_mtime": _subs_mtime(exp_dir),
@@ -825,9 +823,7 @@ def get_experiments_table_rows(results_dir: Path) -> list[dict[str, Any]]:
             row = {"selected": False, "experiment": dir_path.name, **summary}
         # Derive the eligibility badge fresh (submissions.json is cheap and can
         # change after a submit without invalidating the mtime-based cache).
-        row["eligibility"] = eligibility_badge(
-            dir_path, row.get("_category", "broken"), row.get("_ran"), row.get("_total")
-        )
+        row["eligibility"] = eligibility_badge(dir_path, row.get("_category", "broken"))
         rows.append(row)
     rows.sort(key=lambda r: r["date"], reverse=True)
     return rows

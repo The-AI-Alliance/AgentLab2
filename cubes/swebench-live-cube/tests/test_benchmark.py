@@ -10,6 +10,7 @@ from cube.task import TaskExecutionInfo
 
 from swebench_live_cube.benchmark import SWEBenchLiveBenchmarkConfig
 from swebench_live_cube.debug import _TASK_ACTIONS, get_debug_benchmark
+from swebench_live_cube.gold_subset import lite_gold_ids
 from swebench_live_cube.task import (
     SWEBenchLiveExecutionInfo,
     SWEBenchLiveTaskConfig,
@@ -74,6 +75,17 @@ def test_named_subset_verified():
     # Every retained task lists 'verified' in its splits field
     for tm in cfg.tasks().values():
         assert "verified" in tm.splits
+
+
+def test_named_subset_lite_gold():
+    """``named_subset('lite-gold')`` returns the 275 root-gold-solvable lite tasks, each a lite task."""
+    cfg = SWEBenchLiveBenchmarkConfig().named_subset("lite-gold")
+    assert cfg.num_tasks == 275
+    assert set(cfg.tasks().keys()) == lite_gold_ids()
+    # lite-gold ⊂ lite: every gold task also carries the 'lite' marker.
+    for tm in cfg.tasks().values():
+        assert "lite-gold" in tm.splits
+        assert "lite" in tm.splits
 
 
 def test_debug_benchmark_type():

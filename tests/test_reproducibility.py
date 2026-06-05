@@ -52,7 +52,8 @@ def _exp_record(n_tasks: int = 5) -> ExperimentRecord:
         agent=_agent_info(),
         benchmark_name="miniwob",
         benchmark_version="1.0.0",
-        benchmark_subset=BenchmarkSubset(name="miniwob[level=all]", n_tasks=n_tasks, filter="level=all"),
+        # filter is the registered named_subsets key (post named-subset PR), not a glob.
+        benchmark_subset=BenchmarkSubset(name="miniwob[all]", n_tasks=n_tasks, filter="all"),
     )
 
 

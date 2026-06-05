@@ -245,7 +245,7 @@ All in [`src/cube_harness/auto_cube/templates/`](../../templates/):
 
 - [`session.md`](../../templates/session.md) — session scope + live tracker
 - [`notes.md`](../../templates/notes.md) — per-round hypothesis → result
-- [`exp_config.py`](../../templates/exp_config.py) — copy-and-edit experiment recipe
+- [`exp_config.py`](../../templates/exp_config.py) — copy-and-edit experiment recipe. Keep `is_official=False`: Auto-CUBE runs are iteration, never submittable evaluations.
 - [`fix_report.md`](../../templates/fix_report.md) — PR body for fixes
 - [`report.md`](../../templates/report.md) — final REPORT.md rollup
 

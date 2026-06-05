@@ -21,6 +21,13 @@ Categories (more restrictive than the original sketch — the philosophy is
     operator can submit with ``--yes`` after eyeballing the diagnosis.
   • ``submittable``        — clean run of a complete named subset or the full
     benchmark. Hand off to ``submit_to_journal.py``.
+
+The ``is_official`` field on ``ExperimentRecord`` is an explicit operator override
+of the subset_review/submittable inference (it never overrides the integrity
+checks): ``True`` ⇒ submittable when complete and clean, ``False`` ⇒ never
+submittable, ``None`` (default) ⇒ infer from debug_limit + subset shape. Editing
+that one field in ``experiment_record.json`` and re-scanning reclassifies a run
+without re-running it.
 """
 
 from __future__ import annotations
@@ -95,7 +102,6 @@ class ScanCategory(str, Enum):
     already_submitted = "already_submitted"
     broken = "broken"
     unfinished = "unfinished"  # episodes still QUEUED/RUNNING — state may change
-    incomplete = "incomplete"  # finished, but ran only a subset of the declared benchmark
     subset_review = "subset_review"
     submittable = "submittable"
 
@@ -123,6 +129,7 @@ class ScanResult:
     benchmark_subset_name: str = ""
     benchmark_subset_filter: str | None = None
     has_explicit_task_list: bool = False
+    is_official: bool | None = None
     # Raw per-episode signal collected during the single status pass, so display
     # consumers (XRay's experiment table) don't have to re-read the status files.
     # `status_counts` maps raw EpisodeStatus.status → count; `rewards` are the
@@ -242,6 +249,7 @@ def classify(
         benchmark_subset_name=bench_subset.name,
         benchmark_subset_filter=bench_subset.filter,
         has_explicit_task_list=has_explicit_task_list,
+        is_official=record.is_official,
     )
 
     # ── In-flight episodes mean the experiment is still running ──────────
@@ -277,19 +285,28 @@ def classify(
             ),
         )
 
-    # ── Missing tasks, nothing in flight ⇒ incomplete ───────────────────
-    # A finished run that covered only a subset of the declared benchmark
-    # (selected via glob / task-list / early stop). Distinct from `unfinished`
-    # (still running): this won't progress on its own, and it isn't submittable
-    # as the full benchmark — it's typically a debug / partial slice.
+    # ── Missing tasks ⇒ unfinished (could resume) ───────────────────────
     if n_missing > 0:
         return ScanResult(
             **base,
-            category=ScanCategory.incomplete,
-            reasons=(f"{n_terminal}/{n_tasks} declared task(s) ran — partial subset, not the full benchmark",),
+            category=ScanCategory.unfinished,
+            reasons=(f"{n_missing}/{n_tasks} task(s) have no status file — experiment may have stopped early",),
         )
 
-    # ── Subset-shape gate: more restrictive than the original sketch ─────
+    # ── Explicit run-intent override ─────────────────────────────────────
+    # is_official is the operator's stated intent; it overrides the subset-shape
+    # inference below but never the integrity checks above (a run must still be
+    # complete and non-broken). None ⇒ fall through to inference.
+    if record.is_official is False:
+        return ScanResult(
+            **base,
+            category=ScanCategory.subset_review,
+            reasons=("is_official=False — run marked debug, not for submission",),
+        )
+    if record.is_official is True:
+        return ScanResult(**base, category=ScanCategory.submittable)
+
+    # ── Subset-shape gate (is_official is None ⇒ infer) ──────────────────
     review_reasons: list[str] = []
     if debug_limit:
         review_reasons.append(f"debug_limit={debug_limit} was applied — not a full subset")

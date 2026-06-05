@@ -839,15 +839,21 @@ def test_rejected_state_shows_rejected_badge(tmp_path: Path) -> None:
 
 
 class TestIsArchivable:
-    """Archive auto-select: broken + incomplete + rejected, but not submittable/submitted."""
+    """Archive auto-select: broken + rejected + explicit-debug (is_official=False),
+    but not submittable / submitted / a bare subset_review."""
 
-    def test_broken_and_incomplete_are_archivable(self, tmp_path: Path) -> None:
+    def test_broken_is_archivable(self, tmp_path: Path) -> None:
         assert xray_utils.is_archivable(tmp_path, "broken")
-        assert xray_utils.is_archivable(tmp_path, "incomplete")
 
-    def test_submittable_and_subset_review_are_not(self, tmp_path: Path) -> None:
+    def test_explicit_debug_is_archivable(self, tmp_path: Path) -> None:
+        # is_official=False ⇒ operator marked it debug ⇒ archivable, even though
+        # the category is subset_review.
+        assert xray_utils.is_archivable(tmp_path, "subset_review", is_official=False)
+
+    def test_submittable_and_bare_subset_review_are_not(self, tmp_path: Path) -> None:
         assert not xray_utils.is_archivable(tmp_path, "submittable")
-        assert not xray_utils.is_archivable(tmp_path, "subset_review")
+        assert not xray_utils.is_archivable(tmp_path, "subset_review")  # is_official None ⇒ keep
+        assert not xray_utils.is_archivable(tmp_path, "subset_review", is_official=True)
 
     def test_rejected_run_is_archivable(self, tmp_path: Path) -> None:
         from cube_harness.reproducibility import submissions  # noqa: PLC0415

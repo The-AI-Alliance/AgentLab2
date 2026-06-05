@@ -184,17 +184,14 @@ class TestClassifierUnfinished:
         assert result.category is ScanCategory.unfinished
         assert "QUEUED/RUNNING" in result.reasons[0]
 
-    def test_missing_status_files_is_incomplete(self, tmp_path: Path) -> None:
-        # A finished run covering only a subset of the declared benchmark is
-        # `incomplete` (a partial/debug slice), distinct from `unfinished`
-        # (still running).
+    def test_missing_status_files_is_unfinished(self, tmp_path: Path) -> None:
         exp_dir = tmp_path / "partial"
         _populate_clean_run(exp_dir, n_tasks=5, n_success=3)
         # Bump n_tasks to 10 — 5 tasks have no status file at all.
         _set_subset_field(exp_dir, n_tasks=10)
         result = classify(exp_dir)
-        assert result.category is ScanCategory.incomplete
-        assert "partial subset" in result.reasons[0]
+        assert result.category is ScanCategory.unfinished
+        assert "have no status file" in result.reasons[0]
 
 
 class TestClassifierLiveStragglerStaysUnfinished:
@@ -245,6 +242,52 @@ class TestClassifierSubsetReview:
         result = classify(exp_dir)
         assert result.category is ScanCategory.subset_review
         assert any("hand-picked" in r for r in result.reasons)
+
+    def test_is_official_false_blocks_clean_full_run(self, tmp_path: Path) -> None:
+        # A clean full run that would be submittable is held back when marked debug.
+        exp_dir = tmp_path / "marked_debug"
+        _populate_clean_run(exp_dir, n_tasks=3, n_success=3)
+        _set_record_field(exp_dir, is_official=False)
+        result = classify(exp_dir)
+        assert result.category is ScanCategory.subset_review
+        assert any("is_official=False" in r for r in result.reasons)
+
+    def test_is_official_true_promotes_hand_picked_subset(self, tmp_path: Path) -> None:
+        # is_official=True overrides the subset-shape gate: a hand-picked list becomes
+        # submittable (the operator vouches it's an official eval).
+        exp_dir = tmp_path / "vouched"
+        _populate_clean_run(exp_dir, n_tasks=3, n_success=3)
+        _set_subset_field(exp_dir, task_ids=["t0", "t1", "t2"])
+        _set_record_field(exp_dir, is_official=True)
+        result = classify(exp_dir)
+        assert result.category is ScanCategory.submittable
+
+    def test_is_official_true_does_not_override_unfinished(self, tmp_path: Path) -> None:
+        # Intent never overrides integrity: a run still missing tasks stays unfinished.
+        exp_dir = tmp_path / "vouched_incomplete"
+        _populate_clean_run(exp_dir, n_tasks=3, n_success=3)
+        _set_subset_field(exp_dir, n_tasks=5)  # 2 tasks have no status file
+        _set_record_field(exp_dir, is_official=True)
+        result = classify(exp_dir)
+        assert result.category is ScanCategory.unfinished
+
+    def test_is_official_true_does_not_override_unfinished_with_debug_limit(self, tmp_path: Path) -> None:
+        # The integrity gate fires before the is_official override even when a debug_limit
+        # truncated the run: a partial run stays unfinished, never submittable.
+        exp_dir = tmp_path / "vouched_truncated"
+        _populate_clean_run(exp_dir, n_tasks=1, n_success=1)
+        _set_subset_field(exp_dir, n_tasks=3)  # 2 tasks never ran
+        _set_record_field(exp_dir, debug_limit=1, is_official=True)
+        result = classify(exp_dir)
+        assert result.category is ScanCategory.unfinished
+
+    def test_is_official_none_falls_back_to_inference(self, tmp_path: Path) -> None:
+        # Default None → existing inference: clean full run is submittable.
+        exp_dir = tmp_path / "inferred"
+        _populate_clean_run(exp_dir, n_tasks=3, n_success=3)
+        _set_record_field(exp_dir, is_official=None)
+        result = classify(exp_dir)
+        assert result.category is ScanCategory.submittable
 
 
 class TestClassifierIdempotency:

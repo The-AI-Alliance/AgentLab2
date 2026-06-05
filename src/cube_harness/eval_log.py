@@ -434,33 +434,51 @@ class AgentInfo(TypedBaseModel):
 class BenchmarkSubset(TypedBaseModel):
     """Benchmark subset descriptor for MNAR propensity correction.
 
-    Automatically derived from the benchmark object. The name field captures any subset
-    suffix applied via subset_from_glob (e.g., "[level=l1]") or subset_from_list.
-    n_tasks is the denominator for computing completion rate without requiring the benchmark.
+    Automatically derived from the benchmark config. ``n_tasks`` is the size of the
+    selected view (the denominator for completion rate). The descriptor routes the
+    journal-eligibility scan to one of three outcomes:
+
+    * Full benchmark — ``task_ids`` None → submittable.
+    * Registered named subset — when the config was built via ``named_subset(name)``
+      (carried on ``BenchmarkConfig.subset_name``), ``filter`` holds the subset key and
+      ``task_ids`` stays None, so a complete run is submittable.
+    * Ad-hoc subset (``subset_from_list`` / unregistered glob) — ``task_ids`` records the
+      explicit list, which the scan flags as subset_review.
     """
 
-    name: str = Field(description="Benchmark name including any subset suffix (benchmark_metadata.name).")
-    n_tasks: int = Field(description="Total tasks in this subset — denominator for completion rate.")
+    name: str = Field(description="Benchmark name including any subset suffix, e.g. 'swebench-live-cube[lite-gold]'.")
+    n_tasks: int = Field(description="Tasks in this subset (the selected view) — denominator for completion rate.")
     filter: str | None = Field(
         default=None,
-        description="Glob expression if the subset was created via subset_from_glob.",
+        description="Registered named_subsets key (BenchmarkConfig.subset_name) for an official subset; None otherwise.",
     )
     task_ids: list[str] | None = Field(
         default=None,
         description=(
-            "Explicit task list when the subset was constructed via subset_from_list. "
-            "Hand-picked subsets without a natural name don't make good reproducibility "
-            "reference points — the journal-eligibility scan flags them as subset_review. "
-            "None when the subset was built from a filter or is the full benchmark."
+            "Explicit task list for an ad-hoc subset (subset_from_list, or a glob that isn't a "
+            "registered named subset). Hand-picked subsets aren't reproducibility reference points, "
+            "so the journal-eligibility scan flags them as subset_review. None for a registered named "
+            "subset or the full benchmark."
         ),
     )
 
     @classmethod
     def from_benchmark_config(cls, benchmark_config: BenchmarkConfig) -> "BenchmarkSubset":
-        """Derive BenchmarkSubset from a cube BenchmarkConfig object."""
-        name = benchmark_config.benchmark_metadata.name
-        n_tasks = len(benchmark_config.task_metadata)
-        return cls(name=name, n_tasks=n_tasks)
+        """Derive BenchmarkSubset from a cube BenchmarkConfig object.
+
+        ``n_tasks`` comes from ``num_tasks`` (the selected view), not the full class-level
+        registry, so a subset run records its real denominator. A config built via
+        ``named_subset(name)`` carries the registered key on ``subset_name``; it is recorded
+        via ``filter`` (→ submittable when complete). Any other subset records its
+        ``task_ids`` (→ subset_review). ``getattr`` guards against a cube-standard predating
+        the ``subset_name`` field (then it degrades to the ad-hoc path).
+        """
+        base_name = benchmark_config.benchmark_metadata.name
+        n_tasks = benchmark_config.num_tasks
+        subset_name = getattr(benchmark_config, "subset_name", None)
+        if subset_name is not None:
+            return cls(name=f"{base_name}[{subset_name}]", n_tasks=n_tasks, filter=subset_name)
+        return cls(name=base_name, n_tasks=n_tasks, task_ids=benchmark_config.task_ids)
 
 
 class InvestigatorLLMConfig(TypedBaseModel):
@@ -616,6 +634,16 @@ class ExperimentRecord(TypedBaseModel):
             "code path that didn't propagate the value into the record)."
         ),
     )
+    is_official: bool | None = Field(
+        default=None,
+        description=(
+            "Explicit run-intent override for the journal-eligibility scan. None: infer from "
+            "debug_limit + subset shape (default). True: official evaluation — bypasses the "
+            "subset-review gate, so a complete, clean run is submittable. False: debug run — "
+            "never submittable. Edit this one field and re-scan to reclassify without re-running; "
+            "it never affects execution."
+        ),
+    )
     investigator_llm_config: InvestigatorLLMConfig | None = Field(
         default=None,
         description="Investigator configuration if a post-hoc LLM investigator was run on these episodes.",
@@ -630,6 +658,7 @@ class ExperimentRecord(TypedBaseModel):
         benchmark_config: BenchmarkConfig,
         git_cwd: str | None = None,
         debug_limit: int | None = None,
+        is_official: bool | None = None,
     ) -> "ExperimentRecord":
         """Build ExperimentRecord from experiment parameters."""
         harness_version = _get_package_version("cube-harness") or "unknown"
@@ -648,6 +677,7 @@ class ExperimentRecord(TypedBaseModel):
             benchmark_version=bm_version,
             benchmark_subset=BenchmarkSubset.from_benchmark_config(benchmark_config),
             debug_limit=debug_limit,
+            is_official=is_official,
         )
 
     def write(self, output_dir: Path) -> None:

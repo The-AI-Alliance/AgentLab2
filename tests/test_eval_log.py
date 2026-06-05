@@ -375,6 +375,38 @@ def test_benchmark_subset_from_benchmark(mock_cube_benchmark_config) -> None:
     assert subset.name == "mock-cube"
     assert subset.n_tasks == 2
     assert subset.filter is None
+    # Full benchmark: no explicit list and no filter → submittable.
+    assert subset.task_ids is None
+
+
+def test_benchmark_subset_ad_hoc_list_records_task_ids(mock_cube_benchmark_config) -> None:
+    # A hand-picked subset_from_list records its real count (1, not 2) and the
+    # explicit task_ids, so the scan flags it as subset_review.
+    sub_cfg = mock_cube_benchmark_config.subset_from_list(["mock_cube_task_1"])
+    subset = BenchmarkSubset.from_benchmark_config(sub_cfg)
+    assert subset.n_tasks == 1
+    assert subset.task_ids == ["mock_cube_task_1"]
+    assert subset.filter is None
+
+
+def test_benchmark_subset_named_subset_is_recognised(mock_named_subset_benchmark_config) -> None:
+    # named_subset('gold') matches a registered named subset → recorded via filter,
+    # no explicit task_ids, so a complete run is submittable.
+    gold = mock_named_subset_benchmark_config.named_subset("gold")
+    subset = BenchmarkSubset.from_benchmark_config(gold)
+    assert subset.name == "mock-cube[gold]"
+    assert subset.filter == "gold"
+    assert subset.n_tasks == 2
+    assert subset.task_ids is None
+
+
+def test_benchmark_subset_unregistered_glob_is_ad_hoc(mock_named_subset_benchmark_config) -> None:
+    # A glob that doesn't correspond to a registered named subset is not official:
+    # record the explicit task_ids so the scan asks for review.
+    other = mock_named_subset_benchmark_config.subset_from_glob("abstract_description", "other")
+    subset = BenchmarkSubset.from_benchmark_config(other)
+    assert subset.filter is None
+    assert subset.task_ids == ["t3"]
 
 
 def test_benchmark_subset_unknown_benchmark() -> None:
