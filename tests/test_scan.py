@@ -178,6 +178,35 @@ class TestClassifierUnfinished:
         assert "partial subset" in result.reasons[0]
 
 
+class TestClassifierAbandoned:
+    """A stale-dominated run is broken (archivable) even with a live straggler.
+
+    Mirrors the XRay path: ghost promotion has already written STALE into the
+    dead episodes, and classify runs read-only (sweep_stale=False)."""
+
+    def test_stale_dominated_run_is_broken_despite_in_flight(self, tmp_path: Path) -> None:
+        exp_dir = tmp_path / "abandoned"
+        _populate_clean_run(exp_dir, n_tasks=4, n_success=4)
+        _set_subset_field(exp_dir, n_tasks=4)
+        # 2 STALE (dead workers) + 1 RUNNING + 1 COMPLETED → 2/4 = 50% stale.
+        _add_status(exp_dir, "t0", "STALE")
+        _add_status(exp_dir, "t1", "STALE")
+        _add_status(exp_dir, "t2", "RUNNING")
+        result = classify(exp_dir, sweep_stale=False)
+        assert result.category is ScanCategory.broken
+        assert "abandoned" in result.reasons[0]
+
+    def test_few_stale_with_in_flight_stays_unfinished(self, tmp_path: Path) -> None:
+        exp_dir = tmp_path / "mostly_running"
+        _populate_clean_run(exp_dir, n_tasks=4, n_success=4)
+        _set_subset_field(exp_dir, n_tasks=4)
+        # 1 STALE + 1 RUNNING + 2 COMPLETED → 1/4 = 25% stale (< 50%).
+        _add_status(exp_dir, "t0", "STALE")
+        _add_status(exp_dir, "t1", "RUNNING")
+        result = classify(exp_dir, sweep_stale=False)
+        assert result.category is ScanCategory.unfinished
+
+
 class TestClassifierSubsetReview:
     def test_debug_limit_flagged(self, tmp_path: Path) -> None:
         exp_dir = tmp_path / "debug"
