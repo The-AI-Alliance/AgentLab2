@@ -15,6 +15,11 @@ temp/
 # Auto-CUBE experiment outputs (large, not for VCS)
 auto_cube/results/
 
+# Submission staging dirs written by submit_to_journal.py / submit_to_eee.py
+# (relative to cwd when run from the repo root)
+journal-out/
+eee-out/
+
 # Personal experiment recipes (shared recipes are committed without the custom_ prefix)
 recipes/custom_*
 

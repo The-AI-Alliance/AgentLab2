@@ -1522,11 +1522,17 @@ def run_xray(
             return [state.results_dir / row[1] for row in records if row and bool(row[0])]
 
         def _run_submitter(script: str, exp_dir: Path, extra: list[str]) -> tuple[bool, str]:
-            """Invoke a submit script for one experiment; return (ok, last-output-line)."""
+            """Invoke a submit script for one experiment; return (ok, last-meaningful-line).
+
+            On failure the tail is taken from stderr (where the traceback /
+            CalledProcessError lands) so the recorded failure reason is the actual
+            error, not the last incidental stdout line."""
             cmd = [sys.executable, str(Path(__file__).resolve().parents[3] / "scripts" / script), str(exp_dir), *extra]
             proc = subprocess.run(cmd, capture_output=True, text=True)
-            tail = (proc.stdout.strip().splitlines() or [""])[-1]
-            return proc.returncode == 0, tail
+            ok = proc.returncode == 0
+            stream = proc.stdout if ok else (proc.stderr or proc.stdout)
+            tail = next((ln for ln in reversed(stream.strip().splitlines()) if ln.strip()), "")
+            return ok, tail
 
         def on_submit(table: Any, destination: str) -> tuple[list[list[Any]], Any]:
             """Submit the checked experiments to EEE or the cube-registry journal."""

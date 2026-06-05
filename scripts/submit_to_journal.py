@@ -125,6 +125,7 @@ def _open_pr(record_path: Path, record: dict, branch: str) -> str:
         # `gh repo fork --clone --remote` forks (if needed) and clones into
         # the cwd's subdirectory. We feed it the parent and let gh pick the
         # directory name. Quiet output keeps the user-visible echo clean.
+        # git clone flags go after a `--` separator (gh dropped `--clone-flags=`).
         subprocess.run(
             [
                 "gh",
@@ -133,7 +134,8 @@ def _open_pr(record_path: Path, record: dict, branch: str) -> str:
                 CUBE_REGISTRY_REPO,
                 "--clone",
                 "--remote",
-                "--clone-flags=--depth=1",
+                "--",
+                "--depth=1",
             ],
             cwd=tmp,
             check=True,
@@ -168,6 +170,13 @@ def _open_pr(record_path: Path, record: dict, branch: str) -> str:
         # Push to the *fork* (origin). The canonical repo is `upstream`.
         subprocess.run(["git", "-C", str(clone_dir), "push", "-u", "origin", branch], check=True)
 
+        # Fork owner, parsed from origin's URL (https or ssh) — needed for the
+        # cross-repo --head below.
+        origin_url = subprocess.check_output(
+            ["git", "-C", str(clone_dir), "remote", "get-url", "origin"], text=True
+        ).strip()
+        fork_owner = origin_url.rstrip("/").removesuffix(".git").split("/")[-2].split(":")[-1]
+
         title = f"results: {record['benchmark_name']} — {record['agent']['llm_model']}"
         body = (
             f"Adds one community evaluation result for `{record['benchmark_name']}`.\n\n"
@@ -179,9 +188,9 @@ def _open_pr(record_path: Path, record: dict, branch: str) -> str:
             f"- outcomes: {record['results']['outcomes']}\n\n"
             f"_Submitted via cube-harness `scripts/submit_to_journal.py`._"
         )
-        # `gh pr create` from inside the fork clone defaults to opening the PR
-        # against the parent (upstream) repo. We pass --repo explicitly to
-        # make the target unambiguous.
+        # Target the canonical repo with --repo, and name the head branch as
+        # `<fork_owner>:<branch>` — with --repo set, gh would otherwise look for
+        # the branch on upstream (where it doesn't exist) and fail.
         pr = subprocess.check_output(
             [
                 "gh",
@@ -189,6 +198,8 @@ def _open_pr(record_path: Path, record: dict, branch: str) -> str:
                 "create",
                 "--repo",
                 CUBE_REGISTRY_REPO,
+                "--head",
+                f"{fork_owner}:{branch}",
                 "--title",
                 title,
                 "--body",
