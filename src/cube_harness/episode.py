@@ -51,14 +51,17 @@ class Episode:
     It builds the monitored env_tool + EventStreamer, attaches the
     streamer to the agent's event producers (LLM, sub-agents) via
     `agent.attach_recorder(streamer)`, then calls
-    `await agent.run(initial.obs, env_tool)` and finalizes regardless
-    of how the agent returns or raises. The previous `_run_loop` is
-    gone; every agent (legacy `step()` and new overridden `run()`)
-    flows through the same Episode body.
+    `agent.run(initial.obs, env_tool)` and finalizes regardless of how
+    the agent returns or raises. The previous `_run_loop` is gone; every
+    agent (legacy `step()` and new overridden `run()`) flows through the
+    same Episode body.
 
-    Public `run()` stays sync — callers (`exp_runner`, recipes, Ray
-    workers) keep their existing signature. Internally `run()` wraps an
-    `async _arun()` with `asyncio.run`.
+    The episode body (`_run_episode`) is fully synchronous and runs on
+    the calling thread — no event loop. Sequential agents dispatch tools
+    inline (sync Playwright / shell work natively; pdb is single-stack).
+    A parallel agent (`parallel_actions=True`) opens its own
+    `asyncio.run` scoped to the gather inside `Agent.run` — the only
+    place an event loop exists.
     """
 
     def __init__(
