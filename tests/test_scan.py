@@ -220,6 +220,16 @@ class TestClassifierSubsetReview:
         result = classify(exp_dir)
         assert result.category is ScanCategory.unfinished
 
+    def test_is_official_true_does_not_override_unfinished_with_debug_limit(self, tmp_path: Path) -> None:
+        # The integrity gate fires before the is_official override even when a debug_limit
+        # truncated the run: a partial run stays unfinished, never submittable.
+        exp_dir = tmp_path / "vouched_truncated"
+        _populate_clean_run(exp_dir, n_tasks=1, n_success=1)
+        _set_subset_field(exp_dir, n_tasks=3)  # 2 tasks never ran
+        _set_record_field(exp_dir, debug_limit=1, is_official=True)
+        result = classify(exp_dir)
+        assert result.category is ScanCategory.unfinished
+
     def test_is_official_none_falls_back_to_inference(self, tmp_path: Path) -> None:
         # Default None → existing inference: clean full run is submittable.
         exp_dir = tmp_path / "inferred"
