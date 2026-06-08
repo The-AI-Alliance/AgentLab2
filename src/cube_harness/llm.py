@@ -492,6 +492,7 @@ class LLM:
             result.append({"token_id": token_id, "logprob": float(logprob)})
         return result
 
+
 @dataclass(frozen=True)
 class LLMRouteLease:
     """A temporary route assignment for one generation request."""
@@ -515,6 +516,7 @@ class LLMRouter(Protocol):
         error: BaseException | None = None,
     ) -> None: ...
 
+
 class DummyRouter(LLMRouter):
     """A dummy router that performs no routing and returns an empty lease."""
 
@@ -529,6 +531,28 @@ class DummyRouter(LLMRouter):
     ) -> None:
         pass
 
+
+def _normalize_messages_for_template(messages: list) -> list[dict]:
+    """Coerce chat messages to plain dicts before ``apply_chat_template``.
+
+    Newer chat templates (e.g. Qwen3 on transformers>=4.57) access ``message.reasoning_content``,
+    which raises ``AttributeError`` on litellm ``Message`` pydantic objects but is tolerated on
+    dicts. The generation path serialises messages to JSON before the server applies the template;
+    client-side token counting must do the same, so normalise here and default the field.
+    """
+    normalized: list[dict] = []
+    for m in messages:
+        if isinstance(m, dict):
+            d = dict(m)
+        elif hasattr(m, "model_dump"):
+            d = m.model_dump(exclude_none=True)
+        else:
+            d = {k: getattr(m, k) for k in ("role", "content", "tool_calls", "reasoning_content") if hasattr(m, k)}
+        d.setdefault("reasoning_content", None)
+        normalized.append(d)
+    return normalized
+
+
 class VLLMTokenCounter:
     def __init__(self, tokenizer_name: str):
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -538,7 +562,7 @@ class VLLMTokenCounter:
 
     def count_prompt_tokens(self, messages, tools=None) -> int:
         token_ids = self.tokenizer.apply_chat_template(
-            messages,
+            _normalize_messages_for_template(messages),
             tools=tools,
             add_special_tokens=True,
             add_generation_prompt=True,
@@ -554,7 +578,9 @@ class RoutedLLMConfig(LLMConfig):
     configs and result artifacts stay portable.
     """
 
-    tokenizer_name: str # used for token counting; can differ from model_name in LLMConfig when routing to different models
+    tokenizer_name: (
+        str  # used for token counting; can differ from model_name in LLMConfig when routing to different models
+    )
     router: Any = Field(default=None, exclude=True)
 
     def make(self) -> "RoutedLLM":

@@ -1,54 +1,37 @@
-"""Smoke tests for ``recipes/lamer_miniwob.py``'s LaMerAgent.
+"""Tests for the LaMer agents (``cube_harness.agents.lamer``).
 
-Covers the parts of LaMerAgent that don't need a real LLM:
+Covers the parts that don't need a real LLM, for both the ReAct and TIR variants:
 - ``__init__`` loads memory from disk (or starts empty when no file).
-- ``finalize`` calls the LLM, appends to memory, persists to disk, returns AgentOutput.
-- ``finalize`` graceful failure: empty response, LLM exception.
-- ``choose_steps_to_render`` injects memory after the system prompt.
-- Memory file format round-trips: write → reload → same content.
+- ``finalize`` reflects only on failure (reward <= 0): LLM call → append to memory → persist →
+  return AgentOutput; success / empty response / LLM exception all return None gracefully.
+- Lesson injection: ReAct splices a memory block in as messages; TIR appends to the system prompt.
+
+The reflection *content* here comes from the generic ``SimpleReflectionProvider`` so these tests have
+no cube dependency; the math ``MathReflectionProvider`` is covered in ``test_reflection.py``.
 """
 
 import json
-import sys
 from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
-import pytest
+from litellm import Message
 
-# Skip the whole module when miniwob-cube isn't installed — the recipe imports
-# it at module level, so we'd ImportError before any test runs (e.g. tests.yml
-# CI doesn't install workspace cubes). Matches the recipe-import guard pattern.
-pytest.importorskip("miniwob_cube")
-
-from litellm import Message  # noqa: E402
-
-from cube_harness.core import AgentOutput  # noqa: E402
-from cube_harness.llm import LLMConfig, LLMResponse, Usage  # noqa: E402
-
-# recipes/ is not a package; import the recipe by path so we can pull
-# LaMerAgent / LaMerAgentConfig out of it.
-_RECIPES = Path(__file__).resolve().parent.parent / "recipes"
-sys.path.insert(0, str(_RECIPES))
-import lamer_miniwob  # noqa: E402
-
-LaMerAgent = lamer_miniwob.LaMerAgent
-LaMerAgentConfig = lamer_miniwob.LaMerAgentConfig
-
-
-def teardown_module(_module: object) -> None:
-    """Remove the recipes/ sys.path insertion after the test module finishes."""
-    if str(_RECIPES) in sys.path:
-        sys.path.remove(str(_RECIPES))
+from cube_harness.agents.lamer import (
+    LaMerReactAgent,
+    LaMerReactAgentConfig,
+    LaMerTirAgent,
+    LaMerTirAgentConfig,
+    episodes_to_success,
+    lamer_rollout_credit,
+)
+from cube_harness.agents.reflection import SimpleReflectionProviderConfig
+from cube_harness.core import AgentOutput
+from cube_harness.llm import LLMConfig, LLMResponse, Usage
 
 
 def _fake_llm_response(content: str) -> LLMResponse:
-    """A real ``LLMResponse`` instance for stubbing ``self.llm``.
-
-    ``LLMCall.usage`` is a Pydantic ``Usage`` model — Pydantic V2 rejects
-    duck-typed substitutes, so we build a real ``Usage``. The Message comes
-    from litellm (the same class ReactAgent stores in ``self.history``).
-    """
+    """A real ``LLMResponse`` instance for stubbing ``self.llm`` (Pydantic rejects duck types)."""
     return LLMResponse(
         message=Message(role="assistant", content=content),
         usage=Usage(
@@ -62,73 +45,85 @@ def _fake_llm_response(content: str) -> LLMResponse:
     )
 
 
-def _agent(memory_path: Path | None = None) -> LaMerAgent:
-    cfg = LaMerAgentConfig(
+def _react_agent(memory_path: Path | None = None) -> LaMerReactAgent:
+    cfg = LaMerReactAgentConfig(
         llm_config=LLMConfig(model_name="openai/gpt-4o"),
+        reflection_provider=SimpleReflectionProviderConfig(),
+        memory_path=memory_path,
+    )
+    return cfg.make([])
+
+
+def _tir_agent(memory_path: Path | None = None, system_prompt: str = "BASE PROMPT") -> LaMerTirAgent:
+    cfg = LaMerTirAgentConfig(
+        llm_config=LLMConfig(model_name="openai/gpt-4o"),
+        system_prompt=system_prompt,
+        max_actions=3,
+        reflection_provider=SimpleReflectionProviderConfig(),
         memory_path=memory_path,
     )
     return cfg.make([])
 
 
 # ---------------------------------------------------------------------------
-# Inheritance + identity
+# Shape + identity
 # ---------------------------------------------------------------------------
 
 
-class TestLaMerAgentShape:
-    def test_subclasses_reactagent(self) -> None:
-        agent = _agent()
-        classes = {c.__name__ for c in type(agent).__mro__}
-        assert {"LaMerAgent", "ReactAgent", "Agent"} <= classes
+class TestShape:
+    def test_react_subclasses_reactagent(self) -> None:
+        classes = {c.__name__ for c in type(_react_agent()).__mro__}
+        assert {"LaMerReactAgent", "ReactAgent", "Agent"} <= classes
 
-    def test_agent_name_includes_model(self) -> None:
-        cfg = LaMerAgentConfig(llm_config=LLMConfig(model_name="openai/gpt-4o"))
+    def test_tir_subclasses_tiragent(self) -> None:
+        classes = {c.__name__ for c in type(_tir_agent()).__mro__}
+        assert {"LaMerTirAgent", "TirAgent", "Agent"} <= classes
+
+    def test_react_agent_name_includes_model(self) -> None:
+        cfg = LaMerReactAgentConfig(
+            llm_config=LLMConfig(model_name="openai/gpt-4o"),
+            reflection_provider=SimpleReflectionProviderConfig(),
+        )
         assert cfg.agent_name == "LaMer-openai_gpt-4o"
 
     def test_default_memory_is_empty_when_no_path(self) -> None:
-        agent = _agent(memory_path=None)
-        assert agent.memory == []
+        assert _react_agent(memory_path=None).memory == []
+        assert _tir_agent(memory_path=None).memory == []
 
 
 # ---------------------------------------------------------------------------
-# __init__: memory load
+# __init__: memory load (mechanism shared via CrossEpisodeReflector)
 # ---------------------------------------------------------------------------
 
 
 class TestMemoryLoad:
     def test_init_starts_empty_when_file_missing(self, tmp_path: Path) -> None:
-        path = tmp_path / "lamer.json"  # doesn't exist
-        agent = _agent(memory_path=path)
-        assert agent.memory == []
+        assert _react_agent(memory_path=tmp_path / "lamer.json").memory == []
 
     def test_init_loads_existing_memory_file(self, tmp_path: Path) -> None:
         path = tmp_path / "lamer.json"
         path.write_text(json.dumps({"memory": ["lesson 1", "lesson 2"]}))
-        agent = _agent(memory_path=path)
-        assert agent.memory == ["lesson 1", "lesson 2"]
+        assert _react_agent(memory_path=path).memory == ["lesson 1", "lesson 2"]
 
     def test_init_corrupted_file_starts_empty(self, tmp_path: Path) -> None:
         path = tmp_path / "lamer.json"
         path.write_text("not valid json {{{")
-        # Should log but not raise; memory starts empty.
-        agent = _agent(memory_path=path)
-        assert agent.memory == []
+        assert _react_agent(memory_path=path).memory == []  # logs, does not raise
 
     def test_init_missing_memory_key_starts_empty(self, tmp_path: Path) -> None:
         path = tmp_path / "lamer.json"
         path.write_text(json.dumps({"other_field": "value"}))
-        agent = _agent(memory_path=path)
-        assert agent.memory == []
+        assert _react_agent(memory_path=path).memory == []
 
 
 # ---------------------------------------------------------------------------
-# finalize: LLM call, memory append, persistence, return value
+# finalize: reflect only on failure; LLM call, append, persistence, return value
 # ---------------------------------------------------------------------------
 
 
 class TestFinalize:
     def test_finalize_returns_agent_output_with_reflection_tag(self, tmp_path: Path) -> None:
-        agent = _agent(memory_path=tmp_path / "lamer.json")
+        agent = _react_agent(memory_path=tmp_path / "lamer.json")
         with patch.object(agent, "llm", return_value=_fake_llm_response("clicked the wrong button")):
             result = agent.finalize(reward=0.0)
         assert isinstance(result, AgentOutput)
@@ -138,119 +133,169 @@ class TestFinalize:
         assert result.actions == []
 
     def test_finalize_appends_to_memory(self, tmp_path: Path) -> None:
-        agent = _agent(memory_path=tmp_path / "lamer.json")
-        assert agent.memory == []
+        agent = _react_agent(memory_path=tmp_path / "lamer.json")
         with patch.object(agent, "llm", return_value=_fake_llm_response("first lesson")):
             agent.finalize(reward=0.0)
         assert agent.memory == ["first lesson"]
 
     def test_finalize_persists_memory_to_disk(self, tmp_path: Path) -> None:
         memory_path = tmp_path / "agent_state" / "lamer.json"
-        agent = _agent(memory_path=memory_path)
+        agent = _react_agent(memory_path=memory_path)
         with patch.object(agent, "llm", return_value=_fake_llm_response("a lesson")):
             agent.finalize(reward=0.0)
-        # The file should exist with the memory persisted.
-        assert memory_path.exists()
-        data = json.loads(memory_path.read_text())
-        assert data == {"memory": ["a lesson"]}
+        assert json.loads(memory_path.read_text()) == {"memory": ["a lesson"]}
 
     def test_finalize_persists_round_trip(self, tmp_path: Path) -> None:
         """Write memory in one agent, read it back in a fresh agent — same content."""
         path = tmp_path / "lamer.json"
-        agent1 = _agent(memory_path=path)
-        with patch.object(agent1, "llm", return_value=_fake_llm_response("lesson A")):
-            agent1.finalize(reward=0.0)
-        with patch.object(agent1, "llm", return_value=_fake_llm_response("lesson B")):
-            agent1.finalize(reward=1.0)
-        # Fresh agent loads from disk.
-        agent2 = _agent(memory_path=path)
-        assert agent2.memory == ["lesson A", "lesson B"]
+        agent1 = _react_agent(memory_path=path)
+        for lesson in ("lesson A", "lesson B"):
+            with patch.object(agent1, "llm", return_value=_fake_llm_response(lesson)):
+                agent1.finalize(reward=0.0)
+        assert _react_agent(memory_path=path).memory == ["lesson A", "lesson B"]
+
+    def test_finalize_success_does_not_reflect(self, tmp_path: Path) -> None:
+        """reward > 0 ⇒ no reflection (memory unchanged, returns None), but the file is persisted."""
+        path = tmp_path / "lamer.json"
+        agent = _react_agent(memory_path=path)
+        with patch.object(agent, "llm", return_value=_fake_llm_response("should not be recorded")) as llm:
+            result = agent.finalize(reward=1.0)
+        assert result is None
+        assert agent.memory == []
+        llm.assert_not_called()
+        assert json.loads(path.read_text()) == {"memory": []}
 
     def test_finalize_empty_response_does_not_append(self, tmp_path: Path) -> None:
-        agent = _agent(memory_path=tmp_path / "lamer.json")
+        agent = _react_agent(memory_path=tmp_path / "lamer.json")
         with patch.object(agent, "llm", return_value=_fake_llm_response("   ")):
             result = agent.finalize(reward=0.0)
         assert agent.memory == []
-        # Empty response → returns None (nothing to record in trajectory).
         assert result is None
 
     def test_finalize_llm_failure_does_not_propagate(self, tmp_path: Path) -> None:
-        agent = _agent(memory_path=tmp_path / "lamer.json")
+        path = tmp_path / "lamer.json"
+        agent = _react_agent(memory_path=path)
         with patch.object(agent, "llm", side_effect=RuntimeError("provider down")):
             result = agent.finalize(reward=0.0)
-        # Failure → returns None; memory unchanged.
         assert result is None
         assert agent.memory == []
-        # File should still be persisted (with empty memory) so subsequent runs see it.
-        path = agent._lamer_config.memory_path
-        assert path is not None
-        assert path.exists()
-        data = json.loads(path.read_text())
-        assert data == {"memory": []}
+        assert json.loads(path.read_text()) == {"memory": []}  # persisted empty so later runs see it
 
     def test_finalize_with_no_memory_path_does_not_crash(self) -> None:
-        """When memory_path is None (e.g., the agent was constructed for ad-hoc use),
-        finalize should still work — just no persistence."""
-        agent = _agent(memory_path=None)
+        agent = _react_agent(memory_path=None)
         with patch.object(agent, "llm", return_value=_fake_llm_response("lesson")):
             result = agent.finalize(reward=0.0)
         assert result is not None
         assert agent.memory == ["lesson"]
 
     def test_finalize_reward_in_prompt(self, tmp_path: Path) -> None:
-        """The reward should be interpolated into the reflection prompt."""
-        agent = _agent(memory_path=tmp_path / "lamer.json")
-        captured_prompts: list[Any] = []
+        """The reward is interpolated into the SimpleReflectionProvider prompt."""
+        agent = _react_agent(memory_path=tmp_path / "lamer.json")
+        captured: list[Any] = []
 
-        def _capture(prompt):
-            captured_prompts.append(prompt)
+        def _capture(prompt: Any) -> LLMResponse:
+            captured.append(prompt)
             return _fake_llm_response("reflected")
 
         with patch.object(agent, "llm", side_effect=_capture):
-            agent.finalize(reward=0.7)
-        # The user-content message in the prompt should mention reward=0.7.
-        assert len(captured_prompts) == 1
-        user_msgs = [m for m in captured_prompts[0].messages if m.get("role") == "user"]
-        assert user_msgs
-        assert "0.7" in user_msgs[0]["content"]
+            agent.finalize(reward=0.0)
+        user_msgs = [m for m in captured[0].messages if m.get("role") == "user"]
+        assert user_msgs and "0.0" in user_msgs[0]["content"]
 
 
 # ---------------------------------------------------------------------------
-# Memory injection into prompts
+# Lesson injection — ReAct splices messages; TIR appends to the system prompt
 # ---------------------------------------------------------------------------
 
 
-class TestMemoryInjection:
+class TestReactInjection:
     def test_choose_steps_to_render_without_memory_passes_through(self) -> None:
-        agent = _agent()
+        agent = _react_agent()
         agent.history = [{"role": "user", "content": "goal"}]
         msgs = agent.choose_steps_to_render(agent.history)
-        # No "Lessons from previous attempts" block when memory is empty.
         assert not any(isinstance(m, dict) and "Lessons from previous attempts" in m.get("content", "") for m in msgs)
 
     def test_choose_steps_to_render_injects_memory_after_system(self) -> None:
-        agent = _agent()
+        agent = _react_agent()
         agent.history = [{"role": "user", "content": "goal"}]
-        agent.memory = ["last time I clicked the wrong button"]
+        agent._reflector.memory = ["last time I clicked the wrong button"]
         msgs = agent.choose_steps_to_render(agent.history)
-        # msgs[0] = system; msgs[1] = the memory block; msgs[2] = assistant ack.
-        assert isinstance(msgs[1], dict)
-        assert msgs[1]["role"] == "user"
+        assert isinstance(msgs[1], dict) and msgs[1]["role"] == "user"
         assert "Lessons from previous attempts" in msgs[1]["content"]
         assert "last time I clicked the wrong button" in msgs[1]["content"]
-        assert isinstance(msgs[2], dict)
-        assert msgs[2]["role"] == "assistant"
+        assert isinstance(msgs[2], dict) and msgs[2]["role"] == "assistant"
 
     def test_memory_block_format_includes_attempt_numbers(self) -> None:
-        agent = _agent()
+        agent = _react_agent()
         agent.history = [{"role": "user", "content": "goal"}]
-        agent.memory = ["L1", "L2", "L3"]
-        msgs = agent.choose_steps_to_render(agent.history)
-        block = msgs[1]["content"]
-        assert "Reflection after attempt 1" in block
-        assert "Reflection after attempt 2" in block
-        assert "Reflection after attempt 3" in block
+        agent._reflector.memory = ["L1", "L2", "L3"]
+        block = agent.choose_steps_to_render(agent.history)[1]["content"]
+        assert all(f"Reflection after attempt {i}" in block for i in (1, 2, 3))
 
 
-if __name__ == "__main__":
-    sys.exit(pytest.main([__file__, "-v"]))
+class TestTirInjection:
+    def test_system_prompt_unchanged_without_memory(self) -> None:
+        agent = _tir_agent(system_prompt="BASE PROMPT")
+        msgs = agent._build_prompt_messages()
+        assert msgs[0] == {"role": "system", "content": "BASE PROMPT"}
+
+    def test_lessons_appended_to_system_prompt(self) -> None:
+        agent = _tir_agent(system_prompt="BASE PROMPT")
+        agent._reflector.memory = ["verify before submitting"]
+        system = agent._build_prompt_messages()[0]["content"]
+        assert system.startswith("BASE PROMPT")
+        assert "Lessons from previous attempts" in system
+        assert "verify before submitting" in system
+
+
+# ---------------------------------------------------------------------------
+# lamer_rollout_credit — the meta-RL credit policy (split + terminal-anchored discount)
+# ---------------------------------------------------------------------------
+
+
+class TestLamerRolloutCredit:
+    def test_reflections_earn_full_eventual_outcome(self) -> None:
+        # Reflections at any episode of a successful rollout get the FULL outcome (not discounted).
+        assert lamer_rollout_credit([0.0, 0.0, 1.0], [(0, True), (1, True)], gamma=0.5) == [1.0, 1.0]
+
+    def test_solve_discounted_by_distance_from_success(self) -> None:
+        # Solve attempts: the successful (last) attempt full; earlier ones discounted by gamma**dist.
+        turns = [(0, False), (1, False), (2, False)]  # solve0, solve1, solve2(success)
+        assert lamer_rollout_credit([0.0, 0.0, 1.0], turns, gamma=0.5) == [0.25, 0.5, 1.0]
+
+    def test_recoverable_beats_completely_wrong(self) -> None:
+        # The same failed cold attempt scores gamma**dist>0 if the rollout recovers, 0 if it never does.
+        recoverable = lamer_rollout_credit([0.0, 1.0], [(0, False)], gamma=0.5)[0]
+        hopeless = lamer_rollout_credit([0.0, 0.0], [(0, False)], gamma=0.5)[0]
+        assert recoverable == 0.5 and hopeless == 0.0 and recoverable > hopeless
+
+    def test_first_try_beats_recoverable_when_gamma_lt_1(self) -> None:
+        first_try = lamer_rollout_credit([1.0], [(0, False)], gamma=0.5)[0]  # 1 episode, solved
+        recoverable = lamer_rollout_credit([0.0, 1.0], [(0, False)], gamma=0.5)[0]
+        assert first_try == 1.0 and recoverable == 0.5 and first_try > recoverable
+
+    def test_gamma_1_ties_recoverable_and_first_try(self) -> None:
+        first_try = lamer_rollout_credit([1.0], [(0, False)], gamma=1.0)[0]
+        recoverable = lamer_rollout_credit([0.0, 1.0], [(0, False)], gamma=1.0)[0]
+        assert first_try == recoverable == 1.0  # no separation at gamma=1
+
+    def test_all_fail_zero_credit(self) -> None:
+        turns = [(0, True), (0, False), (1, True), (1, False)]
+        assert lamer_rollout_credit([0.0, 0.0], turns, gamma=0.5) == [0.0, 0.0, 0.0, 0.0]
+
+    def test_empty_episode_rewards(self) -> None:
+        assert lamer_rollout_credit([], [], gamma=1.0) == []
+
+
+class TestEpisodesToSuccess:
+    def test_first_try_success(self) -> None:
+        assert episodes_to_success([1.0]) == 1
+
+    def test_solved_on_third_attempt(self) -> None:
+        assert episodes_to_success([0.0, 0.0, 1.0]) == 3
+
+    def test_never_solved_is_zero(self) -> None:
+        assert episodes_to_success([0.0, 0.0]) == 0
+
+    def test_empty_is_zero(self) -> None:
+        assert episodes_to_success([]) == 0
