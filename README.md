@@ -10,6 +10,8 @@ Open source harness for building and evaluating AI agents using the [CUBE Standa
 > **cube-harness is in active development (alpha).** Interfaces may change. We welcome early adopters and contributors who want to shape the framework, not just use it.
 > See our [Roadmap](ROADMAP.md) and [Contributing Guide](CONTRIBUTING.md).
 >
+> **Want to change the harness itself?** Start with [Changing cube-harness](CONTRIBUTING.md#changing-cube-harness) and the project [Design Philosophy](https://the-ai-alliance.github.io/cube-standard/design-philosophy); the `/gatekeep-rfc` skill lets you check your own draft before anyone else reads it.
+>
 > **Have a benchmark to contribute?** [Fill out this short form](https://docs.google.com/forms/d/e/1FAIpQLSddMFyRXZJPpD0I2K27OEmIPUpj57w--u2NuMscrjNlkqy8rQ/viewform) — no commitment required. Want to go deeper? [Apply to join the core team](https://forms.gle/JFiBi4ynfVLMghAH8).
 
 <!-- [Published Documentation](https://the-ai-alliance.github.io/cube-harness/) -->

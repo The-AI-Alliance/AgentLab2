@@ -2,6 +2,14 @@
 
 For contribution philosophy, DCO requirements, RFC process, and community guidelines, see the canonical [CONTRIBUTING.md in cube-standard](https://github.com/The-AI-Alliance/cube-standard/blob/main/CONTRIBUTING.md).
 
+## Changing cube-harness
+
+Before proposing a change to a shared surface (`core.py` / `agent.py` / `llm.py`, the `openspec/specs/`, or any cross-vertical API), read the project-wide [Design Philosophy](https://the-ai-alliance.github.io/cube-standard/design-philosophy) and the harness [Constitution](.claude/rules/constitution.md) (the 5 pillars). Most "change the harness" needs are better served by your own recipe, agent/infra config, or a new use-case — not a shared-surface change.
+
+- **Check yourself first with `/gatekeep-rfc`** (Claude Code) — run it locally and iteratively on your draft. It separates the real need from the mechanism, leads with the escape hatch that fits, and points you at the smallest version before anyone else reads it. Converge locally before opening a PR.
+- **A need that requires changing a cube-standard contract** (`Task` / `Benchmark` / `Tool` / `Action` / `Observation`) goes **upstream first** — open an `openspec/changes/` proposal in cube-standard (run its `/gatekeep-rfc` there); the harness change, if any, follows once the contract lands. cube-harness *consumes* those contracts, it doesn't extend them.
+- **Otherwise**, breaking changes get an `openspec/changes/<name>/` proposal (below); additive, backward-compatible changes just keep the living spec accurate.
+
 ## OpenSpec — how we manage contracts
 
 We follow the [OpenSpec](https://github.com/Fission-AI/OpenSpec) methodology. Each layer of

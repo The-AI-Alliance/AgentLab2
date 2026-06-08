@@ -17,6 +17,23 @@ It does NOT define the task/benchmark/tool protocol — that's cube-standard. If
 tempted to change base class signatures (`Task.step`, `Benchmark.setup`, etc.), you're
 in the wrong repo; go to cube-standard and start with an openspec change proposal.
 
+## Routing contributors
+
+Point people to the right place instead of answering ad hoc:
+
+- **Wanting to change the harness** ("can we add a field / change this API?") → the
+  project-wide [Design Philosophy](https://the-ai-alliance.github.io/cube-standard/design-philosophy)
+  (universal: lean, additive-isn't-free, friction-not-a-wall, escape hatches) + the
+  [Constitution](.claude/rules/constitution.md) (the 5 pillars), then
+  [CONTRIBUTING.md § Changing cube-harness](CONTRIBUTING.md#changing-cube-harness). Triage
+  an actual RFC with the `/gatekeep-rfc` skill
+  ([`.claude/skills/gatekeep-rfc/`](.claude/skills/gatekeep-rfc)).
+- **A need that touches a cube-standard contract** (`Task`/`Benchmark`/`Tool`/`Action`/
+  `Observation`) → **upstream**: route them to cube-standard's `/gatekeep-rfc` and an
+  `openspec/changes/` proposal *there* first; the harness change follows.
+- Default to the **smaller change**: a recipe, an agent/infra config, or a new use-case —
+  not new shared surface.
+
 ## Package layout
 
 ```
