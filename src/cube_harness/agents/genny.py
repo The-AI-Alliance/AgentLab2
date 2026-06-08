@@ -29,7 +29,7 @@ is a valid prefix of the next step, which starts the same way and appends one mo
 
 import json
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 if TYPE_CHECKING:
     from cube_harness.streamer import EventStreamer
@@ -179,28 +179,30 @@ class GennyConfig(AgentConfig):
     # Observation format for tool results (role="tool" messages).
     # "raw"        = send content unchanged (default).
     # "output_tag" = wrap content in <output>...</output>, matching mini-swe-agent format.
-    obs_format: str = "raw"
+    obs_format: Literal["raw", "output_tag"] = "raw"  # any other value was silently treated as "raw"
 
     # Context compaction — triggered when accumulated history exceeds this char threshold.
     # For flat_history=True: compacts self.history into a summary injected into the system message.
     # For enable_summarize=True (flat_history=False): compacts self.summaries into one entry.
     # None = disabled (default).
-    compact_threshold_chars: int | None = None
+    compact_threshold_chars: Annotated[int, Field(gt=0)] | None = None
     compact_prompt: str = _DEFAULT_COMPACT_PROMPT
 
     # Misc
-    max_obs_chars: int | None = None  # None = no truncation
+    # None = no truncation. Must be > 0: 0 truncates every observation to just
+    # "… [truncated]", silently blinding the agent on every step.
+    max_obs_chars: Annotated[int, Field(gt=0)] | None = None
     # How often to inject the framework `Budget` summary into the prompt
     # ("budget used: agent_steps 34/150 (23%), cost $1.20/$5.00 (24%), …").
     # The actual limits live on `cube_harness.budget.Budget` constructed by
     # Episode (max_agent_steps, max_cost_usd, max_prompt_tokens, …); Genny just
     # decides when to display the summary so the LLM can plan against
     # what's left. 0 disables injection entirely.
-    display_budget_every_k: int = 5
+    display_budget_every_k: Annotated[int, Field(ge=0)] = 5
     # Retry budget when the model returns no tool calls. On each retry the empty response
     # and a correction user message are appended; if still no tool calls after all retries,
     # a STOP action is returned. 0 = no retry (preserves current behavior).
-    max_format_errors: int = 0
+    max_format_errors: Annotated[int, Field(ge=0)] = 0
 
     @property
     def agent_name(self) -> str:

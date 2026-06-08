@@ -4,7 +4,7 @@ import pprint
 import time
 from datetime import datetime
 from functools import partial
-from typing import TYPE_CHECKING, Any, Callable, List, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Callable, List, Literal
 from uuid import uuid4
 
 if TYPE_CHECKING:
@@ -94,7 +94,7 @@ class Prompt(TypedBaseModel):
 class LLMConfig(ValidatedConfig):
     """Thin LLM wrapper around LiteLLM completion API."""
 
-    model_name: str
+    model_name: Annotated[str, Field(min_length=1)]  # empty = a typo that fails only at first API call
     temperature: float = 1.0
     max_tokens: int = 128000
     max_completion_tokens: int = 8192

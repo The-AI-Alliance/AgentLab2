@@ -4,7 +4,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Self
+from typing import Annotated, Self
 from uuid import uuid4
 
 from cube.benchmark import Benchmark, BenchmarkConfig
@@ -74,14 +74,14 @@ class Experiment(TypedBaseModel):
     benchmark_config: SerializeAsAny[BenchmarkConfig]
     infra: SerializeAsAny[InfraConfig] | None = None
     resume: bool = False
-    max_steps: int = MAX_STEPS
+    max_steps: Annotated[int, Field(gt=0)] = MAX_STEPS
     # Per-episode dollar cap on cumulative LLM cost. None = no cap.
     # Episode threads this into `Budget.max_cost_usd`; EventStreamer bumps
     # `Budget.cost_usd` from `LLMCall.usage.cost`; `MonitoredTool` raises
     # `BudgetExceeded` when the agent runs over. Agents (e.g. Genny) also
     # read it via `recorder.budget` for graceful self-stop.
-    max_cost_usd: float | None = None
-    max_retries: int = 3
+    max_cost_usd: Annotated[float, Field(gt=0)] | None = None
+    max_retries: Annotated[int, Field(ge=0)] = 3
     git_cwd: str | None = None
     debug_limit: int | None = None
     """If set, the runner truncates the task list to the first N entries.
