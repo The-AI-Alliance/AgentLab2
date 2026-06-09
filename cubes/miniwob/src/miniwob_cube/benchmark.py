@@ -33,6 +33,10 @@ class MiniWobBenchmark(Benchmark["MiniWobBenchmarkConfig"]):
         self._stdout_file = open(tmp_dir / "miniwob_server_stdout.log", "w")
         self._stderr_file = open(tmp_dir / "miniwob_server_stderr.log", "w")
         logger.info(f"Starting MiniWob server at port {cfg.port} serving from {cfg.html_path}...")
+
+        # MiniWoB rollout state lives in each browser page/context, not in this Python
+        # static file server. The server only serves HTML/JS/CSS assets, so a single
+        # job-owned server can be shared by many rollout processes on the same node.
         self._server_process = subprocess.Popen(
             [sys.executable, "-m", "http.server", str(cfg.port)],
             cwd=cfg.html_path,
@@ -98,6 +102,7 @@ class MiniWobBenchmarkConfig(BenchmarkConfig[MiniWobTaskMetadata]):
     benchmark_class: ClassVar[type[Benchmark]] = MiniWobBenchmark
 
     html_path: str = files("miniwob").joinpath("html").as_posix()  # type: ignore
+    # Shared job-owned MiniWoB server port. Must be free on the node.
     port: int = 8000
     remove_human_display: bool = True
     episode_max_time: int = 1000000
