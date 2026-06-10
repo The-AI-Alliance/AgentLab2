@@ -18,6 +18,7 @@ from typing import Any
 
 from cube_harness.episode_status import EpisodeStatus, Status
 from cube_harness.eval_log import EvalLog
+from cube_harness.reproducibility import samples
 from cube_harness.results import ExperimentResult
 
 JOURNAL_SCHEMA_VERSION = "1.0"
@@ -216,3 +217,59 @@ def build_journal_record(
         "results": results_dict,
     }
     return record
+
+
+@dataclass
+class JournalSubmission:
+    """A registry submission: the small summary record + its companion bundle.
+
+    Both files land under ``results/<cube-id>/`` — ``summary_filename`` (the
+    human-reviewable, table-driving record, with a ``detailed_results`` pointer)
+    and ``bundle_filename`` (the gzipped per-task samples the verifier re-derives
+    the summary from).
+    """
+
+    record: dict[str, Any]
+    bundle: bytes
+    summary_filename: str
+    bundle_filename: str
+
+
+def build_journal_submission(
+    experiment_dir: Path,
+    *,
+    submitter: str,
+    cube_id: str | None = None,
+) -> JournalSubmission:
+    """Build the full registry submission: summary record + per-task bundle.
+
+    The summary gains a ``detailed_results`` pointer (file / format / sha256 /
+    n_samples). Fails fast if the summary's aggregate doesn't match the bundle —
+    the same consistency invariant the registry verifier re-checks in CI, caught
+    locally before anything is published.
+    """
+    record = build_journal_record(experiment_dir, submitter=submitter, cube_id=cube_id)
+    bundle = samples.build_samples_bundle(experiment_dir)
+    agg = samples.aggregate_from_samples(samples.iter_samples(bundle))
+
+    summary_avg = record["results"]["avg_score"]
+    if agg["n_scored"] and agg["avg_score"] != summary_avg:
+        raise ValueError(
+            f"summary/bundle mismatch: results.avg_score={summary_avg} but "
+            f"bundle recomputes {agg['avg_score']} over {agg['n_scored']} scored samples"
+        )
+
+    stem = sanitize_filename(record["evaluation_id"])
+    bundle_filename = f"{stem}{samples.SAMPLES_SUFFIX}"
+    record["detailed_results"] = {
+        "file": bundle_filename,
+        "format": samples.SAMPLES_FORMAT,
+        "sha256": samples.sha256_hex(bundle),
+        "n_samples": agg["n_samples"],
+    }
+    return JournalSubmission(
+        record=record,
+        bundle=bundle,
+        summary_filename=f"{stem}.json",
+        bundle_filename=bundle_filename,
+    )

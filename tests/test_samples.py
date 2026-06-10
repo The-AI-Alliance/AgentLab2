@@ -71,3 +71,27 @@ class TestAggregateFromSamples:
         rec = build_journal_record(tmp_path, submitter="tester")
         assert agg["avg_score"] == rec["results"]["avg_score"]
         assert agg["std_err"] == rec["results"]["std_err"]
+
+
+class TestJournalSubmission:
+    def test_summary_points_at_paired_bundle(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility.journal import build_journal_submission  # noqa: PLC0415
+
+        _save_eval_log(tmp_path, [1.0, 0.0, 1.0])
+        sub = build_journal_submission(tmp_path, submitter="tester")
+        # Paired filenames share a stem; summary references the bundle by name + hash.
+        assert sub.summary_filename.endswith(".json")
+        assert sub.bundle_filename == sub.summary_filename[: -len(".json")] + samples.SAMPLES_SUFFIX
+        dr = sub.record["detailed_results"]
+        assert dr["file"] == sub.bundle_filename
+        assert dr["format"] == "jsonl.gz"
+        assert dr["n_samples"] == 3
+        assert dr["sha256"] == samples.sha256_hex(sub.bundle)
+
+    def test_bundle_re_derives_the_summary(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility.journal import build_journal_submission  # noqa: PLC0415
+
+        _save_eval_log(tmp_path, [1.0, 0.0, 1.0, 1.0])
+        sub = build_journal_submission(tmp_path, submitter="tester")
+        agg = samples.aggregate_from_samples(samples.iter_samples(sub.bundle))
+        assert agg["avg_score"] == sub.record["results"]["avg_score"]
