@@ -41,6 +41,7 @@ from cube.benchmark import BenchmarkConfig
 from cube.core import TypedBaseModel
 from pydantic import Field
 
+from cube_harness.storage import ARCHIVED_MARKER as _ARCHIVED_MARKER
 from cube_harness.storage import EPISODES_DIR as _EPISODES_DIR
 
 if TYPE_CHECKING:
@@ -840,7 +841,14 @@ class EvalLog(TypedBaseModel):
 
     @classmethod
     def load(cls, output_dir: Path) -> "EvalLog":
-        """Load experiment_record.json and all per-trajectory episode_record.json files."""
+        """Load experiment_record.json and all per-trajectory episode_record.json files.
+
+        Archived episode dirs (the ``ARCHIVED_MARKER`` suffix a retry leaves behind
+        via ``storage.archive_episode``) are skipped — they hold the *superseded*
+        attempt's record, and counting both attempts would double-count the task in
+        every consumer (journal/EEE avg_score, samples bundle). Mirrors
+        ``ExperimentResult.iter_episode_statuses``.
+        """
         output_dir = Path(output_dir)
         experiment = ExperimentRecord.model_validate_json((output_dir / EXPERIMENT_RECORD_FILENAME).read_text())
         episodes: list[EpisodeRecord] = []
@@ -848,7 +856,7 @@ class EvalLog(TypedBaseModel):
         if episodes_dir.exists():
             for ep_dir in sorted(episodes_dir.iterdir()):
                 record_path = ep_dir / EPISODE_RECORD_FILENAME
-                if ep_dir.is_dir() and record_path.exists():
+                if ep_dir.is_dir() and _ARCHIVED_MARKER not in ep_dir.name and record_path.exists():
                     episodes.append(EpisodeRecord.model_validate_json(record_path.read_text()))
         return cls(experiment=experiment, episodes=episodes)
 

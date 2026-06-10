@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -186,6 +187,12 @@ class TestBuildJournalRecord:
         record = build_journal_record(populated_exp_dir, submitter="alacoste")
         assert record["evaluation_id"] == "alacoste/20260404_195953_genny_miniwob"
 
+    def test_submitter_with_spaces_rejected_locally(self, populated_exp_dir: Path) -> None:
+        # A git user.name like "Ada Lovelace" fails the registry's evaluation_id
+        # pattern — must be caught before a PR is opened, not by registry CI.
+        with pytest.raises(ValueError, match="--submitter"):
+            build_journal_record(populated_exp_dir, submitter="Ada Lovelace")
+
     def test_schema_version_pinned(self, populated_exp_dir: Path) -> None:
         record = build_journal_record(populated_exp_dir, submitter="alacoste")
         assert record["schema_version"] == JOURNAL_SCHEMA_VERSION
@@ -231,35 +238,46 @@ class TestBuildEEERecord:
         assert extras["cube_harness_git_commit"] == "f" * 40
         assert extras["cube_standard_git_commit"] == "8" * 40
 
-    def test_model_developer_extracted_from_provider_prefix(self, populated_exp_dir: Path) -> None:
+    def test_developer_and_platform_split(self, populated_exp_dir: Path) -> None:
+        # azure/gpt-* is an OpenAI model served by Azure — EEE's schema keeps
+        # those in separate fields (developer vs inference_platform).
         record = build_eee_record(populated_exp_dir)
-        assert record["model_info"]["developer"] == "Azure"
+        assert record["model_info"]["developer"] == "openai"
+        assert record["model_info"]["inference_platform"] == "azure"
+
+    def test_evaluation_id_follows_eee_convention(self, populated_exp_dir: Path) -> None:
+        # eval_name/model_id/timestamp, model slashes flattened to "_" — the
+        # shape used by records in the live EEE datastore. The harness run
+        # name moves to source_metadata.additional_details.
+        record = build_eee_record(populated_exp_dir)
+        assert record["evaluation_id"] == "miniwob/azure_gpt-5.4-mini/1748560000.0"
+        extras = record["source_metadata"]["additional_details"]
+        assert extras["cube_harness_run_id"] == "20260404_195953_genny_miniwob"
 
 
 class TestProviderPrefixMapping:
-    """Coverage for the explicit prefix → display-name table (W4)."""
+    """Coverage for the (developer, inference_platform) slug extraction (W4)."""
 
     @pytest.mark.parametrize(
         "llm_model,expected",
         [
-            ("openai/gpt-4o", "OpenAI"),  # was "Openai"
-            ("azure/gpt-5.4-mini", "Azure"),
-            ("anthropic/claude-opus-4-7", "Anthropic"),
-            ("vertex_ai/gemini-2.0", "Google Vertex AI"),  # was "Vertex_Ai"
-            ("huggingface/llama", "HuggingFace"),  # was "Huggingface"
-            ("bedrock/anthropic.claude-3-5", "AWS Bedrock"),  # was "Bedrock"
-            ("openrouter/anthropic/claude-3-5-sonnet", "Anthropic"),  # 2-deep routing
-            ("together_ai/llama", "Together AI"),
-            ("groq/llama-3-70b", "Groq"),
-            ("nonexistent_provider/model", "nonexistent_provider"),  # fallback
-            ("", ""),
-            ("no-slash-model", ""),
+            ("openai/gpt-4o", ("openai", "openai")),
+            ("azure/gpt-5.4-mini", ("openai", "azure")),  # host implies developer
+            ("anthropic/claude-opus-4-7", ("anthropic", "anthropic")),
+            ("vertex_ai/gemini-2.0", ("google", "vertex_ai")),  # alias
+            ("gemini/gemini-2.5-pro", ("google", "gemini")),  # alias
+            ("openrouter/anthropic/claude-3-5-sonnet", ("anthropic", "openrouter")),  # routed
+            ("together_ai/meta-llama/Llama-3-70b", ("meta-llama", "together_ai")),  # routed
+            ("bedrock/anthropic.claude-3-5", ("bedrock", "bedrock")),  # best-effort passthrough
+            ("nonexistent_provider/model", ("nonexistent_provider", "nonexistent_provider")),
+            ("", ("", "")),
+            ("no-slash-model", ("", "")),
         ],
     )
-    def test_llm_developer_mapping(self, llm_model: str, expected: str) -> None:
-        from cube_harness.reproducibility.eee import _llm_developer
+    def test_developer_and_platform_mapping(self, llm_model: str, expected: tuple[str, str]) -> None:
+        from cube_harness.reproducibility.eee import _developer_and_platform
 
-        assert _llm_developer(llm_model) == expected
+        assert _developer_and_platform(llm_model) == expected
 
 
 class TestEEEEvaluationIdNoneSafety:
@@ -287,3 +305,34 @@ class TestEEEEvaluationIdNoneSafety:
         assert result["score_details"]["score"] == pytest.approx(0.25)
         assert "uncertainty" in result["score_details"]
         assert result["score_details"]["uncertainty"]["num_samples"] == 4
+
+
+class TestArchivedAttemptsExcluded:
+    """A retry archives the prior attempt's episode dir (``storage.archive_episode``)
+    with its episode_record.json still inside. EvalLog.load must skip those dirs,
+    or every consumer (journal/EEE avg_score, samples bundle) double-counts the task."""
+
+    def _archive_first_attempt(self, exp_dir: Path, task_id: str, new_score: float) -> None:
+        """Simulate _pre_claim: archive the live attempt, then write a fresh one."""
+        ep_dir = exp_dir / EPISODES_DIR / f"{task_id}_ep0"
+        shutil.copytree(ep_dir, ep_dir.parent / f"{ep_dir.name}.archived_1749000000.0")
+        retry = _ep_record(task_id, new_score)
+        (ep_dir / "episode_record.json").write_text(retry.model_dump_json(indent=2))
+
+    def test_load_skips_archived_episode_dirs(self, populated_exp_dir: Path) -> None:
+        self._archive_first_attempt(populated_exp_dir, "t_success", new_score=0.0)
+        log = EvalLog.load(populated_exp_dir)
+        assert len(log.episodes) == 4  # one per live attempt, archived copy ignored
+        assert sorted(ep.sample_id for ep in log.episodes) == [
+            "t_failure",
+            "t_max_steps",
+            "t_success",
+            "t_system_error",
+        ]
+
+    def test_journal_score_reflects_only_live_attempts(self, populated_exp_dir: Path) -> None:
+        # First attempt of t_success scored 1.0; the retry scored 0.0. Only the
+        # retry may count: avg over {0.0, 0.0, 0.0, 0.0} — not 1/5 (stale mixed in).
+        self._archive_first_attempt(populated_exp_dir, "t_success", new_score=0.0)
+        record = build_journal_record(populated_exp_dir, submitter="alacoste")
+        assert record["results"]["avg_score"] == 0.0

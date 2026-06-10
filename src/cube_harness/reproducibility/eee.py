@@ -18,13 +18,32 @@ This module is pure — no I/O beyond the experiment directory.
 
 from __future__ import annotations
 
+import importlib.resources
+import json
 import statistics
 from pathlib import Path
 from typing import Any
 
 from cube_harness.eval_log import EvalLog
 
-EEE_SCHEMA_VERSION = "0.2.2"
+
+def _installed_schema_version() -> str | None:
+    """The ``version`` embedded in the installed ``every-eval-ever`` schema.
+
+    The record's ``schema_version`` must state the schema it actually conforms
+    to — and validation (smoke + submit script) runs against whatever package is
+    installed, so a hard-coded constant drifts silently when that package is
+    bumped. None when the package isn't installed (it's an optional dep).
+    """
+    try:
+        text = importlib.resources.files("every_eval_ever").joinpath("schemas/eval.schema.json").read_text()
+        version = json.loads(text).get("version")
+        return version if isinstance(version, str) else None
+    except Exception:
+        return None
+
+
+EEE_SCHEMA_VERSION = _installed_schema_version() or "0.2.2"
 
 
 def _to_string_kvs(d: dict[str, Any]) -> dict[str, str]:
@@ -32,49 +51,46 @@ def _to_string_kvs(d: dict[str, Any]) -> dict[str, str]:
     return {k: str(v) for k, v in d.items() if v is not None}
 
 
-# Curated provider-prefix → display-name mapping. `str.title()` mangles
-# common prefixes (`openai` → `Openai`, `vertex_ai` → `Vertex_Ai`,
-# `huggingface` → `Huggingface`) and doesn't model multi-segment prefixes
-# where the model's actual developer is one level deeper (e.g.
-# `openrouter/anthropic/claude-*` is an Anthropic model served via
-# OpenRouter). Keep the map small + explicit; fall back to the prefix
-# verbatim when an unknown provider appears.
-_PROVIDER_DISPLAY_NAME: dict[str, str] = {
-    "openai": "OpenAI",
-    "azure": "Azure",
-    "anthropic": "Anthropic",
-    "google": "Google",
-    "vertex_ai": "Google Vertex AI",
-    "gemini": "Google",
-    "mistral": "Mistral",
-    "cohere": "Cohere",
-    "huggingface": "HuggingFace",
-    "bedrock": "AWS Bedrock",
-    "together_ai": "Together AI",
-    "fireworks_ai": "Fireworks AI",
-    "groq": "Groq",
-    "replicate": "Replicate",
-    "ollama": "Ollama",
+# EEE's schema splits who *made* the model (``model_info.developer``) from
+# whose API *served* it (``model_info.inference_platform``), and the live
+# datastore keys directories by lowercase developer slugs
+# (``data/GAIA/anthropic/…``, ``data/IFEval/meta-llama/…``). LiteLLM ids
+# conflate the two in the prefix, so map explicitly:
+#   anthropic/claude-*            → developer=anthropic,  platform=anthropic
+#   azure/gpt-*                   → developer=openai,     platform=azure
+#   openrouter/anthropic/claude-* → developer=anthropic,  platform=openrouter
+#   together_ai/meta-llama/L-3-*  → developer=meta-llama, platform=together_ai
+_HOST_IMPLIES_DEVELOPER: dict[str, str] = {
+    # LiteLLM's `azure/` prefix is Azure OpenAI — the models are OpenAI's.
+    "azure": "openai",
+}
+# Developer-owned API prefixes whose slug differs from the developer's
+# canonical (datastore) name.
+_DEVELOPER_ALIASES: dict[str, str] = {
+    "gemini": "google",
+    "vertex_ai": "google",
 }
 
 
-def _llm_developer(llm_model: str | None) -> str:
-    """Best-effort extraction of the model developer from a LiteLLM-style id.
+def _developer_and_platform(llm_model: str | None) -> tuple[str, str]:
+    """Best-effort ``(developer, inference_platform)`` slugs from a LiteLLM id.
 
-    Handles the common single-prefix case (``openai/gpt-4o`` → ``OpenAI``)
-    and the routed-provider case (``openrouter/anthropic/claude-3-5`` →
-    ``Anthropic``). Falls back to the verbatim prefix when neither segment
-    matches a known provider, and to ``""`` when no prefix is present.
+    Returns ``("", "")`` when no provider prefix is present. Unknown prefixes
+    pass through lowercased rather than being dropped — a wrong-but-present
+    slug is reviewable in the EEE PR; an empty one is silently lost.
     """
     if not llm_model or "/" not in llm_model:
-        return ""
+        return "", ""
     segments = llm_model.split("/")
-    # Routed prefixes (openrouter, bedrock proxy, etc.) put the actual
-    # developer in segment 1; check that first, then fall back to segment 0.
-    if len(segments) >= 3 and segments[1].lower() in _PROVIDER_DISPLAY_NAME:
-        return _PROVIDER_DISPLAY_NAME[segments[1].lower()]
-    first = segments[0].lower()
-    return _PROVIDER_DISPLAY_NAME.get(first, segments[0])
+    platform = segments[0].lower()
+    if len(segments) >= 3:
+        # Routed provider (openrouter, together_ai, huggingface, …): the
+        # actual developer is the middle segment.
+        developer = segments[1].lower()
+        return _DEVELOPER_ALIASES.get(developer, developer), platform
+    if platform in _HOST_IMPLIES_DEVELOPER:
+        return _HOST_IMPLIES_DEVELOPER[platform], platform
+    return _DEVELOPER_ALIASES.get(platform, platform), platform
 
 
 def build_eee_record(
@@ -112,6 +128,10 @@ def build_eee_record(
 
     provenance = _to_string_kvs(
         {
+            # The harness run name — no longer part of evaluation_id (which
+            # follows EEE's eval/model/timestamp convention), so keep it here
+            # to link the record back to the experiment dir.
+            "cube_harness_run_id": exp.evaluation_id,
             "cube_harness_version": exp.eval_library.version,
             "cube_harness_git_commit": exp.agent.git_commit,
             "cube_harness_git_remote_url": exp.agent.git_remote_url,
@@ -137,19 +157,24 @@ def build_eee_record(
         "name": exp.agent.llm_model or "",
         "id": exp.agent.llm_model or "",
     }
-    developer = _llm_developer(exp.agent.llm_model)
+    developer, inference_platform = _developer_and_platform(exp.agent.llm_model)
     if developer:
         model_info["developer"] = developer
+    if inference_platform:
+        model_info["inference_platform"] = inference_platform
 
     # `exp.agent.llm_model` can be None when the harness couldn't infer the
     # model name from the agent config. Stringify defensively so the EEE id
     # doesn't end up as "miniwob/None/…" (W3) — "unknown" is a clearer signal
     # to a reader and collides less catastrophically than the literal "None".
-    llm_model_segment = exp.agent.llm_model or "unknown"
+    # EEE's id convention is ``eval_name/model_id/timestamp`` with the model's
+    # slashes flattened to ``_`` (e.g. ``GAIA/anthropic_claude-3-7-sonnet-
+    # 20250219/1744624699.0`` in the live datastore).
+    llm_model_segment = (exp.agent.llm_model or "unknown").replace("/", "_")
 
     record: dict[str, Any] = {
         "schema_version": EEE_SCHEMA_VERSION,
-        "evaluation_id": f"{cube_id}/{llm_model_segment}/{exp.evaluation_id}",
+        "evaluation_id": f"{cube_id}/{llm_model_segment}/{exp.evaluation_timestamp}",
         "retrieved_timestamp": str(int(exp.evaluation_timestamp)),
         "evaluation_timestamp": str(int(exp.evaluation_timestamp)),
         "source_metadata": source_metadata,

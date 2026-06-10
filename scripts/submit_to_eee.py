@@ -32,10 +32,15 @@ DEFAULT_EEE_DATASET = "evaleval/EEE_datastore"
 
 
 def _eee_path(out_dir: Path, record: dict) -> Path:
-    """Render the EEE-expected file path ``data/{benchmark}/{developer}/{model}/{uuid}.json``."""
+    """Render the EEE datastore path ``data/{benchmark}/{developer}/{model}/{uuid}.json``.
+
+    Mirrors the live datastore's layout: lowercase developer slug, model
+    directory without the provider prefix — e.g.
+    ``data/GAIA/anthropic/claude-3-7-sonnet-20250219/<uuid>.json``.
+    """
     benchmark = record["evaluation_results"][0]["evaluation_name"].split("[", 1)[0]
     developer = record["model_info"].get("developer") or "unknown"
-    model = record["model_info"]["id"].replace("/", "__") or "unknown"
+    model = record["model_info"]["id"].split("/")[-1] or "unknown"
     target_dir = out_dir / "data" / benchmark / developer / model
     target_dir.mkdir(parents=True, exist_ok=True)
     return target_dir / f"{uuid.uuid4().hex}.json"

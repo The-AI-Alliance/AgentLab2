@@ -7,6 +7,8 @@ import json
 import statistics
 from pathlib import Path
 
+import pytest
+
 from cube_harness.eval_log import EvalLog
 from cube_harness.reproducibility import samples
 
@@ -95,3 +97,25 @@ class TestJournalSubmission:
         sub = build_journal_submission(tmp_path, submitter="tester")
         agg = samples.aggregate_from_samples(samples.iter_samples(sub.bundle))
         assert agg["avg_score"] == sub.record["results"]["avg_score"]
+
+    def test_duplicate_sample_ids_rejected(self, tmp_path: Path) -> None:
+        # Two episode records for the same task (e.g. a stale retry attempt that
+        # leaked into the episode set) must refuse to build — averaging both
+        # silently misreports the score and no downstream gate can catch it.
+        from cube_harness.reproducibility.journal import build_journal_submission  # noqa: PLC0415
+
+        exp = _exp_record(n_tasks=2)
+        episodes = [_ep_record("t0", 1.0), _ep_record("t1", 0.0), _ep_record("t0", 0.0)]
+        episodes[2].trajectory_id = "t0_ep1"  # distinct dir, same task
+        EvalLog(experiment=exp, episodes=episodes).save(tmp_path)
+        with pytest.raises(ValueError, match="duplicate sample_id"):
+            build_journal_submission(tmp_path, submitter="tester")
+
+    def test_more_samples_than_tasks_rejected(self, tmp_path: Path) -> None:
+        from cube_harness.reproducibility.journal import build_journal_submission  # noqa: PLC0415
+
+        exp = _exp_record(n_tasks=2)
+        episodes = [_ep_record(f"t{i}", 1.0) for i in range(3)]
+        EvalLog(experiment=exp, episodes=episodes).save(tmp_path)
+        with pytest.raises(ValueError, match="outnumber"):
+            build_journal_submission(tmp_path, submitter="tester")

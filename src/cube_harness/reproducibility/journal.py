@@ -11,6 +11,7 @@ This module is pure — no I/O beyond reading the experiment directory.
 from __future__ import annotations
 
 import json
+import re
 import statistics
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,11 @@ JOURNAL_SCHEMA_VERSION = "1.0"
 # Slash → __ when sanitizing evaluation_id into a filename stem (matches
 # cube-registry's results_check.py).
 _FILENAME_REPLACE = str.maketrans({"/": "__"})
+
+# Mirrors results-schema.json's evaluation_id pattern. Checked locally so a bad
+# submitter handle (e.g. a git user.name with spaces) fails before a PR is
+# opened, not in registry CI after.
+_EVALUATION_ID_RE = re.compile(r"^[A-Za-z0-9_./-]{1,128}$")
 
 
 @dataclass
@@ -202,9 +208,17 @@ def build_journal_record(
     if max_steps is not None:
         results_dict["max_steps_per_episode"] = max_steps
 
+    evaluation_id = f"{submitter}/{exp.evaluation_id}"
+    if not _EVALUATION_ID_RE.match(evaluation_id):
+        raise ValueError(
+            f"evaluation_id {evaluation_id!r} does not match the registry's "
+            f"{_EVALUATION_ID_RE.pattern!r} pattern — pass --submitter with a plain "
+            "GitHub handle (no spaces or special characters)"
+        )
+
     record: dict[str, Any] = {
         "schema_version": JOURNAL_SCHEMA_VERSION,
-        "evaluation_id": f"{submitter}/{exp.evaluation_id}",
+        "evaluation_id": evaluation_id,
         "evaluation_timestamp": exp.evaluation_timestamp,
         "eval_library": {
             "name": exp.eval_library.name,
@@ -250,7 +264,27 @@ def build_journal_submission(
     """
     record = build_journal_record(experiment_dir, submitter=submitter, cube_id=cube_id)
     bundle = samples.build_samples_bundle(experiment_dir)
-    agg = samples.aggregate_from_samples(samples.iter_samples(bundle))
+    rows = samples.iter_samples(bundle)
+    agg = samples.aggregate_from_samples(rows)
+
+    # A task must contribute exactly one sample. Duplicates mean stale data made
+    # it into the episode records (e.g. an archived retry attempt) — averaging
+    # them silently misreports the score, and no downstream gate can catch it
+    # because the summary and the bundle would be consistently wrong together.
+    sample_ids = [row.get("sample_id") for row in rows]
+    duplicates = sorted({sid for sid in sample_ids if sample_ids.count(sid) > 1})
+    if duplicates:
+        raise ValueError(
+            f"samples bundle has {len(duplicates)} duplicate sample_id(s) "
+            f"({duplicates[:5]}{'…' if len(duplicates) > 5 else ''}) — "
+            "each task must contribute exactly one episode record"
+        )
+    n_tasks = record["benchmark_subset"]["n_tasks"]
+    if len(rows) > n_tasks:
+        raise ValueError(
+            f"samples bundle has {len(rows)} rows but the subset only has {n_tasks} tasks — "
+            "episode records outnumber tasks"
+        )
 
     summary_avg = record["results"]["avg_score"]
     if agg["n_scored"] and agg["avg_score"] != summary_avg:

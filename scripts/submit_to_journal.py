@@ -91,7 +91,23 @@ def _confirm_not_a_leaderboard(*, acknowledged: bool) -> None:
 
 
 def _git_user_handle() -> str:
-    """Best-effort GitHub handle: ``GIT_AUTHOR_NAME`` env > ``git config user.name``."""
+    """Best-effort GitHub handle for the ``evaluation_id`` namespace.
+
+    Tries the *actual* GitHub login first (``gh api user`` — gh is required for
+    ``--auto-pr`` anyway), then ``GIT_AUTHOR_NAME``/``USER`` env, then
+    ``git config user.name``. The last two are heuristics: a user.name like
+    "Ada Lovelace" contains a space and fails the registry's evaluation_id
+    pattern — ``build_journal_record`` rejects it locally with a pointer to
+    ``--submitter``, rather than letting registry CI reject the opened PR.
+    """
+    try:
+        login = subprocess.check_output(
+            ["gh", "api", "user", "--jq", ".login"], text=True, stderr=subprocess.DEVNULL
+        ).strip()
+        if login:
+            return login
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
     env = os.environ.get("GIT_AUTHOR_NAME") or os.environ.get("USER")
     if env:
         return env
@@ -223,7 +239,8 @@ def main(
         str | None,
         typer.Option(
             "--submitter",
-            help="GitHub handle for the evaluation_id namespace (defaults to git config user.name).",
+            help="GitHub handle for the evaluation_id namespace "
+            "(default: gh api user login, then $GIT_AUTHOR_NAME/$USER, then git config user.name).",
         ),
     ] = None,
     cube_id: Annotated[
@@ -306,7 +323,15 @@ def main(
         return
 
     branch = f"results/{record['benchmark_name']}/{sanitize_filename(record['evaluation_id'])}"
-    pr_url = _open_pr([summary_path, bundle_path], record, branch)
+    # Mark in-progress so a crash leaves a retryable 'pending', not a false
+    # 'submitted' — same lifecycle as submit_to_eee.py.
+    submissions.record_pending(experiment_dir, "journal")
+    try:
+        pr_url = _open_pr([summary_path, bundle_path], record, branch)
+    except Exception as e:  # noqa: BLE001 — surface any gh/git failure as a recorded failure
+        submissions.record_failed(experiment_dir, "journal", reason=f"{type(e).__name__}: {e}")
+        typer.echo(f"journal submission failed: {e}", err=True)
+        raise typer.Exit(code=1) from e
     typer.echo(f"PR opened: {pr_url}")
     # Stamp idempotency so a repeat invocation (or the scan script) sees that
     # this experiment has already been submitted to the journal.
