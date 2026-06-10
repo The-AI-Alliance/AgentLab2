@@ -1,0 +1,10 @@
+{
+  "name": "sokoban-cube",
+  "version": "0.1.0",
+  "description": "Procedurally generated Sokoban puzzles on a 6x6 board with 2 boxes. The agent pushes every box onto a goal; boxes can be shoved into corners and become permanently stuck, so the task rewards multi-step planning.",
+  "authors": [],
+  "license": "Apache-2.0",
+  "requirements": {},
+  "num_tasks": 750,
+  "tags": ["puzzle", "planning", "sokoban", "synthetic", "games"]
+}

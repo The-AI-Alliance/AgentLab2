@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from litellm import Message
 
 from cube_harness.agents.lamer import (
@@ -285,6 +286,43 @@ class TestLamerRolloutCredit:
 
     def test_empty_episode_rewards(self) -> None:
         assert lamer_rollout_credit([], [], gamma=1.0) == []
+
+
+class TestLamerForwardCredit:
+    """The LaMer-paper "forward" scheme (Eq. 4 cross-episode return-to-go)."""
+
+    def test_solve_turns_match_outcome_under_sparse(self) -> None:
+        # Sparse single-terminal success: solve-turn credit is identical to the "outcome" scheme.
+        turns = [(0, False), (1, False), (2, False)]
+        forward = lamer_rollout_credit([0.0, 0.0, 1.0], turns, gamma=0.5, scheme="forward")
+        outcome = lamer_rollout_credit([0.0, 0.0, 1.0], turns, gamma=0.5, scheme="outcome")
+        assert forward == outcome == [0.25, 0.5, 1.0]
+
+    def test_reflections_discounted_by_distance_to_success(self) -> None:
+        # The key divergence: reflection after episode e earns the next-episode-onward return R[e+1],
+        # i.e. gamma**(distance to success) — NOT the flat eventual outcome of the "outcome" scheme.
+        turns = [(0, True), (1, True)]  # reflection after ep0, reflection after ep1
+        assert lamer_rollout_credit([0.0, 0.0, 1.0], turns, gamma=0.5, scheme="forward") == [0.5, 1.0]
+
+    def test_coincides_with_outcome_at_gamma_1(self) -> None:
+        turns = [(0, False), (0, True), (1, False), (1, True), (2, False)]
+        rewards = [0.0, 0.0, 1.0]
+        assert lamer_rollout_credit(rewards, turns, gamma=1.0, scheme="forward") == lamer_rollout_credit(
+            rewards, turns, gamma=1.0, scheme="outcome"
+        )
+
+    def test_forward_sums_partial_rewards(self) -> None:
+        # With proportional (non-terminal) rewards, "forward" sums per-episode returns where "outcome"
+        # would collapse to the single max — R[0] = 0.5 + 0.5*(0 + 0.5*1.0) = 0.75.
+        assert lamer_rollout_credit([0.5, 0.0, 1.0], [(0, False)], gamma=0.5, scheme="forward") == [0.75]
+
+    def test_last_episode_reflection_earns_zero(self) -> None:
+        # A reflection after the final episode has no subsequent episode → 0.
+        assert lamer_rollout_credit([0.0, 0.0], [(1, True)], gamma=0.5, scheme="forward") == [0.0]
+
+    def test_unknown_scheme_raises(self) -> None:
+        with pytest.raises(ValueError, match="unknown lamer credit scheme"):
+            lamer_rollout_credit([1.0], [(0, False)], gamma=1.0, scheme="bogus")
 
 
 class TestEpisodesToSuccess:

@@ -237,29 +237,44 @@ def lamer_rollout_credit(
     turns: list[tuple[int, bool]],
     *,
     gamma: float = 1.0,
+    scheme: str = "outcome",
 ) -> list[float]:
     """Per-turn RL reward for a LaMer multi-episode rollout — the meta-RL credit policy.
 
     Pure and framework-agnostic (an RL trainer maps its own training units onto this): ``turns`` is
     one ``(episode_index, is_reflection)`` per training unit, ``episode_rewards`` is the per-episode
-    outcome (index = episode). Returns one reward per turn, in order. Every turn is credited by the
-    rollout's EVENTUAL outcome ``max(episode_rewards)`` (so a wrong-but-recoverable attempt still beats
-    a completely-wrong one, which scores 0), split by turn type:
+    outcome (index = episode). Returns one reward per turn, in order. ``scheme`` selects how reward is
+    spread across turns:
 
-    - a REFLECTION turn earns the full eventual outcome — a reflection that led to success scores it in
-      full (the meta-RL signal);
-    - a SOLVE turn earns the eventual outcome discounted by distance from the terminal episode,
-      ``outcome * gamma**(n - 1 - e)``: the successful (last) attempt gets it in full, an earlier
-      wrong-but-recoverable attempt gets a ``gamma``-discounted positive, a never-recovered attempt
-      gets 0.
+    ``"outcome"`` (default) — every turn is credited by the rollout's EVENTUAL outcome
+    ``max(episode_rewards)`` (so a wrong-but-recoverable attempt still beats a completely-wrong one,
+    which scores 0), split by turn type: a SOLVE turn in episode ``e`` earns
+    ``outcome * gamma**(n - 1 - e)`` (the successful last attempt in full, earlier attempts discounted
+    by distance from the terminal episode), a REFLECTION turn earns the full eventual outcome.
+    ``gamma=1.0`` makes recoverable == first-try. The math LaMer runs use this scheme.
 
-    ``gamma`` (<1) discounts EARLIER solve attempts more, so a first-try success (``gamma**0``) beats a
-    wrong-but-recoverable earlier attempt (``gamma**(>0)``) beats completely-wrong (0); ``gamma=1.0``
-    makes recoverable == first-try (no separation).
+    ``"forward"`` (LaMer paper, Eq. 4) — each turn is credited by the discounted cross-episode
+    return-to-go of its own episode, ``R[e] = r_e + gamma*R[e+1]`` (= Σ_{m>=e} gamma**(m-e) * r_m): a
+    SOLVE turn in episode ``e`` earns ``R[e]`` (its episode's reward plus the ``gamma``-discounted
+    returns of all later episodes); a REFLECTION turn after episode ``e`` earns the next-episode-onward
+    return ``R[e+1]`` ("the reward obtained in the subsequent episodes"), 0 after the last episode.
+    Here ``gamma`` is the paper's γ_traj exploration/exploitation dial. For sparse single-terminal
+    rewards this matches ``"outcome"`` on solve turns and differs only by discounting reflections by
+    their distance to success; at ``gamma=1.0`` the two schemes coincide.
     """
     n = len(episode_rewards)
     if n == 0:
         return [0.0] * len(turns)
+    if scheme == "forward":
+        # forward cross-episode return-to-go per episode: R[e] = r_e + gamma * R[e+1]
+        rtg = [0.0] * n
+        acc = 0.0
+        for e in range(n - 1, -1, -1):
+            acc = episode_rewards[e] + gamma * acc
+            rtg[e] = acc
+        return [(rtg[e + 1] if e + 1 < n else 0.0) if is_reflection else rtg[e] for e, is_reflection in turns]
+    if scheme != "outcome":
+        raise ValueError(f"unknown lamer credit scheme {scheme!r}; expected 'outcome' or 'forward'")
     outcome = max(episode_rewards)
     return [outcome * (1.0 if is_reflection else gamma ** (n - 1 - e)) for e, is_reflection in turns]
 
