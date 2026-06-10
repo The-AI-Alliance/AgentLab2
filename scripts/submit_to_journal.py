@@ -30,7 +30,8 @@ import typer
 
 from cube_harness.reproducibility import (
     JOURNAL_SCHEMA_VERSION,
-    build_journal_record,
+    JournalSubmission,
+    build_journal_submission,
     sanitize_filename,
     submissions,
 )
@@ -101,18 +102,20 @@ def _git_user_handle() -> str:
         return "submitter"
 
 
-def _write_record(record: dict, out_root: Path) -> Path:
-    cube_id = record["benchmark_name"]
-    eid = record["evaluation_id"]
-    target_dir = out_root / "results" / cube_id
+def _write_submission(sub: JournalSubmission, out_root: Path) -> list[Path]:
+    """Write the summary record + its samples bundle under
+    ``<out_root>/results/<cube-id>/``. Returns ``[summary_path, bundle_path]``."""
+    target_dir = out_root / "results" / sub.record["benchmark_name"]
     target_dir.mkdir(parents=True, exist_ok=True)
-    target_path = target_dir / f"{sanitize_filename(eid)}.json"
-    target_path.write_text(json.dumps(record, indent=2) + "\n")
-    return target_path
+    summary_path = target_dir / sub.summary_filename
+    bundle_path = target_dir / sub.bundle_filename
+    summary_path.write_text(json.dumps(sub.record, indent=2) + "\n")
+    bundle_path.write_bytes(sub.bundle)
+    return [summary_path, bundle_path]
 
 
-def _open_pr(record_path: Path, record: dict, branch: str) -> str:
-    """Fork cube-registry, copy *record_path* into the fork, push, gh pr create.
+def _open_pr(files: list[Path], record: dict, branch: str) -> str:
+    """Fork cube-registry, copy *files* into the fork, push, gh pr create.
 
     Uses ``gh repo fork --clone`` so this works for any GitHub user, not just
     members of The-AI-Alliance org. The fork is idempotent — gh detects an
@@ -146,15 +149,15 @@ def _open_pr(record_path: Path, record: dict, branch: str) -> str:
             raise FileNotFoundError(f"expected `gh repo fork` to create {clone_dir}; got {list(Path(tmp).iterdir())}")
 
         subprocess.run(["git", "-C", str(clone_dir), "checkout", "-b", branch], check=True)
-        cube_id = record["benchmark_name"]
-        dst_dir = clone_dir / "results" / cube_id
+        dst_dir = clone_dir / "results" / record["benchmark_name"]
         dst_dir.mkdir(parents=True, exist_ok=True)
-        dst_path = dst_dir / record_path.name
-        shutil.copyfile(record_path, dst_path)
-        subprocess.run(
-            ["git", "-C", str(clone_dir), "add", str(dst_path.relative_to(clone_dir))],
-            check=True,
-        )
+        for src in files:
+            dst_path = dst_dir / src.name
+            shutil.copyfile(src, dst_path)
+            subprocess.run(
+                ["git", "-C", str(clone_dir), "add", str(dst_path.relative_to(clone_dir))],
+                check=True,
+            )
         subprocess.run(
             [
                 "git",
@@ -185,7 +188,10 @@ def _open_pr(record_path: Path, record: dict, branch: str) -> str:
             f"± {record['results']['std_err']:.3f}\n"
             f"- subset: `{record['benchmark_subset']['name']}` "
             f"({record['benchmark_subset']['n_tasks']} tasks)\n"
-            f"- outcomes: {record['results']['outcomes']}\n\n"
+            f"- outcomes: {record['results']['outcomes']}\n"
+            f"- detailed results: `{record['detailed_results']['file']}` "
+            f"({record['detailed_results']['n_samples']} samples, sha256 "
+            f"`{record['detailed_results']['sha256'][:12]}…`)\n\n"
             f"_Submitted via cube-harness `scripts/submit_to_journal.py`._"
         )
         # Target the canonical repo with --repo, and name the head branch as
@@ -278,10 +284,12 @@ def main(
     typer.echo(f"submitter: {submitter}")
     typer.echo(f"experiment_dir: {experiment_dir}")
 
-    record = build_journal_record(experiment_dir, submitter=submitter, cube_id=cube_id)
+    sub = build_journal_submission(experiment_dir, submitter=submitter, cube_id=cube_id)
+    record = sub.record
     assert record["schema_version"] == JOURNAL_SCHEMA_VERSION
-    target_path = _write_record(record, out_dir)
-    typer.echo(f"wrote: {target_path}")
+    summary_path, bundle_path = _write_submission(sub, out_dir)
+    typer.echo(f"wrote: {summary_path}")
+    typer.echo(f"       {bundle_path}  ({len(sub.bundle):,} B, {record['detailed_results']['n_samples']} samples)")
     typer.echo(
         f"  {record['benchmark_name']} v{record['benchmark_version']} · "
         f"{record['agent']['config_type']} / {record['agent']['llm_model']} · "
@@ -292,13 +300,13 @@ def main(
         typer.echo("")
         typer.echo("To submit by hand:")
         typer.echo("  1. Fork https://github.com/The-AI-Alliance/cube-registry and clone it locally.")
-        typer.echo(f"  2. Copy {target_path} into <clone>/results/{record['benchmark_name']}/")
+        typer.echo(f"  2. Copy both files into <clone>/results/{record['benchmark_name']}/")
         typer.echo("  3. Commit (with -s) and open a PR — CI will validate + auto-merge.")
         typer.echo("Or re-run with --auto-pr.")
         return
 
     branch = f"results/{record['benchmark_name']}/{sanitize_filename(record['evaluation_id'])}"
-    pr_url = _open_pr(target_path, record, branch)
+    pr_url = _open_pr([summary_path, bundle_path], record, branch)
     typer.echo(f"PR opened: {pr_url}")
     # Stamp idempotency so a repeat invocation (or the scan script) sees that
     # this experiment has already been submitted to the journal.
@@ -309,7 +317,7 @@ def main(
         schema_version=record["schema_version"],
         submitted_by=submitter,
         pr_url=pr_url,
-        local_path=str(target_path),
+        local_path=str(summary_path),
     )
     typer.echo(f"recorded in {experiment_dir / submissions.SUBMISSIONS_FILENAME}")
 
