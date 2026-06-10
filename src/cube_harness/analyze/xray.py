@@ -1573,7 +1573,9 @@ def run_xray(
                     gr.update(value="Nothing selected to submit.", visible=True),
                 )
             if destination == "eee":
-                script, extra = "submit_to_eee.py", []
+                # Clicking Submit → EEE is an explicit publish: actually open the
+                # HF-dataset PR (the CLI defaults to --no-upload for safety).
+                script, extra = "submit_to_eee.py", ["--upload"]
             else:
                 script, extra = "submit_to_journal.py", ["--auto-pr", "--i-understand-this-is-not-a-leaderboard"]
             dest_key = "eee" if destination == "eee" else "journal"
