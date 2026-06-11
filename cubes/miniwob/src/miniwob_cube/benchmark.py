@@ -1,5 +1,6 @@
 from io import TextIOWrapper
 import logging
+import socket
 import subprocess
 import sys
 import tempfile
@@ -18,6 +19,13 @@ from miniwob_cube.task import MiniWobTaskConfig, MiniWobTaskMetadata
 logger = logging.getLogger(__name__)
 
 
+def _find_free_port() -> int:
+    """Ask the OS for a free TCP port (so parallel benchmark instances don't collide on 8000)."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("localhost", 0))
+        return sock.getsockname()[1]
+
+
 class MiniWobBenchmark(Benchmark["MiniWobBenchmarkConfig"]):
     """Runtime pair — owns the local HTTP server process serving MiniWob HTML."""
 
@@ -29,9 +37,11 @@ class MiniWobBenchmark(Benchmark["MiniWobBenchmarkConfig"]):
 
     def _setup(self) -> None:
         cfg = self.config
+        if cfg.port == 0:  # auto-assign a free port — each parallel Ray worker gets its own server
+            cfg.port = _find_free_port()
         tmp_dir = Path(tempfile.gettempdir())
-        self._stdout_file = open(tmp_dir / "miniwob_server_stdout.log", "w")
-        self._stderr_file = open(tmp_dir / "miniwob_server_stderr.log", "w")
+        self._stdout_file = open(tmp_dir / f"miniwob_server_{cfg.port}_stdout.log", "w")
+        self._stderr_file = open(tmp_dir / f"miniwob_server_{cfg.port}_stderr.log", "w")
         logger.info(f"Starting MiniWob server at port {cfg.port} serving from {cfg.html_path}...")
         self._server_process = subprocess.Popen(
             [sys.executable, "-m", "http.server", str(cfg.port)],
@@ -45,7 +55,7 @@ class MiniWobBenchmark(Benchmark["MiniWobBenchmarkConfig"]):
         while time.monotonic() < startup_deadline:
             if self._server_process.poll() is not None:
                 self._stderr_file.flush()
-                stderr_path = Path(tempfile.gettempdir()) / "miniwob_server_stderr.log"
+                stderr_path = Path(tempfile.gettempdir()) / f"miniwob_server_{cfg.port}_stderr.log"
                 stderr_content = stderr_path.read_text() if stderr_path.exists() else "No stderr available"
                 returncode = self._server_process.returncode
                 self.close()
@@ -98,7 +108,7 @@ class MiniWobBenchmarkConfig(BenchmarkConfig[MiniWobTaskMetadata]):
     benchmark_class: ClassVar[type[Benchmark]] = MiniWobBenchmark
 
     html_path: str = files("miniwob").joinpath("html").as_posix()  # type: ignore
-    port: int = 8000
+    port: int = 8000  # set 0 to auto-assign a free port (needed for many parallel benchmark instances)
     remove_human_display: bool = True
     episode_max_time: int = 1000000
     server_start_timeout: float = 10.0

@@ -1,38 +1,23 @@
-# /// script
-# requires-python = ">=3.12"
-# dependencies = [
-#     "cube-harness",
-#     "workarena-cube",
-#     "miniwob-cube",
-#     "matplotlib",
-# ]
-#
-# [tool.uv.sources]
-# cube-harness = { path = "..", editable = true }
-# workarena-cube = { path = "../cubes/workarena", editable = true }
-# miniwob-cube = { path = "../cubes/miniwob", editable = true }
-# ///
-"""JefHinter — in-context self-improvement loop for cube-harness agents.
+"""JefHinter — in-context self-improvement eval harness for cube-harness agents.
 
-Reproduces the JephHinter eval (ServiceNow K26 demo) inside cube-harness: an
-agent attempts a fixed task set, an LLM *mines hints* from its own failed (and
-contrastively, successful) trajectories, the hints are injected back into the
-agent via ``GennyConfig.task_hints``, and the agent re-runs. Success rate is
-tracked per iteration; the loop reproduces the characteristic upward curve.
+Reproduces the JephHinter eval (ServiceNow K26 demo) natively: an agent attempts
+a benchmark, an LLM *mines hints* from its own (failed, and contrastively
+successful) trajectories, the hints are injected via ``GennyConfig.task_hints``,
+and the agent re-runs — tracking success rate per iteration; the loop reproduces
+the characteristic upward curve.
 
-What is reused vs. new:
-- Reused: ``Experiment`` + runners (rollouts), ``FileStorage`` (reload),
-  ``GennyConfig.task_hints`` (injection), and the investigator ``hinter``
-  ``TaskHint`` schema (hint shape).
-- New (this file): the outer loop, a standalone LLM ``HintMiner`` (the
-  investigator's own miner is hard-wired to the Claude Code SDK, so it cannot
-  drive a local vLLM/OpenAI model — we mine with ``cube_harness.llm.LLM``), the
-  ``HintDB`` curator, and the metrics/curve.
+This module is the **benchmark-agnostic harness**: the miner, the curator, the
+outer loop, and metrics. It takes a ``BenchmarkConfig`` object — a thin per-cube
+recipe builds that config and calls :func:`run_jefhinter`. See
+``recipes/jefhinter_miniwob.py`` and ``recipes/jefhinter_workarena.py``.
 
-This is the config — copy and edit, or drive via the CLI (``--help``).
-
-    .venv/bin/python recipes/jefhinter.py --benchmark workarena_l1 \
-        --api-base http://localhost:8001/v1 --model qwen2.5-7b-instruct
+Reused cube-harness primitives: ``Experiment`` + runners (rollouts),
+``FileStorage`` (reload), ``GennyConfig.task_hints`` (injection), and the
+investigator ``hinter`` ``TaskHint`` schema (hint shape). New here: the outer
+loop, a standalone LLM :class:`HintMiner` (the investigator's own miner is
+hard-wired to the Claude Code SDK, so it cannot drive a local vLLM/OpenAI model —
+we mine with ``cube_harness.llm.LLM``), the :class:`HintDB` curator, and the
+metrics/curve.
 """
 
 from __future__ import annotations
@@ -41,13 +26,8 @@ import json
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import Annotated
 
-import typer
 from cube.core import Action, EnvironmentOutput
-from cube_browser_tool.bgym_tool import BgymToolConfig
-from miniwob_cube import MINIWOB_CONFIGS
-from workarena_cube.benchmark import WorkArenaBenchmarkConfig
 
 from cube_harness.agents.genny import GennyConfig
 from cube_harness.agents.genny_configs import make_agent_config
@@ -59,15 +39,12 @@ from cube_harness.experiment import Experiment
 from cube_harness.llm import LLM, LLMConfig, Prompt
 from cube_harness.storage import FileStorage
 
-logger = logging.getLogger("jefhinter")
+try:
+    import wandb
+except ImportError:  # optional dependency
+    wandb = None
 
-# The 4 WorkArena L1 demo tasks from the K26 JephHinter demo.
-WORKARENA_L1_DEMO_TASKS = [
-    "workarena.servicenow.sort-incident-list",
-    "workarena.servicenow.create-incident",
-    "workarena.servicenow.filter-incident-list",
-    "workarena.servicenow.order-standard-laptop",
-]
+logger = logging.getLogger("jefhinter")
 
 AGENT_SYSTEM_PROMPT = (
     "You are an expert web agent operating a real browser through an accessibility "
@@ -119,33 +96,16 @@ def build_llm(model: str, api_base: str, temperature: float, max_completion_toke
     )
 
 
-def build_benchmark(benchmark: str, task_ids: list[str] | None, n_seeds: int):
-    """Build the benchmark config subset for the loop.
-
-    Returns a ``BenchmarkConfig``. ``task_ids`` restricts to a subset; ``None``
-    keeps the registry default subset.
-    """
-    if benchmark == "workarena_l1":
-        # axtree-only (no screenshot): the served model is text-only, and axtree is the
-        # canonical WorkArena observation (AgentLab's GPT-4o text config runs axtree-only).
-        browser = BgymToolConfig(use_html=False, use_axtree=True, use_screenshot=False)
-        cfg = WorkArenaBenchmarkConfig(tool_config=browser, n_seeds_l1=n_seeds).named_subset("l1")
-        return cfg.subset_from_list(task_ids or WORKARENA_L1_DEMO_TASKS)
-    if benchmark == "miniwob":
-        cfg = MINIWOB_CONFIGS["default"]
-        cfg.tool_config.use_screenshot = False  # text-only served model
-        return cfg.subset_from_list(task_ids) if task_ids else cfg
-    raise ValueError(f"unknown benchmark {benchmark!r} (expected workarena_l1 | miniwob)")
-
-
-def build_agent(llm_config: LLMConfig, task_hints: dict[str, str], max_actions: int, cost_limit: float) -> GennyConfig:
+def build_genny_agent(
+    llm_config: LLMConfig, task_hints: dict[str, str], max_actions: int, cost_limit: float
+) -> GennyConfig:
     """Genny agent config with the current per-task hints injected.
 
     Built from the canonical ``make_agent_config``; we override the system prompt
     for the web setting, inject the per-task hints, and switch to rolling-summary
-    history. Web (axtree) observations are large (~8-10k tokens each); flat history
-    overflows a 32k context by ~step 3, so we use summarize mode (bounded context)
-    plus an obs-size cap.
+    history. Web (axtree/html) observations are large (~8-10k tokens each); flat
+    history overflows a 32k context by ~step 3, so we use summarize mode (bounded
+    context) plus an obs-size cap.
     """
     cfg = make_agent_config(
         llm_config=llm_config, template="workflow-generic", max_actions=max_actions, cost_limit=cost_limit
@@ -326,28 +286,38 @@ def run_one(
     max_steps: int,
     n_parallel: int,
     debug_limit: int | None,
+    repeats: int = 1,
 ) -> list[Trajectory]:
-    """Run one experiment; return its trajectories (with steps) from disk."""
-    run_dir = out_dir / label
-    exp = Experiment(
-        name=f"jefhinter-{label}",
-        agent_config=agent_config,
-        benchmark_config=benchmark_config,
-        output_dir=run_dir,
-        max_steps=max_steps,
-    )
-    logger.info("[%s] running -> %s", label, run_dir)
-    if n_parallel > 1 and debug_limit is None:
-        run_with_ray(exp, n_cpus=n_parallel)
-    else:
-        run_sequentially(exp, debug_limit=debug_limit)
-    trajectories = FileStorage(exp.output_dir).load_all_trajectories()
-    logger.info("[%s] %d trajectories loaded", label, len(trajectories))
+    """Run the experiment ``repeats`` times (sampled rollouts) and pool trajectories.
+
+    MiniWoB tasks are fixed instances, so with temperature > 0 the repeats are i.i.d.
+    draws of the agent's stochastic policy — pooling them turns the per-task success
+    into a stable fraction (the instrument-noise fix; see the hint_conditioned_rl
+    thread's Experiment 0 calibration).
+    """
+    trajectories: list[Trajectory] = []
+    for rep in range(repeats):
+        suffix = f"-rep{rep}" if repeats > 1 else ""
+        run_dir = out_dir / label / f"rep{rep}" if repeats > 1 else out_dir / label
+        exp = Experiment(
+            name=f"jefhinter-{label}{suffix}",
+            agent_config=agent_config,
+            benchmark_config=benchmark_config,
+            output_dir=run_dir,
+            max_steps=max_steps,
+        )
+        logger.info("[%s%s] running -> %s", label, suffix, run_dir)
+        if n_parallel > 1 and debug_limit is None:
+            run_with_ray(exp, n_cpus=n_parallel)
+        else:
+            run_sequentially(exp, debug_limit=debug_limit)
+        trajectories += FileStorage(exp.output_dir).load_all_trajectories()
+    logger.info("[%s] %d trajectories loaded (%d repeats)", label, len(trajectories), repeats)
     return trajectories
 
 
 # --------------------------------------------------------------------------- #
-# Metrics + plot
+# Metrics + plot + optional W&B
 # --------------------------------------------------------------------------- #
 def dump_metrics(records: list[dict], db: HintDB, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -376,8 +346,50 @@ def plot_curve(records: list[dict], path: Path, title: str) -> None:
     ax.set_title(title)
     ax.grid(True, axis="y", alpha=0.3)
     fig.tight_layout()
-    fig.savefig(path, dpi=120)
+    fig.savefig(str(path), dpi=120)
     logger.info("curve -> %s", path)
+
+
+class WandbLogger:
+    """Optional W&B logging of the per-iteration success curve + mined hints."""
+
+    def __init__(
+        self,
+        enabled: bool,
+        project: str,
+        run_name: str,
+        config: dict,
+        tags: list[str] | None = None,
+        group: str | None = None,
+    ) -> None:
+        self._run = None
+        if enabled and wandb is not None:
+            self._run = wandb.init(project=project, name=run_name, config=config, tags=tags, group=group, reinit=True)
+        elif enabled:
+            logger.warning("wandb requested but not installed; skipping W&B logging")
+
+    def log_iteration(self, record: dict) -> None:
+        if self._run is None:
+            return
+        row = {"success_rate": record["overall"], "n_hints": record["hints_in_db"]}
+        for task_id, rate in record["per_task"].items():
+            row[f"task_success/{task_id.split('.')[-1]}"] = rate
+        self._run.log(row, step=record["iteration"])
+
+    def log_final(self, curve_path: Path, db: HintDB) -> None:
+        if self._run is None:
+            return
+        if curve_path.exists():
+            self._run.log({"curve": wandb.Image(str(curve_path))})
+        table = wandb.Table(columns=["task_id", "hint"])
+        for task_id, hints in db.to_dict().items():
+            for hint in hints:
+                table.add_data(task_id, hint)
+        self._run.log({"hints": table})
+
+    def finish(self) -> None:
+        if self._run is not None:
+            self._run.finish()
 
 
 # --------------------------------------------------------------------------- #
@@ -395,6 +407,8 @@ def run_jefhinter_loop(
     n_parallel: int,
     debug_limit: int | None,
     benchmark_name: str,
+    wandb_logger: WandbLogger | None = None,
+    repeats: int = 1,
 ) -> list[dict]:
     """baseline -> (mine -> inject -> re-run) x n_iters, tracking success per iteration."""
     db = HintDB()
@@ -404,12 +418,16 @@ def run_jefhinter_loop(
     for it in range(n_iters + 1):
         label = "baseline" if it == 0 else f"iter{it}"
         task_hints = {} if it == 0 else db.as_task_hints()
-        agent = build_agent(agent_llm, task_hints, max_actions, cost_limit)
-        trajectories = run_one(label, agent, benchmark_config, out_dir, max_steps, n_parallel, debug_limit)
+        agent = build_genny_agent(agent_llm, task_hints, max_actions, cost_limit)
+        trajectories = run_one(
+            label, agent, benchmark_config, out_dir, max_steps, n_parallel, debug_limit, repeats=repeats
+        )
 
         score = score_trajectories(trajectories)
         record = {"iteration": it, "label": label, "hints_in_db": db.size, **score}
         records.append(record)
+        if wandb_logger is not None:
+            wandb_logger.log_iteration(record)
         logger.info(
             "[%s] overall=%.1f%% (%d eps, %d hints) per_task=%s",
             label,
@@ -426,34 +444,81 @@ def run_jefhinter_loop(
 
         dump_metrics(records, db, out_dir / "metrics.json")  # checkpoint each iteration
 
-    plot_curve(records, out_dir / "curve.png", f"JefHinter on {benchmark_name} — success vs hint iteration")
+    curve_path = out_dir / "curve.png"
+    plot_curve(records, curve_path, f"JefHinter on {benchmark_name} — success vs hint iteration")
+    if wandb_logger is not None:
+        wandb_logger.log_final(curve_path, db)
+        wandb_logger.finish()
     return records
 
 
-def main(
-    benchmark: Annotated[str, typer.Option(help="workarena_l1 | miniwob")] = "workarena_l1",
-    model: Annotated[str, typer.Option(help="served model name on the vLLM endpoint")] = "qwen2.5-7b-instruct",
-    api_base: Annotated[str, typer.Option(help="OpenAI-compatible base url")] = "http://localhost:8001/v1",
-    hinter_model: Annotated[str, typer.Option(help="miner model (defaults to --model)")] = "",
-    n_iters: Annotated[int, typer.Option(help="number of hint iterations after baseline")] = 3,
-    n_seeds: Annotated[int, typer.Option(help="seeds per task (WorkArena L1)")] = 5,
-    max_steps: Annotated[int, typer.Option(help="max agent steps per episode")] = 15,
-    max_actions: Annotated[int, typer.Option(help="agent action budget")] = 15,
-    cost_limit: Annotated[float, typer.Option(help="per-episode cost limit (USD)")] = 5.0,
-    n_parallel: Annotated[int, typer.Option(help="parallel episodes via Ray (1 = sequential)")] = 1,
-    debug_limit: Annotated[int, typer.Option(help="cap episodes per run for a smoke (0 = no cap)")] = 0,
-    tasks: Annotated[str, typer.Option(help="comma-separated task_ids subset (default: 4 L1 demo tasks)")] = "",
-    output_dir: Annotated[str, typer.Option(help="output directory")] = "",
-) -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    out_dir = Path(output_dir) if output_dir else Path.home() / "cube_harness_results" / f"jefhinter_{benchmark}"
-    task_ids = [t.strip() for t in tasks.split(",") if t.strip()] or None
+def run_jefhinter(
+    benchmark_config,
+    benchmark_name: str,
+    *,
+    model: str,
+    api_base: str,
+    out_dir: Path,
+    hinter_model: str = "",
+    hinter_api_base: str = "",
+    hinter_max_tokens: int = 1024,
+    n_iters: int = 3,
+    max_steps: int = 15,
+    max_actions: int = 15,
+    cost_limit: float = 5.0,
+    n_parallel: int = 1,
+    debug_limit: int | None = None,
+    wandb_enabled: bool = True,
+    wandb_project: str = "jeffhinter",
+    wandb_tags: tuple[str, ...] = ("eval",),
+    wandb_group: str = "",
+    wandb_run_name: str = "",
+    task_ids: list[str] | None = None,
+    temperature: float = 0.7,
+    hinter_temperature: float = 0.6,
+    repeats: int = 1,
+) -> list[dict]:
+    """Convenience entry: build LLM configs + W&B logger, run the loop, log a summary.
 
-    agent_llm = build_llm(model, api_base, temperature=0.7, max_completion_tokens=1536)
-    hinter_llm = build_llm(hinter_model or model, api_base, temperature=0.6, max_completion_tokens=1024)
-    benchmark_config = build_benchmark(benchmark, task_ids, n_seeds)
-
-    logger.info("JefHinter: benchmark=%s model=%s n_iters=%d -> %s", benchmark, model, n_iters, out_dir)
+    The thin per-cube recipes build ``benchmark_config`` from their registry and
+    call this.
+    """
+    agent_llm = build_llm(model, api_base, temperature=temperature, max_completion_tokens=1536)
+    hinter_llm = build_llm(
+        hinter_model or model,
+        hinter_api_base or api_base,
+        temperature=hinter_temperature,
+        max_completion_tokens=hinter_max_tokens,
+    )
+    hinter_name = hinter_model or model
+    run_name = wandb_run_name
+    if not run_name:
+        run_name = f"{benchmark_name}-{model}"
+        if hinter_name != model:
+            run_name += f"-hinter-{hinter_name}"
+        run_name += f"-iters{n_iters}"
+    wandb_logger = WandbLogger(
+        enabled=wandb_enabled,
+        project=wandb_project,
+        run_name=run_name,
+        group=wandb_group or None,
+        tags=list(wandb_tags),
+        config={
+            "benchmark": benchmark_name,
+            "model": model,
+            "hinter_model": hinter_name,
+            "api_base": api_base,
+            "hinter_api_base": hinter_api_base or api_base,
+            "n_iters": n_iters,
+            "max_steps": max_steps,
+            "n_tasks": len(task_ids) if task_ids else None,
+            "tasks": sorted(task_ids) if task_ids else "benchmark-default",
+            "temperature": temperature,
+            "hinter_temperature": hinter_temperature,
+            "repeats": repeats,
+        },
+    )
+    logger.info("JefHinter: benchmark=%s model=%s n_iters=%d -> %s", benchmark_name, model, n_iters, out_dir)
     records = run_jefhinter_loop(
         benchmark_config=benchmark_config,
         agent_llm=agent_llm,
@@ -464,13 +529,14 @@ def main(
         max_actions=max_actions,
         cost_limit=cost_limit,
         n_parallel=n_parallel,
-        debug_limit=debug_limit or None,
-        benchmark_name=benchmark,
+        debug_limit=debug_limit,
+        benchmark_name=benchmark_name,
+        wandb_logger=wandb_logger,
+        repeats=repeats,
     )
-    print("\n=== JefHinter summary ===")
+    logger.info("=== JefHinter summary (%s) ===", benchmark_name)
     for r in records:
-        print(f"  {r['label']:>9}: {r['overall'] * 100:5.1f}%  ({r['n_episodes']} eps, {r['hints_in_db']} hints)")
-
-
-if __name__ == "__main__":
-    typer.run(main)
+        logger.info(
+            "  %9s: %5.1f%%  (%d eps, %d hints)", r["label"], r["overall"] * 100, r["n_episodes"], r["hints_in_db"]
+        )
+    return records
