@@ -173,6 +173,51 @@ def render_trajectory(traj: Trajectory, max_agent_steps: int = 25) -> str:
 # --------------------------------------------------------------------------- #
 # Hint miner
 # --------------------------------------------------------------------------- #
+def mine_hint_from_transcripts(
+    llm: LLM, task_id: str, failed_transcript: str, passed_transcript: str | None
+) -> TaskHint | None:
+    """Mine one generalizable hint for ``task_id`` from rendered transcripts.
+
+    String-level core of :class:`HintMiner` so external callers (e.g. PipelineRL's
+    in-training hint refresh) can mine from transcripts they rendered themselves
+    (via :func:`render_trajectory`) without holding ``Trajectory`` objects.
+    """
+    parts = [
+        f"Task: {task_id}",
+        "",
+        "--- FAILED ATTEMPT ---",
+        failed_transcript,
+    ]
+    if passed_transcript is not None:
+        parts += ["", "--- SUCCESSFUL ATTEMPT (for contrast) ---", passed_transcript]
+    parts += ["", "Produce the JSON hint object now."]
+    prompt = Prompt(
+        messages=[
+            {"role": "system", "content": MINER_SYSTEM_PROMPT},
+            {"role": "user", "content": "\n".join(parts)},
+        ]
+    )
+    try:
+        response = llm(prompt)
+        obj = extract_json_block(response.message.content or "")
+    except Exception as exc:  # noqa: BLE001 - mining is best-effort per task
+        logger.warning("mining failed for %s: %s", task_id, exc)
+        return None
+    raw_hints = obj.get("hints") or []
+    if not raw_hints:
+        return None
+    raw = raw_hints[0]
+    raw.setdefault("task_id", task_id)
+    raw.setdefault("hint_type", "task_specific")
+    raw.setdefault("rationale", "")
+    raw.setdefault("confidence", 3)
+    try:
+        return TaskHint.model_validate(raw)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hint for %s failed validation: %s", task_id, exc)
+        return None
+
+
 class HintMiner:
     """Mine one generalizable hint per failing task from its trajectories."""
 
@@ -197,40 +242,12 @@ class HintMiner:
         return hints
 
     def _mine_one(self, task_id: str, failed: Trajectory, passed: Trajectory | None) -> TaskHint | None:
-        parts = [
-            f"Task: {task_id}",
-            "",
-            "--- FAILED ATTEMPT ---",
+        return mine_hint_from_transcripts(
+            self._llm,
+            task_id,
             render_trajectory(failed, self._max_agent_steps),
-        ]
-        if passed is not None:
-            parts += ["", "--- SUCCESSFUL ATTEMPT (for contrast) ---", render_trajectory(passed, self._max_agent_steps)]
-        parts += ["", "Produce the JSON hint object now."]
-        prompt = Prompt(
-            messages=[
-                {"role": "system", "content": MINER_SYSTEM_PROMPT},
-                {"role": "user", "content": "\n".join(parts)},
-            ]
+            render_trajectory(passed, self._max_agent_steps) if passed is not None else None,
         )
-        try:
-            response = self._llm(prompt)
-            obj = extract_json_block(response.message.content or "")
-        except Exception as exc:  # noqa: BLE001 - mining is best-effort per task
-            logger.warning("mining failed for %s: %s", task_id, exc)
-            return None
-        raw_hints = obj.get("hints") or []
-        if not raw_hints:
-            return None
-        raw = raw_hints[0]
-        raw.setdefault("task_id", task_id)
-        raw.setdefault("hint_type", "task_specific")
-        raw.setdefault("rationale", "")
-        raw.setdefault("confidence", 3)
-        try:
-            return TaskHint.model_validate(raw)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("hint for %s failed validation: %s", task_id, exc)
-            return None
 
 
 # --------------------------------------------------------------------------- #
