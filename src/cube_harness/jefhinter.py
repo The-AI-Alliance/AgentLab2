@@ -374,7 +374,9 @@ class WandbLogger:
         row = {"success_rate": record["overall"], "n_hints": record["hints_in_db"]}
         for task_id, rate in record["per_task"].items():
             row[f"task_success/{task_id.split('.')[-1]}"] = rate
-        self._run.log(row, step=record["iteration"])
+        # commit=True: with an explicit step, W&B otherwise defers the row until the NEXT
+        # step arrives — with ~hourly iterations the live dashboard would lag a full iteration.
+        self._run.log(row, step=record["iteration"], commit=True)
 
     def log_final(self, curve_path: Path, db: HintDB) -> None:
         if self._run is None:
