@@ -502,6 +502,9 @@ class Genny(Agent):
             prompt=prompt,
             output=response.message,
             usage=response.usage,
+            logprobs=response.logprobs,
+            completion_token_ids=response.completion_token_ids,
+            finish_reason=response.finish_reason,
         )
         return response.message.content or "", llm_call
 
@@ -556,6 +559,9 @@ class Genny(Agent):
             prompt=prompt,
             output=response.message,
             usage=response.usage,
+            logprobs=response.logprobs,
+            completion_token_ids=response.completion_token_ids,
+            finish_reason=response.finish_reason,
         )
         self._compacted_summary = summary
         self.history = self.history[-keep:]
@@ -583,6 +589,9 @@ class Genny(Agent):
             prompt=prompt,
             output=response.message,
             usage=response.usage,
+            logprobs=response.logprobs,
+            completion_token_ids=response.completion_token_ids,
+            finish_reason=response.finish_reason,
         )
         self.summaries = [summary]
         self.summary_actions = []
@@ -610,6 +619,9 @@ class Genny(Agent):
                 prompt=prompt,
                 output=response.message,
                 usage=response.usage,
+                logprobs=response.logprobs,
+                completion_token_ids=response.completion_token_ids,
+                finish_reason=response.finish_reason,
             )
         ]
         for attempt in range(self.config.max_format_errors):
@@ -631,6 +643,9 @@ class Genny(Agent):
                     prompt=prompt,
                     output=response.message,
                     usage=response.usage,
+                    logprobs=response.logprobs,
+                    completion_token_ids=response.completion_token_ids,
+                    finish_reason=response.finish_reason,
                 )
             )
         return response.message, llm_calls

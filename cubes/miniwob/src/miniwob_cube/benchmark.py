@@ -13,6 +13,7 @@ from typing import ClassVar, Generator
 from cube.benchmark import Benchmark, BenchmarkConfig, BenchmarkMetadata
 from cube.resource import InfraConfig
 from cube.task import TaskConfig
+from pydantic import PrivateAttr
 
 from miniwob_cube.task import MiniWobTaskConfig, MiniWobTaskMetadata
 
@@ -114,9 +115,31 @@ class MiniWobBenchmarkConfig(BenchmarkConfig[MiniWobTaskMetadata]):
     server_start_timeout: float = 10.0
     server_start_poll_interval: float = 0.1
 
+    _runtime: "MiniWobBenchmark | None" = PrivateAttr(default=None)
+
     @property
     def base_url(self) -> str:
         return f"http://localhost:{self.port}/miniwob"
+
+    def setup(self) -> None:
+        """Config-as-facade for runners that drive the benchmark via its config (cube_rl).
+
+        Owns a runtime ``MiniWobBenchmark`` and starts the local HTML server; with
+        ``port=0`` the server binds a free port and ``self.port`` is updated, so
+        ``get_task_configs()`` called afterwards bakes the live ``base_url``.
+        """
+        if self._runtime is None:
+            self._runtime = MiniWobBenchmark(self)
+            self._runtime.setup()
+
+    def close(self) -> None:
+        if self._runtime is not None:
+            self._runtime.close()
+            self._runtime = None
+
+    @property
+    def _runtime_context(self) -> dict | None:
+        return getattr(self._runtime, "_runtime_context", None)
 
     def get_task_configs(self) -> Generator[MiniWobTaskConfig, None, None]:
         for tm in self.tasks().values():
