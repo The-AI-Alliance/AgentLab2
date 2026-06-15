@@ -392,22 +392,31 @@ def run_one(
     n_parallel: int,
     debug_limit: int | None,
     repeats: int = 1,
+    instance_seeds: list[int] | None = None,
 ) -> list[Trajectory]:
     """Run the experiment ``repeats`` times (sampled rollouts) and pool trajectories.
 
-    MiniWoB tasks are fixed instances, so with temperature > 0 the repeats are i.i.d.
-    draws of the agent's stochastic policy — pooling them turns the per-task success
-    into a stable fraction (the instrument-noise fix; see the hint_conditioned_rl
-    thread's Experiment 0 calibration).
+    Default (``instance_seeds=None``): all reps share the benchmark's fixed instance
+    (seed-pinned), so with temperature > 0 the repeats are i.i.d. draws of the agent's
+    stochastic policy — pooling turns per-task success into a stable fraction (the
+    instrument-noise fix; see the hint_conditioned_rl thread's Experiment 0 calibration).
+
+    Cross-instance (``instance_seeds`` given): rep ``i`` runs on instance ``seed
+    instance_seeds[i % len]`` — a different draw of the *same* task. Pooling then measures
+    mean success across the instance distribution, the test of cross-instance generalization.
+    Requires the benchmark config to expose a ``seed`` field (e.g. MiniWoB); ignored otherwise.
     """
     trajectories: list[Trajectory] = []
     for rep in range(repeats):
+        bench_cfg = benchmark_config
+        if instance_seeds and hasattr(benchmark_config, "seed"):
+            bench_cfg = benchmark_config.model_copy(update={"seed": instance_seeds[rep % len(instance_seeds)]})
         suffix = f"-rep{rep}" if repeats > 1 else ""
         run_dir = out_dir / label / f"rep{rep}" if repeats > 1 else out_dir / label
         exp = Experiment(
             name=f"jefhinter-{label}{suffix}",
             agent_config=agent_config,
-            benchmark_config=benchmark_config,
+            benchmark_config=bench_cfg,
             output_dir=run_dir,
             max_steps=max_steps,
         )
@@ -514,6 +523,7 @@ def run_jefhinter_loop(
     benchmark_name: str,
     wandb_logger: WandbLogger | None = None,
     repeats: int = 1,
+    instance_seeds: list[int] | None = None,
 ) -> list[dict]:
     """baseline -> (mine -> inject -> re-run) x n_iters, tracking success per iteration."""
     db = HintDB()
@@ -525,7 +535,15 @@ def run_jefhinter_loop(
         task_hints = {} if it == 0 else db.as_task_hints()
         agent = build_genny_agent(agent_llm, task_hints, max_actions, cost_limit)
         trajectories = run_one(
-            label, agent, benchmark_config, out_dir, max_steps, n_parallel, debug_limit, repeats=repeats
+            label,
+            agent,
+            benchmark_config,
+            out_dir,
+            max_steps,
+            n_parallel,
+            debug_limit,
+            repeats=repeats,
+            instance_seeds=instance_seeds,
         )
 
         score = score_trajectories(trajectories)
@@ -582,11 +600,13 @@ def run_jefhinter(
     temperature: float = 0.7,
     hinter_temperature: float = 0.6,
     repeats: int = 1,
+    instance_seeds: list[int] | None = None,
 ) -> list[dict]:
     """Convenience entry: build LLM configs + W&B logger, run the loop, log a summary.
 
     The thin per-cube recipes build ``benchmark_config`` from their registry and
-    call this.
+    call this. ``instance_seeds`` (optional) runs each rep on a different instance of
+    the same tasks (cross-instance eval); ``None`` keeps the benchmark's fixed instance.
     """
     agent_llm = build_llm(model, api_base, temperature=temperature, max_completion_tokens=1536)
     hinter_llm = build_llm(
@@ -621,6 +641,8 @@ def run_jefhinter(
             "temperature": temperature,
             "hinter_temperature": hinter_temperature,
             "repeats": repeats,
+            "instance_seeds": instance_seeds,
+            "eval_mode": "cross-instance" if instance_seeds else "fixed-instance",
         },
     )
     logger.info("JefHinter: benchmark=%s model=%s n_iters=%d -> %s", benchmark_name, model, n_iters, out_dir)
@@ -638,6 +660,7 @@ def run_jefhinter(
         benchmark_name=benchmark_name,
         wandb_logger=wandb_logger,
         repeats=repeats,
+        instance_seeds=instance_seeds,
     )
     logger.info("=== JefHinter summary (%s) ===", benchmark_name)
     for r in records:

@@ -113,6 +113,8 @@ class MiniWobBenchmarkConfig(BenchmarkConfig[MiniWobTaskMetadata]):
     episode_max_time: int = 1000000
     server_start_timeout: float = 10.0
     server_start_poll_interval: float = 0.1
+    seed: int = 42  # MiniWoB instance seed (Math.seedrandom); 42 = historical pin. Vary per benchmark
+    # instance (e.g. one seed per eval rep) to draw different instances of the same tasks.
 
     @property
     def base_url(self) -> str:
@@ -126,4 +128,5 @@ class MiniWobBenchmarkConfig(BenchmarkConfig[MiniWobTaskMetadata]):
                 base_url=self.base_url,
                 remove_human_display=self.remove_human_display,
                 episode_max_time=self.episode_max_time,
+                seed=self.seed,
             )

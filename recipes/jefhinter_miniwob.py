@@ -62,6 +62,25 @@ MINIWOB_HARD_TASKS = [
     "read-table",
 ]
 
+# Cross-instance eval: when --cross-instance is set (and --instance-seeds is not given),
+# rep i runs on instance seed CROSS_INSTANCE_SEED_BASE + i. These are fixed + shared across
+# every run so models/conditions are compared on the SAME held-out instances, and they sit
+# far from training's sha256-derived seed space (negligible collision) so they are genuinely held out.
+CROSS_INSTANCE_SEED_BASE = 9001
+
+
+def _resolve_instance_seeds(cross_instance: bool, instance_seeds: str, repeats: int) -> list[int] | None:
+    """Fixed seed-42 eval (None) unless cross-instance is requested.
+
+    Explicit --instance-seeds wins; else --cross-instance auto-generates `repeats` held-out
+    seeds. Returns None (the historical seed-42 behavior, byte-identical to Exp 1) otherwise.
+    """
+    if instance_seeds.strip():
+        return [int(s) for s in instance_seeds.split(",") if s.strip()]
+    if cross_instance:
+        return [CROSS_INSTANCE_SEED_BASE + i for i in range(repeats)]
+    return None
+
 
 def main(
     model: Annotated[str, typer.Option(help="served model name on the vLLM endpoint")] = "qwen2.5-7b-instruct",
@@ -82,6 +101,17 @@ def main(
     ] = 8000,
     debug_limit: Annotated[int, typer.Option(help="cap episodes per run for a smoke (0 = no cap)")] = 0,
     tasks: Annotated[str, typer.Option(help="'hard' (28-task eval set), 'all' (125), or comma-separated ids")] = "hard",
+    cross_instance: Annotated[
+        bool,
+        typer.Option(
+            "--cross-instance/--fixed-instance",
+            help="run each rep on a different instance of the same tasks (cross-instance eval); "
+            "default fixed = seed 42, comparable to prior results",
+        ),
+    ] = False,
+    instance_seeds: Annotated[
+        str, typer.Option(help="explicit comma-separated instance seeds (overrides --cross-instance auto-gen)")
+    ] = "",
     output_dir: Annotated[str, typer.Option(help="output directory")] = "",
     wandb_enabled: Annotated[bool, typer.Option("--wandb/--no-wandb", help="log to Weights & Biases")] = True,
     wandb_project: Annotated[str, typer.Option(help="W&B project name")] = "jeffhinter",
@@ -99,6 +129,8 @@ def main(
         task_ids = [t.strip() for t in tasks.split(",") if t.strip()]
     if task_ids:
         cfg = cfg.subset_from_list(task_ids)
+
+    seeds = _resolve_instance_seeds(cross_instance, instance_seeds, repeats)
 
     out = Path(output_dir) if output_dir else Path.home() / "cube_harness_results" / "jefhinter_miniwob"
     run_jefhinter(
@@ -123,6 +155,7 @@ def main(
         temperature=temperature,
         hinter_temperature=hinter_temperature,
         repeats=repeats,
+        instance_seeds=seeds,
     )
 
 

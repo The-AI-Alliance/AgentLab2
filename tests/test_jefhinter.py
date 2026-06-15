@@ -134,3 +134,91 @@ def test_miner_general_prompt_selects_general_system_prompt() -> None:
     assert default_miner._system_prompt == jh.MINER_SYSTEM_PROMPT
     general_miner = jh.HintMiner(jh.build_llm("m", "http://localhost:1/v1", 0.5, 256), general_prompt=True)
     assert general_miner._system_prompt == jh.MINER_SYSTEM_PROMPT_GENERAL
+
+
+def test_miniwob_benchmark_seed_threads_to_task_configs() -> None:
+    """Cross-instance eval relies on MiniWobBenchmarkConfig.seed reaching every task config.
+
+    Default 42 = the historical pin (so a no-flag eval is byte-identical to prior results);
+    model_copy(update={'seed': N}) is exactly the per-rep override run_one applies.
+    """
+    import pytest
+
+    miniwob = pytest.importorskip("miniwob_cube")
+    base = miniwob.MINIWOB_CONFIGS["default"]
+    assert base.seed == 42  # default pin
+
+    varied = base.model_copy(update={"seed": 9001})
+    varied_tcs = list(varied.get_task_configs())
+    assert varied_tcs, "benchmark should yield task configs"
+    assert all(tc.seed == 9001 for tc in varied_tcs)
+    # original untouched (no shared-state mutation) -> still the seed-42 instance
+    assert all(tc.seed == 42 for tc in base.get_task_configs())
+
+
+def test_resolve_instance_seeds() -> None:
+    """Recipe seed-resolver: fixed (None) by default, explicit seeds win, else auto held-out set."""
+    import importlib.util
+    from pathlib import Path
+
+    import pytest
+
+    recipe_path = Path(__file__).resolve().parents[1] / "recipes" / "jefhinter_miniwob.py"
+    spec = importlib.util.spec_from_file_location("_jefhinter_miniwob_recipe", recipe_path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except ModuleNotFoundError:
+        pytest.skip("recipe deps (miniwob_cube) not installed in this env")
+
+    resolve = mod._resolve_instance_seeds
+    # default = fixed seed-42 (None -> run_one keeps the benchmark's pinned instance)
+    assert resolve(False, "", 16) is None
+    # --cross-instance auto-generates `repeats` consecutive held-out seeds from the base
+    assert resolve(True, "", 4) == [mod.CROSS_INSTANCE_SEED_BASE + i for i in range(4)]
+    # explicit --instance-seeds wins over the flag and parses/strips
+    assert resolve(True, "11, 22 ,33", 4) == [11, 22, 33]
+    assert resolve(False, "7", 16) == [7]
+
+
+def test_run_one_applies_per_rep_instance_seed(monkeypatch: Any, tmp_path: Any) -> None:
+    """run_one must run rep i on instance_seeds[i] (cross-instance), or the fixed seed by default.
+
+    Monkeypatches the episode runner + storage so no browser/LLM is needed — we only assert
+    the benchmark seed each rep receives.
+    """
+    import pytest
+
+    miniwob = pytest.importorskip("miniwob_cube")
+    bench = miniwob.MINIWOB_CONFIGS["default"].subset_from_list(["simple-arithmetic"])
+    agent = jh.build_genny_agent(jh.build_llm("m", "http://localhost:1/v1", 0.7, 256), {}, 4, 5.0)
+
+    seen: list[int] = []
+    monkeypatch.setattr(jh, "run_sequentially", lambda exp, debug_limit=None: seen.append(exp.benchmark_config.seed))
+    monkeypatch.setattr(jh, "run_with_ray", lambda exp, n_cpus: seen.append(exp.benchmark_config.seed))
+
+    class _EmptyStorage:
+        def __init__(self, *_a: Any, **_k: Any) -> None: ...
+
+        def load_all_trajectories(self) -> list:
+            return []
+
+    monkeypatch.setattr(jh, "FileStorage", _EmptyStorage)
+
+    jh.run_one(
+        "baseline",
+        agent,
+        bench,
+        tmp_path,
+        max_steps=1,
+        n_parallel=1,
+        debug_limit=1,
+        repeats=3,
+        instance_seeds=[9001, 9002, 9003],
+    )
+    assert seen == [9001, 9002, 9003], "each rep should run on its own held-out instance"
+
+    seen.clear()
+    jh.run_one("baseline", agent, bench, tmp_path, max_steps=1, n_parallel=1, debug_limit=1, repeats=2)
+    assert seen == [42, 42], "default (no instance_seeds) keeps the fixed seed-42 instance"
