@@ -24,6 +24,7 @@ class MiniWobTask(Task):
     base_url: str = "http://localhost:8000/miniwob"
     remove_human_display: bool = True
     episode_max_time: int = 1000000
+    seed: int = 42  # MiniWoB instance seed (Math.seedrandom); 42 reproduces the historical pin
 
     @property
     def tool(self) -> BrowserTool:  # type: ignore[override]
@@ -36,7 +37,9 @@ class MiniWobTask(Task):
     def reset(self) -> tuple[Observation, dict[str, Any]]:
         self.tool.reset()
         self.tool.goto(self.url)
-        setup_result = self.tool.evaluate_js(_build_setup_js(self.remove_human_display, self.episode_max_time))
+        setup_result = self.tool.evaluate_js(
+            _build_setup_js(self.remove_human_display, self.episode_max_time, self.seed)
+        )
         goal, info = _parse_setup_result(setup_result)
         obs = Observation.from_text(goal) + self.obs_postprocess(self.tool.page_obs())
         return obs, {**info, "task_id": self.id, "task_url": self.url, "goal": goal}
@@ -65,6 +68,10 @@ class MiniWobTaskConfig(TaskConfig[MiniWobTaskMetadata]):
     base_url: str = "http://localhost:8000/miniwob"
     remove_human_display: bool = True
     episode_max_time: int = 1000000
+    # Override the base TaskConfig.seed default (None) so MiniWoB pins the JS PRNG to 42
+    # by default — byte-identical to the previous hardcoded Math.seedrandom(42). Override
+    # per-config (e.g. one seed per GRPO group) to draw a different instance.
+    seed: int = 42
 
     def make(
         self,
@@ -78,10 +85,11 @@ class MiniWobTaskConfig(TaskConfig[MiniWobTaskMetadata]):
             base_url=self.base_url,
             remove_human_display=self.remove_human_display,
             episode_max_time=self.episode_max_time,
+            seed=42 if self.seed is None else self.seed,
         )
 
 
-def _build_setup_js(remove_human_display: bool, episode_max_time: int) -> str:
+def _build_setup_js(remove_human_display: bool, episode_max_time: int, seed: int = 42) -> str:
     if remove_human_display:
         js = r"""
 let __display_ids = ['reward-display', 'click-canvas', 'sync-task-cover'];
@@ -141,7 +149,7 @@ removeDisplay();
     else:
         js = ""
     js += f"""
-Math.seedrandom(42);
+Math.seedrandom({seed});
 core.EPISODE_MAX_TIME = {episode_max_time};
 core.startEpisodeReal();
 while (!WOB_TASK_READY) {{

@@ -91,3 +91,46 @@ def test_miner_handles_empty_hint_list() -> None:
     miner = jh.HintMiner(jh.build_llm("m", "http://localhost:1/v1", 0.5, 256))
     miner._llm = _FakeLLM('```json\n{"hints": []}\n```')  # type: ignore[assignment]
     assert miner.mine([_traj("t", 0.0)]) == []
+
+
+def test_hint_has_literal_flags_instance_specific_and_passes_general() -> None:
+    # Overfit examples from the audit -> instance-specific, must be rejected.
+    overfit = [
+        "enter the value '9'",
+        "type 'KELI' into id 'tt'",
+        "focus bid=41",
+        "click element [123]",
+        "the answer is 47",
+    ]
+    for text in overfit:
+        assert jh.hint_has_literal(text), f"expected literal flagged: {text!r}"
+    # Good generalizable hints -> method, not value, must pass.
+    general = [
+        "click the header to expand before the arrow icon",
+        "compute the arithmetic shown and type the result",
+    ]
+    for text in general:
+        assert not jh.hint_has_literal(text), f"expected general hint to pass: {text!r}"
+    assert not jh.hint_has_literal("")
+
+
+def test_miner_reject_literals_drops_overfit_hint() -> None:
+    fenced = (
+        '```json\n{"hints": [{"task_id": "t", "hint_type": "task_specific", '
+        '"text": "Enter the value \'9\' into the input.", "rationale": "r", "confidence": 4}]}\n```'
+    )
+    # Default miner keeps the (overfit) hint; reject_literals drops it (-> no hint, same as none).
+    keep = jh.HintMiner(jh.build_llm("m", "http://localhost:1/v1", 0.5, 256))
+    keep._llm = _FakeLLM(fenced)  # type: ignore[assignment]
+    assert len(keep.mine([_traj("t", 0.0)])) == 1
+
+    drop = jh.HintMiner(jh.build_llm("m", "http://localhost:1/v1", 0.5, 256), reject_literals=True)
+    drop._llm = _FakeLLM(fenced)  # type: ignore[assignment]
+    assert drop.mine([_traj("t", 0.0)]) == []
+
+
+def test_miner_general_prompt_selects_general_system_prompt() -> None:
+    default_miner = jh.HintMiner(jh.build_llm("m", "http://localhost:1/v1", 0.5, 256))
+    assert default_miner._system_prompt == jh.MINER_SYSTEM_PROMPT
+    general_miner = jh.HintMiner(jh.build_llm("m", "http://localhost:1/v1", 0.5, 256), general_prompt=True)
+    assert general_miner._system_prompt == jh.MINER_SYSTEM_PROMPT_GENERAL
