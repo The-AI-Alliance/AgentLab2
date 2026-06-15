@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections import defaultdict
 from pathlib import Path
 
@@ -80,6 +81,95 @@ Respond with ONLY a JSON object in a ```json fence, matching:
 
 `confidence` is 0-5. Emit at most one hint. Emit `{"hints": []}` if no useful
 generalizable hint exists."""
+
+
+# Instance-general variant of MINER_SYSTEM_PROMPT (off by default; opt in via
+# HintMiner(general_prompt=True)). Strengthens the GENERALIZABLE rule so the miner
+# never bakes a specific instance's values into the hint — the audit found the base
+# miner sometimes leaks the literal answer ("enter '9'"), which makes a hint useless
+# across re-randomised MiniWoB instances (and is a form of reward hacking). It demands
+# the METHOD to obtain a value, never the value itself.
+MINER_SYSTEM_PROMPT_GENERAL = """You are a hint-harvesting expert for a web agent.
+
+You read one or two trajectories of an agent attempting the SAME task (a failed
+attempt, and when available a successful one for contrast) and extract a short,
+reusable hint that would help the agent solve ANY instance of this task on a re-run.
+
+The task is re-randomised every episode: the specific values, labels, ids, target
+words, dates, and numbers change. A hint that names one instance's values is WORSE
+than no hint — it misleads the agent on the next instance. So your hint MUST describe
+the METHOD to find/compute the right value, never the value itself.
+
+FORBIDDEN in a hint (instance-specific content):
+- Quoted literal values to type/select (e.g. type 'KELI', enter "9", select 'March').
+- Element ids/bids ([123], bid=41, id 'tt-7').
+- A specific number as the answer (e.g. "the answer is 47", "click the 3rd item").
+- Proper nouns / one-off labels from this instance (names, usernames, subjects).
+
+REQUIRED in a good hint:
+- GENERALIZABLE: a reusable UI strategy or workflow that holds for every instance.
+  Name common UI elements (buttons, column headers, funnel/filter icons, menus) and
+  the sequence to use them, and SAY HOW to derive any value from the live observation.
+- ACTIONABLE & GROUNDED: one or two concrete sentences, based on where the failed
+  attempt went wrong (and what a shown successful trace did differently).
+- Do NOT produce a hint when the failure is clearly a harness/tool bug or the
+  evaluator rejected correct behavior; return an empty list instead.
+
+Examples:
+- GOOD: "Click the column header to sort, then read the value from the top row —
+  don't look for a separate sort button."
+- GOOD: "Compute the arithmetic shown in the prompt and type the result into the
+  answer field."
+- BAD:  "Enter the value '9' into the input field." (leaks the instance's answer)
+- BAD:  "Type 'KELI' into id 'tt' then submit." (leaks a literal + an element id)
+
+Before answering, self-check: would this hint still be correct if every value, label,
+id and number on screen changed? If not, generalise it or emit no hint.
+
+Respond with ONLY a JSON object in a ```json fence, matching:
+
+```json
+{"hints": [{"task_id": "<the task_id>", "hint_type": "task_specific",
+  "text": "<one or two sentence reusable instruction>",
+  "rationale": "<why this would fix the failed attempt>", "confidence": 3}]}
+```
+
+`confidence` is 0-5. Emit at most one hint. Emit `{"hints": []}` if no useful
+generalizable hint exists."""
+
+
+# Heuristic regexes for hint_has_literal — instance-specific tokens a generalizable
+# hint must never contain. Each maps to a forbidden category in MINER_SYSTEM_PROMPT_GENERAL.
+_LITERAL_PATTERNS: tuple[tuple[str, "re.Pattern[str]"], ...] = (
+    # Quoted literal to type/select: 'KELI', "March 3" (>=1 non-space char inside quotes).
+    ("quoted", re.compile(r"""['"][^'"]+['"]""")),
+    # Element bid reference: bid=41, bid 41, bid: 7.
+    ("bid", re.compile(r"\bbid\s*[=:]?\s*\d+", re.IGNORECASE)),
+    # Bracketed element id: [123].
+    ("bracket_id", re.compile(r"\[\d+\]")),
+    # id reference: id 'tt', id=tt (the id keyword followed by a concrete value).
+    ("id_ref", re.compile(r"""\bid\s*[=:]?\s*['"]?\w+""", re.IGNORECASE)),
+    # Digit-as-answer: enter 9, type 47, value 3, answer is 12, result 5 (a bare number
+    # presented as the thing to enter — the literal answer, not "click the 3rd row" style
+    # ordinals which we deliberately do not catch here to avoid over-rejection of method).
+    ("digit_answer", re.compile(r"\b(?:enter|type|input|value|answer|result)\b[^.]{0,12}?\b\d+\b", re.IGNORECASE)),
+)
+
+
+def hint_has_literal(text: str) -> bool:
+    """True if ``text`` contains instance-specific tokens a generalizable hint must avoid.
+
+    Heuristic literal filter for the instance-general miner (used when
+    ``HintMiner(reject_literals=True)``). Catches the audit's overfit patterns:
+    quoted literals to type/select ('KELI', "9"), element bids (``bid=41``),
+    bracketed element ids (``[123]``), ``id '...'`` references, and a bare digit
+    presented as the answer (``enter 9``, ``value 47``). Conservative on ordinals /
+    method phrasing ("click the 3rd row", "compute the result") to avoid rejecting
+    genuinely general hints. Returns False on the empty string.
+    """
+    if not text:
+        return False
+    return any(pattern.search(text) for _, pattern in _LITERAL_PATTERNS)
 
 
 # --------------------------------------------------------------------------- #
@@ -176,9 +266,20 @@ def render_trajectory(traj: Trajectory, max_agent_steps: int = 25) -> str:
 class HintMiner:
     """Mine one generalizable hint per failing task from its trajectories."""
 
-    def __init__(self, llm_config: LLMConfig, max_agent_steps: int = 25) -> None:
+    def __init__(
+        self,
+        llm_config: LLMConfig,
+        max_agent_steps: int = 25,
+        reject_literals: bool = False,
+        general_prompt: bool = False,
+    ) -> None:
         self._llm: LLM = llm_config.make()
         self._max_agent_steps = max_agent_steps
+        # Off by default -> byte-identical to the original miner. general_prompt swaps in
+        # MINER_SYSTEM_PROMPT_GENERAL; reject_literals drops any mined hint that still
+        # contains instance-specific tokens (a belt-and-braces guard over the prompt).
+        self._reject_literals = reject_literals
+        self._system_prompt = MINER_SYSTEM_PROMPT_GENERAL if general_prompt else MINER_SYSTEM_PROMPT
 
     def mine(self, trajectories: list[Trajectory]) -> list[TaskHint]:
         by_task: dict[str, list[Trajectory]] = defaultdict(list)
@@ -208,7 +309,7 @@ class HintMiner:
         parts += ["", "Produce the JSON hint object now."]
         prompt = Prompt(
             messages=[
-                {"role": "system", "content": MINER_SYSTEM_PROMPT},
+                {"role": "system", "content": self._system_prompt},
                 {"role": "user", "content": "\n".join(parts)},
             ]
         )
@@ -227,10 +328,14 @@ class HintMiner:
         raw.setdefault("rationale", "")
         raw.setdefault("confidence", 3)
         try:
-            return TaskHint.model_validate(raw)
+            hint = TaskHint.model_validate(raw)
         except Exception as exc:  # noqa: BLE001
             logger.warning("hint for %s failed validation: %s", task_id, exc)
             return None
+        if self._reject_literals and hint_has_literal(hint.text):
+            logger.info("dropping instance-specific hint for %s: %r", task_id, hint.text)
+            return None
+        return hint
 
 
 # --------------------------------------------------------------------------- #
