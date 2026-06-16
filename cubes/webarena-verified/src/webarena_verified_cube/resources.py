@@ -107,6 +107,9 @@ WEBARENA_WIKIPEDIA = DockerServiceConfig(
             name="webarena_wikipedia_data",
             mount_path="/data",
             source_url="http://metis.lti.cs.cmu.edu/webarena-images/wikipedia_en_all_maxi_2022-05.zim",
+            # Raw .zim, not a tarball — copy into the volume verbatim so kiwix-serve
+            # finds it at /data/wikipedia_en_all_maxi_2022-05.zim (not tar -xf'd).
+            extract=False,
         ),
     ],
     endpoint_to_site={"wikipedia": "wikipedia"},
