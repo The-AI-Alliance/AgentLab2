@@ -86,6 +86,14 @@ WEBARENA_GITLAB = DockerServiceConfig(
 # ── wikipedia ─────────────────────────────────────────────────────────────────
 # Kiwix Wikipedia server.  23 tasks.
 # The ZIM file (~80 GB) is downloaded during provision() via VolumeSpec.
+#
+# We use the upstream multi-arch ghcr.io/kiwix/kiwix-serve image rather than
+# am1n3e/webarena-verified-wikipedia (used for the other five sites): that image
+# is published arm64-only — the only one of the six am1n3e WebArena images not
+# built for amd64 — so it fails to start on the amd64 hosts where the rest of the
+# suite runs. kiwix-serve is the upstream server am1n3e wraps, so it serves the
+# same ZIM (only the am1n3e env-control service on :8874 is dropped, which
+# read-only wikipedia does not use).
 WEBARENA_WIKIPEDIA = DockerServiceConfig(
     name="webarena-wikipedia",
     scope="benchmark",
@@ -184,7 +192,7 @@ WEBARENA_ALL = DockerServiceConfig(
         "am1n3e/webarena-verified-shopping",
         "am1n3e/webarena-verified-reddit",
         "am1n3e/webarena-verified-gitlab",
-        "ghcr.io/kiwix/kiwix-serve:3.8.0",
+        "ghcr.io/kiwix/kiwix-serve:3.8.0",  # not am1n3e: that wikipedia image is arm64-only (see WEBARENA_WIKIPEDIA)
         "am1n3e/webarena-verified-map",
     ],
     services={
