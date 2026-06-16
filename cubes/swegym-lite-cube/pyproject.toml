@@ -2,6 +2,10 @@
 name = "swegym-lite-cube"
 version = "0.1.0"
 description = "SWE-Gym Lite — 230 executable real-world GitHub issues with test-based validation"
+license = "Apache-2.0"
+authors = [
+    { name = "Alexandre Lacoste", email = "alex.lacoste.shmu@gmail.com" },
+]
 requires-python = ">=3.12"
 dependencies = [
     "cube-standard[docker]>=0.1.0rc8",
