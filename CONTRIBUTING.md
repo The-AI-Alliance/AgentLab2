@@ -64,6 +64,10 @@ recipes/            # Example experiment scripts
 tests/              # Test suite
 ```
 
+## Releases
+
+Releases are tag-driven and cross-repo (cube-harness packages publish in tiers 4–5, after cube-standard). The full runbook — promoting `dev`→`main`, the dependency tiers, and the `scripts/release.py` driver — is canonical in cube-standard's [`RELEASING.md`](https://github.com/The-AI-Alliance/cube-standard/blob/main/RELEASING.md).
+
 ## Licenses
 
 - **Code** — Apache 2.0 ([LICENSE.Apache-2.0](LICENSE.Apache-2.0))
