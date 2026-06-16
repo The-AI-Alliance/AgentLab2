@@ -363,7 +363,16 @@ class SWEGymLiteTask(Task[SWEGymLiteTaskMetadata, ContainerTerminalTool]):
         """
         tests = " ".join(shlex.quote(t) for t in test_directives)
         # --no-header requires pytest>=6.0; many SWE-bench containers ship older versions.
-        return f"python -m pytest -rN -p no:cacheprovider {tests}"
+        #
+        # -p no:snail: some SWE-Gym images (e.g. facebookresearch/hydra) bundle the
+        # pytest_snail plugin, whose pytest_unconfigure hook calls
+        # pluginmanager.unregister("snail_plugin") and raises
+        # `AssertionError: plugin is not registered` at teardown — pytest then exits
+        # non-zero *even when every test passed*, so a correct (or gold) patch scores 0.
+        # Disabling the plugin removes the crash without changing test semantics (it only
+        # reports slow tests) and is a no-op on images where it isn't installed. Confirmed
+        # by gold-patch differential on facebookresearch__hydra-1741: reward 0 -> 1.
+        return f"python -m pytest -rN -p no:cacheprovider -p no:snail {tests}"
 
 
 class SWEGymLiteTaskConfig(TaskConfig[SWEGymLiteTaskMetadata]):
