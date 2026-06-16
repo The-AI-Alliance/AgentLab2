@@ -1,9 +1,8 @@
-name: Cube CI (fast)
+name: Cube CI (fast v2)
 
-# Runs `make install && make test` for each cube in cubes/.
-# On PRs, only cubes whose files changed are tested.
-# On push to main, all cubes are tested.
-# No workflow change needed when adding a new cube.
+# For each cube in cubes/, installs it with `uv pip install -e` and runs `cube test <entry-point-name>`.
+# After install, importlib.metadata resolves the cube.benchmarks entry-point name (same as `cube list`).
+# All cubes are tested on every run.
 
 on:
   push:
@@ -18,19 +17,11 @@ jobs:
       cubes: ${{ steps.discover.outputs.cubes }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
-        with:
-          fetch-depth: 0
 
       - id: discover
         run: |
-          all_cubes=$(find cubes/ -mindepth 1 -maxdepth 1 -type d -exec test -f {}/Makefile \; -print | xargs -I{} basename {} | sort)
-          if [ "${{ github.event_name }}" = "push" ]; then
-            cubes=$(echo "$all_cubes" | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          else
-            changed=$(git diff --name-only origin/main... | grep '^cubes/' | cut -d/ -f2 | sort -u)
-            cubes=$(comm -12 <(echo "$all_cubes") <(echo "$changed") | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          fi
-          echo "cubes=$cubes" >> "$GITHUB_OUTPUT"
+          dirs=$(find cubes/ -mindepth 1 -maxdepth 1 -type d | xargs -I{} basename {} | sort)
+          echo "cubes=$(echo "$dirs" | jq -R -s -c 'split("\n") | map(select(length > 0))')" >> "$GITHUB_OUTPUT"
 
   test:
     needs: discover
@@ -56,10 +47,19 @@ jobs:
 
       - name: Install
         working-directory: cubes/${{ matrix.cube }}
-        run: make install
+        run: uv sync --upgrade
 
       - name: Test
         working-directory: cubes/${{ matrix.cube }}
-        run: make test
+        run: |
+          cube_names=$(uv run --no-sync python -c "
+          import importlib.metadata, tomllib
+          pkg = tomllib.load(open('pyproject.toml','rb'))['project']['name']
+          eps = importlib.metadata.entry_points(group='cube.benchmarks')
+          print('\n'.join(ep.name for ep in eps if ep.dist.name == pkg))
+          ")
+          for cube_name in $cube_names; do
+            uv run --no-sync cube test "$cube_name"
+          done
         env:
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}

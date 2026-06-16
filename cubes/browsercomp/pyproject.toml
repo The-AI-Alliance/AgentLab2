@@ -36,6 +36,9 @@ dev = [
     "pytest>=9.0.2",
 ]
 
+[tool.uv.sources]
+cube-standard = { git = "https://github.com/The-AI-Alliance/cube-standard", branch = "dev" }
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

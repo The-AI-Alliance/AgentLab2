@@ -64,6 +64,29 @@ recipes/            # Example experiment scripts
 tests/              # Test suite
 ```
 
+## Adding a new cube
+
+Cubes live under `cubes/<cube-name>/`. CI auto-discovers them — no workflow changes needed when adding a new cube.
+
+Every cube must have a `Makefile` with these targets:
+
+| Target | What it must do |
+|--------|----------------|
+| `make install` | `uv sync --all-extras && uv pip install -e .` plus any cube-specific setup (e.g. `uv run playwright install chromium`, metadata generation scripts) |
+| `make test` | `uv run cube test <cube-name>` — runs the cube-standard debug suite. Must exit 0 on success. |
+
+Optional but conventional:
+
+| Target | What it does |
+|--------|-------------|
+| `make unit-test` | `uv run pytest -n auto tests/` — if the cube has fast unit tests ||
+
+**Secret dependencies:** If `make test` requires a secret (e.g. `HUGGING_FACE_HUB_TOKEN`), handle it in the Makefile — skip gracefully or fail with a clear message. The CI workflow passes secrets through as env vars but is otherwise fully generic. Never add cube-specific logic to the workflow file.
+
+**Testing layers:**
+- `make test` (this repo, pre-merge) — verifies the cube works correctly using its own debug suite. No LLM, no harness stack involved.
+- cube-registry nightly — verifies the published cube version works against each registered cloud provider. Owned by cube-registry, not this repo.
+
 ## Licenses
 
 - **Code** — Apache 2.0 ([LICENSE.Apache-2.0](LICENSE.Apache-2.0))

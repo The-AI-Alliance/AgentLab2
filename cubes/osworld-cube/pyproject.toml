@@ -60,7 +60,8 @@ build-backend = "uv_build"
 [tool.uv-build]
 include = [
     "src/osworld_cube/task_metadata.json",
-    "src/osworld_cube/debug_task_metadata.json"
+    "src/osworld_cube/debug_task_metadata.json",
+    "src/osworld_cube/scripts/install.sh"
 ]
 
 [dependency-groups]

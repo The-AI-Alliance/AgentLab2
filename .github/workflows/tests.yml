@@ -3,8 +3,16 @@ name: Tests
 on:
   push:
     branches: [main, dev]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'pyproject.toml'
   pull_request:
     branches: [main, dev]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'pyproject.toml'
 
 jobs:
   test:

@@ -25,7 +25,7 @@ from typing import ClassVar
 
 from cube.benchmark import Benchmark, BenchmarkConfig, BenchmarkMetadata
 from cube.core import Action, ActionSchema, Observation
-from cube.resource import InfraConfig, ResourceConfig
+from cube.resource import InfraConfig
 from cube.task import RuntimeContext, TaskConfig, TaskMetadata
 from cube.testing import run_debug_suite
 from cube import LocalInfraConfig
@@ -143,10 +143,6 @@ class DebugOSWorldBenchmarkConfig(OSWorldBenchmarkConfig):
     )
     task_config_class: ClassVar[type[TaskConfig]] = DebugOSWorldTaskConfig
     benchmark_class: ClassVar[type[Benchmark]] = OSWorldBenchmark
-
-    # Debug benchmark needs no global resources — debug tasks ship their own data
-    # and the VM is launched per-task via runtime_context["infra"].
-    resources: list[ResourceConfig] = []
 
     @classmethod
     def install(cls) -> None:
