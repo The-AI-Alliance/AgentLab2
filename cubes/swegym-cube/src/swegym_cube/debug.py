@@ -1,8 +1,8 @@
-"""Deterministic debug agent for testing swegym-lite-cube end-to-end without an LLM.
+"""Deterministic debug agent for testing swegym-cube end-to-end without an LLM.
 
 Public API
 ----------
-get_debug_benchmark()         -> SWEGymLiteBenchmarkConfig
+get_debug_benchmark()         -> SWEGymBenchmarkConfig
 make_debug_agent(task_id)     -> DebugAgent
 """
 
@@ -12,7 +12,7 @@ import logging
 
 from cube.core import Action, ActionSchema, Observation
 
-from swegym_lite_cube.benchmark import SWEGymLiteBenchmarkConfig
+from swegym_cube.benchmark import SWEGymBenchmarkConfig
 
 logger = logging.getLogger(__name__)
 
@@ -51,14 +51,14 @@ class DebugAgent:
         return self.get_action(obs)
 
 
-def get_debug_benchmark() -> SWEGymLiteBenchmarkConfig:
-    """Return a ``SWEGymLiteBenchmarkConfig`` scoped to the debug tasks.
+def get_debug_benchmark() -> SWEGymBenchmarkConfig:
+    """Return a ``SWEGymBenchmarkConfig`` scoped to the debug tasks.
 
     Pure factory — the harness owns ``config.install()`` and ``config.make(infra)``.
     Debug tasks run in ``oracle_mode`` so reset() writes the gold patch to
     /tmp/gold_patch.diff.
     """
-    return SWEGymLiteBenchmarkConfig(oracle_mode=True).subset_from_list(list(_TASK_ACTIONS))
+    return SWEGymBenchmarkConfig(oracle_mode=True).subset_from_list(list(_TASK_ACTIONS))
 
 
 def make_debug_agent(task_id: str) -> DebugAgent:
@@ -68,11 +68,11 @@ def make_debug_agent(task_id: str) -> DebugAgent:
 if __name__ == "__main__":
     import sys
 
-    import swegym_lite_cube.debug as _this_module
+    import swegym_cube.debug as _this_module
     from cube.testing import run_debug_suite
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s")
 
-    results = run_debug_suite("swegym-lite-cube", _this_module)
+    results = run_debug_suite("swegym-cube", _this_module)
     failed = [r for r in results if r["error"] or not r["done"] or r["reward"] < 1.0]
     sys.exit(1 if failed else 0)

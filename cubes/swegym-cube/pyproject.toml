@@ -1,7 +1,7 @@
 [project]
-name = "swegym-lite-cube"
+name = "swegym-cube"
 version = "0.1.0"
-description = "SWE-Gym Lite — 230 executable real-world GitHub issues with test-based validation"
+description = "SWE-Gym — 2438 executable real-world GitHub issues with test-based validation (with an official 230-task lite subset)"
 license = "Apache-2.0"
 authors = [
     { name = "Alexandre Lacoste", email = "alex.lacoste.shmu@gmail.com" },
@@ -13,14 +13,14 @@ dependencies = [
 ]
 
 [project.entry-points."cube.benchmarks"]
-swegym-lite-cube = "swegym_lite_cube.benchmark:SWEGymLiteBenchmarkConfig"
+swegym-cube = "swegym_cube.benchmark:SWEGymBenchmarkConfig"
 
 [build-system]
 requires = ["uv_build>=0.8,<0.9"]
 build-backend = "uv_build"
 
 [tool.uv-build]
-include = ["src/swegym_lite_cube/task_metadata.json"]
+include = ["src/swegym_cube/task_metadata.json"]
 
 [tool.uv.sources]
 cube-standard = { git = "https://github.com/The-AI-Alliance/cube-standard", branch = "dev" }

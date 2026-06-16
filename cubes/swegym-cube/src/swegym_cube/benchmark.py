@@ -1,4 +1,4 @@
-"""Benchmark for swegym-lite-cube — SWE-Gym Lite with test-based validation."""
+"""Benchmark for swegym-cube — SWE-Gym with test-based validation."""
 
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ from cube.benchmark import Benchmark, BenchmarkConfig, BenchmarkMetadata
 from cube.resource import InfraConfig
 from cube.task import TaskConfig
 
-from swegym_lite_cube.task import SWEGymLiteTaskConfig, SWEGymLiteTaskMetadata
+from swegym_cube.task import SWEGymTaskConfig, SWEGymTaskMetadata
 
 logger = logging.getLogger(__name__)
 
-_DATASET_NAME = "SWE-Gym/SWE-Gym-Lite"
+_DATASET_NAME = "SWE-Gym/SWE-Gym"
 _DATASET_SPLIT = "train"
 
 
@@ -42,11 +42,11 @@ def _build_execution_info(row: dict[str, Any]) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# SWEGymLiteBenchmark (runtime pair)
+# SWEGymBenchmark (runtime pair)
 # ---------------------------------------------------------------------------
 
 
-class SWEGymLiteBenchmark(Benchmark["SWEGymLiteBenchmarkConfig"]):
+class SWEGymBenchmark(Benchmark["SWEGymBenchmarkConfig"]):
     """Runtime pair — publishes ``self._infra`` (stashed by the base
     ``Benchmark.__init__``) into ``runtime_context["infra"]`` so per-task
     container launches flow through ``Task.runtime_context``.
@@ -57,32 +57,40 @@ class SWEGymLiteBenchmark(Benchmark["SWEGymLiteBenchmarkConfig"]):
         if self._infra is not None:
             self._runtime_context["infra"] = self._infra
         logger.info(
-            "SWEGymLiteBenchmark ready with %d tasks (infra=%s)",
+            "SWEGymBenchmark ready with %d tasks (infra=%s)",
             self.config.num_tasks,
             self._infra.fingerprint() if self._infra is not None else "<none>",
         )
 
     def close(self) -> None:
-        logger.info("SWE-Gym Lite benchmark closed")
+        logger.info("SWE-Gym benchmark closed")
 
 
 # ---------------------------------------------------------------------------
-# SWEGymLiteBenchmarkConfig
+# SWEGymBenchmarkConfig
 # ---------------------------------------------------------------------------
 
 
-class SWEGymLiteBenchmarkConfig(BenchmarkConfig[SWEGymLiteTaskMetadata]):
-    """SWE-Gym Lite — 230 real-world GitHub issues with test-based validation."""
+class SWEGymBenchmarkConfig(BenchmarkConfig[SWEGymTaskMetadata]):
+    """SWE-Gym — 2438 real-world GitHub issues with test-based validation.
+
+    Ships an official 230-task ``lite`` subset (the upstream SWE-Gym-Lite split,
+    the score-comparable evaluation set). Select it with ``named_subset("lite")``.
+    """
 
     benchmark_metadata: ClassVar[BenchmarkMetadata] = BenchmarkMetadata(
-        name="swegym-lite-cube",
+        name="swegym-cube",
         version="0.1.0",
-        description="SWE-Gym Lite — 230 executable real-world GitHub issues with test-based validation",
-        num_tasks=230,
+        description=(
+            "SWE-Gym — 2438 executable real-world GitHub issues with test-based "
+            "validation, with an official 230-task `lite` subset"
+        ),
+        num_tasks=2438,
         tags=["swe", "github", "docker", "training"],
+        named_subsets={"lite": ("subset", "lite")},
     )
-    task_config_class: ClassVar[type[TaskConfig]] = SWEGymLiteTaskConfig
-    benchmark_class: ClassVar[type[Benchmark]] = SWEGymLiteBenchmark
+    task_config_class: ClassVar[type[TaskConfig]] = SWEGymTaskConfig
+    benchmark_class: ClassVar[type[Benchmark]] = SWEGymBenchmark
 
     # User-configurable fields
     oracle_mode: bool = False
@@ -144,16 +152,16 @@ class SWEGymLiteBenchmarkConfig(BenchmarkConfig[SWEGymLiteTaskMetadata]):
     # Factory / task generation
     # ------------------------------------------------------------------
 
-    def make(self, infra: InfraConfig | None = None) -> SWEGymLiteBenchmark:
+    def make(self, infra: InfraConfig | None = None) -> SWEGymBenchmark:
         """Resolve a default infra of ``LocalInfraConfig`` if none provided, then
         delegate to the base ``BenchmarkConfig.make`` for provisioning + setup.
         """
-        return cast(SWEGymLiteBenchmark, super().make(infra=infra or LocalInfraConfig()))
+        return cast(SWEGymBenchmark, super().make(infra=infra or LocalInfraConfig()))
 
-    def get_task_configs(self) -> Generator[SWEGymLiteTaskConfig, None, None]:
+    def get_task_configs(self) -> Generator[SWEGymTaskConfig, None, None]:
         """Yield TaskConfigs with oracle_mode forwarded from benchmark settings."""
         for tm in self.tasks().values():
-            yield SWEGymLiteTaskConfig(
+            yield SWEGymTaskConfig(
                 metadata=tm,
                 tool_config=self.tool_config,
                 oracle_mode=self.oracle_mode,
@@ -176,8 +184,8 @@ class SWEGymLiteBenchmarkConfig(BenchmarkConfig[SWEGymLiteTaskMetadata]):
 # (daytona/local/aws/azure) run them normally. See cube-harness#446.
 #
 # Unlike swebench-verified-cube, this set starts EMPTY: the offending instances must be
-# identified empirically for SWE-Gym Lite via the gold-patch differential (toolkit-fail +
-# daytona-root-pass). Until then, the fail-loud probe in ``SWEGymLiteTask.reset()`` (#452)
+# identified empirically for SWE-Gym via the gold-patch differential (toolkit-fail +
+# daytona-root-pass). Until then, the fail-loud probe in ``SWEGymTask.reset()`` (#452)
 # protects every (untagged) task at runtime — a non-root infra that hits an unpatchable
 # root-owned dir raises ``IncompatibleInfraError`` rather than silently scoring 0. Populate
 # this set once the differential surfaces concrete instance_ids.

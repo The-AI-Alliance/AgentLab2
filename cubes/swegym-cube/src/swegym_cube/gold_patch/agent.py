@@ -1,11 +1,11 @@
-"""Gold-patch oracle agent for SWE-Gym Lite.
+"""Gold-patch oracle agent for SWE-Gym.
 
-Applies the gold patch written by SWEGymLiteTask.reset() (oracle_mode=True)
+Applies the gold patch written by SWEGymTask.reset() (oracle_mode=True)
 then immediately calls final_step. Used to validate the eval pipeline and
 identify which tasks are solvable before running any real agent.
 
-Requires cube-harness (not a swegym-lite-cube runtime dependency).
-Install with: pip install swegym-lite-cube[eval]
+Requires cube-harness (not a swegym-cube runtime dependency).
+Install with: pip install swegym-cube[eval]
 """
 
 from cube.core import Action, ActionSchema, Observation

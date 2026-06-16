@@ -1,4 +1,4 @@
-"""Task and TaskConfig for swegym-lite-cube."""
+"""Task and TaskConfig for swegym-cube."""
 
 from __future__ import annotations
 
@@ -32,13 +32,13 @@ When your fix is complete:
 """
 
 
-class SWEGymLiteTaskMetadata(TaskMetadata):
-    """TaskMetadata subclass for SWE-Gym Lite tasks.
+class SWEGymTaskMetadata(TaskMetadata):
+    """TaskMetadata subclass for SWE-Gym tasks.
 
     Public fields shipped in task_metadata.json (available at import time).
     Heavy execution data (problem_statement, patch, test_patch, etc.) lives on
-    ``SWEGymLiteExecutionInfo`` and is loaded lazily by
-    ``SWEGymLiteTaskConfig.make()``.
+    ``SWEGymExecutionInfo`` and is loaded lazily by
+    ``SWEGymTaskConfig.make()``.
 
     Note: SWE-Gym (unlike SWE-bench Verified) ships no human ``difficulty``
     annotation, so there is no ``difficulty`` field here.
@@ -53,12 +53,18 @@ class SWEGymLiteTaskMetadata(TaskMetadata):
     base_commit: str
     """Git SHA of the base commit the agent starts from."""
 
+    subset: str = "full"
+    """Which official subset this task belongs to: ``"lite"`` for the 230-task
+    score-comparable SWE-Gym-Lite split, ``"full"`` for every other task in the
+    2438-task SWE-Gym training set. Drives ``named_subset("lite")`` (matched via
+    ``BenchmarkMetadata.named_subsets`` on the ``subset`` glob key)."""
 
-class SWEGymLiteExecutionInfo(TaskExecutionInfo):
-    """Heavy per-task execution data for SWE-Gym Lite — populated on the worker.
 
-    Loaded by ``SWEGymLiteTaskConfig.make()`` from the per-task execution cache
-    written by ``SWEGymLiteBenchmarkConfig.install()``.
+class SWEGymExecutionInfo(TaskExecutionInfo):
+    """Heavy per-task execution data for SWE-Gym — populated on the worker.
+
+    Loaded by ``SWEGymTaskConfig.make()`` from the per-task execution cache
+    written by ``SWEGymBenchmarkConfig.install()``.
     """
 
     problem_statement: str
@@ -80,8 +86,8 @@ class SWEGymLiteExecutionInfo(TaskExecutionInfo):
     """Wall-clock seconds allowed for the evaluation test commands."""
 
 
-class SWEGymLiteTask(Task[SWEGymLiteTaskMetadata, ContainerTerminalTool]):
-    """A single SWE-Gym Lite task with test-based validation."""
+class SWEGymTask(Task[SWEGymTaskMetadata, ContainerTerminalTool]):
+    """A single SWE-Gym task with test-based validation."""
 
     validate_per_step: bool = False
 
@@ -94,13 +100,13 @@ class SWEGymLiteTask(Task[SWEGymLiteTaskMetadata, ContainerTerminalTool]):
     description must match the original SWE-Gym problem statement exactly."""
 
     @property
-    def _exec(self) -> SWEGymLiteExecutionInfo:
+    def _exec(self) -> SWEGymExecutionInfo:
         """Typed view on execution_info — fails fast if it was not populated."""
-        if not isinstance(self.execution_info, SWEGymLiteExecutionInfo):
+        if not isinstance(self.execution_info, SWEGymExecutionInfo):
             raise RuntimeError(
-                f"SWEGymLiteTask {self.metadata.id!r}: execution_info is "
-                f"{type(self.execution_info).__name__}, expected SWEGymLiteExecutionInfo. "
-                f"Construct via SWEGymLiteTaskConfig.make() so it is populated."
+                f"SWEGymTask {self.metadata.id!r}: execution_info is "
+                f"{type(self.execution_info).__name__}, expected SWEGymExecutionInfo. "
+                f"Construct via SWEGymTaskConfig.make() so it is populated."
             )
         return self.execution_info
 
@@ -280,7 +286,7 @@ class SWEGymLiteTask(Task[SWEGymLiteTaskMetadata, ContainerTerminalTool]):
         self.tool.bash_unlimited(f"echo '{b64}' | base64 -d > /tmp/patch.diff")
 
         # Try git apply first
-        # Commands run in tool.working_dir (set by SWEGymLiteTaskConfig.make) — no need
+        # Commands run in tool.working_dir (set by SWEGymTaskConfig.make) — no need
         # to cd, and hardcoding '/testbed' breaks when _make_tool relocated the tool to a
         # writable copy via relocate_if_readonly.
         result = self.tool.bash_unlimited("git apply /tmp/patch.diff 2>&1", timeout=30)
@@ -352,14 +358,11 @@ class SWEGymLiteTask(Task[SWEGymLiteTaskMetadata, ContainerTerminalTool]):
 
     @staticmethod
     def _build_test_cmd(repo: str, test_directives: list[str]) -> str:
-        """Build the pytest command for a SWE-Gym Lite task.
+        """Build the pytest command for a SWE-Gym task.
 
-        All 11 SWE-Gym Lite repos (getmoto/moto, python/mypy, conan-io/conan,
-        iterative/dvc, dask/dask, pydantic/pydantic, pandas-dev/pandas,
-        facebookresearch/hydra, bokeh/bokeh, Project-MONAI/MONAI, modin-project/modin)
-        use pytest with standard node-id directives, so a single pytest invocation
-        covers every task — no per-repo special-casing (unlike SWE-bench Verified,
-        which also carries django/sympy with bespoke runners).
+        Every SWE-Gym repo uses pytest with standard node-id directives, so a single
+        pytest invocation covers every task — no per-repo special-casing (unlike
+        SWE-bench Verified, which also carries django/sympy with bespoke runners).
         """
         tests = " ".join(shlex.quote(t) for t in test_directives)
         # -rN keeps the summary terse; -p no:cacheprovider avoids writing a .pytest_cache
@@ -376,11 +379,11 @@ class SWEGymLiteTask(Task[SWEGymLiteTaskMetadata, ContainerTerminalTool]):
         return f"python -m pytest -rN -p no:cacheprovider -p no:snail {tests}"
 
 
-class SWEGymLiteTaskConfig(TaskConfig[SWEGymLiteTaskMetadata]):
-    """Serializable factory that produces a SWEGymLiteTask.
+class SWEGymTaskConfig(TaskConfig[SWEGymTaskMetadata]):
+    """Serializable factory that produces a SWEGymTask.
 
     Loads heavy execution data (problem_statement, patch, test_patch, etc.) from
-    the per-task execution cache populated by ``SWEGymLiteBenchmarkConfig.install()``.
+    the per-task execution cache populated by ``SWEGymBenchmarkConfig.install()``.
     """
 
     oracle_mode: bool = False
@@ -391,23 +394,23 @@ class SWEGymLiteTaskConfig(TaskConfig[SWEGymLiteTaskMetadata]):
         cache_dir = type(self).task_execution_cache_dir()
         if not cache_dir.exists() or not any(cache_dir.iterdir()):
             raise RuntimeError(
-                f"SWE-Gym Lite per-task execution cache is empty at {cache_dir}. "
-                f"Run `cube install swegym-lite-cube` (or "
-                f"`SWEGymLiteBenchmarkConfig.install()`) on this worker first."
+                f"SWE-Gym per-task execution cache is empty at {cache_dir}. "
+                f"Run `cube install swegym-cube` (or "
+                f"`SWEGymBenchmarkConfig.install()`) on this worker first."
             )
 
     def make(
         self,
         runtime_context: RuntimeContext | None = None,
-    ) -> SWEGymLiteTask:
+    ) -> SWEGymTask:
         if runtime_context is None or "infra" not in runtime_context:
-            raise ValueError("SWEGymLiteTaskConfig.make() requires runtime_context['infra'].")
+            raise ValueError("SWEGymTaskConfig.make() requires runtime_context['infra'].")
 
         self.verify_installed()
         raw = self.load_task_execution_info()
-        execution_info = SWEGymLiteExecutionInfo.model_validate(raw)
+        execution_info = SWEGymExecutionInfo.model_validate(raw)
 
-        return SWEGymLiteTask(
+        return SWEGymTask(
             metadata=self.metadata,
             execution_info=execution_info,
             tool_config=self.tool_config or TerminalToolConfig(working_dir="/testbed", enable_file_actions=True),

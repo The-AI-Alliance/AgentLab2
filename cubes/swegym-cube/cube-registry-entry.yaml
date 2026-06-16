@@ -1,0 +1,41 @@
+id: swegym-lite
+name: "SWE-Gym Lite"
+version: "0.1.0"
+description: >
+  SWE-Gym Lite ported to the CUBE protocol — the 230-instance subset of
+  SWE-Gym (ICML 2025), a training environment of real-world Python
+  software-engineering tasks collected with the SWE-bench methodology across
+  11 repositories (moto, mypy, conan, dvc, dask, pydantic, pandas, hydra,
+  bokeh, MONAI, modin). The agent receives a GitHub issue and a git checkout
+  at the base commit inside a pre-built executable Docker container, and must
+  produce a patch that makes the upstream fail_to_pass tests pass without
+  breaking pass_to_pass.
+package: swegym-lite-cube
+# NOTE: points at the cube-harness feature branch until the cube-harness PR
+# merges to the default branch; drop the @ref (or pin @dev) after merge.
+dev_install_url: "git+https://github.com/The-AI-Alliance/cube-harness@feat/swegym-lite-cube#subdirectory=cubes/swegym-lite-cube"
+
+authors:
+  - github: recursix
+    name: Alexandre Lacoste
+
+legal:
+  wrapper_license: Apache-2.0
+  benchmark_license:
+    reported: Apache-2.0
+    source_url: "https://github.com/SWE-Gym/SWE-Gym/blob/main/LICENSE"
+    verified_by_original_authors: false
+  notices:
+    - type: third_party_data
+      description: >
+        Wraps the third-party SWE-Gym Lite dataset
+        (https://huggingface.co/datasets/SWE-Gym/SWE-Gym-Lite) and the
+        community-published per-instance evaluation images under the
+        xingyaoww/sweb.eval.x86_64.* Docker Hub namespace.
+
+paper: "https://arxiv.org/abs/2412.21139"
+getting_started_url: "https://github.com/SWE-Gym/SWE-Gym"
+tags:
+  - coding
+  - swe
+  - docker

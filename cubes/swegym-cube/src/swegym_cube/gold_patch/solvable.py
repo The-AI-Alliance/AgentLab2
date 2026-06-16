@@ -4,7 +4,7 @@ After a gold-patch run (see ``recipe.py``), these read the trajectory rewards
 to report which tasks the environment can actually resolve. Pure post-hoc
 helpers — no CLI, no side effects.
 
-Requires cube-harness (not a swegym-lite-cube runtime dependency).
+Requires cube-harness (not a swegym-cube runtime dependency).
 """
 
 from __future__ import annotations

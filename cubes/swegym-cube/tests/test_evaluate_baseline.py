@@ -1,4 +1,4 @@
-"""Tests for the F2a baseline-subtract behaviour in ``SWEGymLiteTask.evaluate``.
+"""Tests for the F2a baseline-subtract behaviour in ``SWEGymTask.evaluate``.
 
 Asserts the invariant: **if pass_to_pass already fails on the unpatched tree,
 a post-patch p2p failure with the same shape must NOT score the agent 0.0**
@@ -14,30 +14,30 @@ from unittest.mock import MagicMock, patch
 
 from cube.tools.terminal import TerminalToolConfig
 
-from swegym_lite_cube.task import (
-    SWEGymLiteExecutionInfo,
-    SWEGymLiteTask,
-    SWEGymLiteTaskMetadata,
+from swegym_cube.task import (
+    SWEGymExecutionInfo,
+    SWEGymTask,
+    SWEGymTaskMetadata,
 )
 
 
-def _make_task() -> SWEGymLiteTask:
+def _make_task() -> SWEGymTask:
     """Construct a Task without launching a real container.
 
     Patches ``model_post_init`` so the base ``cube.task.Task`` does not try to
     provision an infra container or build a tool. The test only exercises
     ``evaluate``, which we drive by patching ``_run_tests`` and ``_apply_patch``.
     """
-    with patch.object(SWEGymLiteTask, "model_post_init", lambda *a, **kw: None):
-        task = SWEGymLiteTask(
-            metadata=SWEGymLiteTaskMetadata(
+    with patch.object(SWEGymTask, "model_post_init", lambda *a, **kw: None):
+        task = SWEGymTask(
+            metadata=SWEGymTaskMetadata(
                 id="getmoto__moto-5699",
                 description="cloudfront list invalidations",
                 repo="getmoto/moto",
                 version="4.0",
                 base_commit="deadbeef",
             ),
-            execution_info=SWEGymLiteExecutionInfo(
+            execution_info=SWEGymExecutionInfo(
                 problem_statement="x",
                 patch="diff",
                 test_patch="diff",

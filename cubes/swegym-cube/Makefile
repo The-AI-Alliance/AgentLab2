@@ -1,10 +1,10 @@
 .PHONY: test debug install
 
 test:
-	uv run cube test swegym-lite-cube
+	uv run cube test swegym-cube
 
 debug:
-	uv run python -m swegym_lite_cube.debug
+	uv run python -m swegym_cube.debug
 
 install:
 	uv sync --all-extras
