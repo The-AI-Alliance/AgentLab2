@@ -1,6 +1,6 @@
 [project]
 name = "webarena-verified-cube"
-version = "1.0.0"
+version = "1.1.0"
 description = "WebArena-Verified benchmark cube — 812 verified web automation tasks"
 requires-python = ">=3.12"
 dependencies = [

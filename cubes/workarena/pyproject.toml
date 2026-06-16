@@ -1,6 +1,6 @@
 [project]
 name = "workarena-cube"
-version = "1.0.0"
+version = "1.1.0"
 description = "WorkArena ServiceNow benchmark for cube"
 requires-python = ">=3.12,<3.13"
 dependencies = [
