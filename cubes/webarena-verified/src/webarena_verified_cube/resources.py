@@ -89,7 +89,7 @@ WEBARENA_GITLAB = DockerServiceConfig(
 WEBARENA_WIKIPEDIA = DockerServiceConfig(
     name="webarena-wikipedia",
     scope="benchmark",
-    docker_images=["am1n3e/webarena-verified-wikipedia"],
+    docker_images=["ghcr.io/kiwix/kiwix-serve:3.8.0"],
     services={
         "wikipedia": 8888,  # web UI  (container port 8080)
         "wikipedia_ctrl": 8889,  # env-ctrl (container port 8874)
@@ -184,7 +184,7 @@ WEBARENA_ALL = DockerServiceConfig(
         "am1n3e/webarena-verified-shopping",
         "am1n3e/webarena-verified-reddit",
         "am1n3e/webarena-verified-gitlab",
-        "am1n3e/webarena-verified-wikipedia",
+        "ghcr.io/kiwix/kiwix-serve:3.8.0",
         "am1n3e/webarena-verified-map",
     ],
     services={

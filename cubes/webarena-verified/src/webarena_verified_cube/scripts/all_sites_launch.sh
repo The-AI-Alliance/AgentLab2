@@ -29,7 +29,8 @@ docker run -d --name webarena_gitlab \
 docker run -d --name webarena_wikipedia \
     -p 8888:8080 -p 8889:8874 \
     -v webarena_wikipedia_data:/data \
-    am1n3e/webarena-verified-wikipedia
+    ghcr.io/kiwix/kiwix-serve:3.8.0 \
+    /data/wikipedia_en_all_maxi_2022-05.zim
 
 # ── map (OSM + Nominatim + OSRM — 9 volumes pre-populated by VolumeSpec) ─────
 docker run -d --name webarena_map \
