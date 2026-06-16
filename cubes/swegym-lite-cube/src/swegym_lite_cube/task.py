@@ -280,9 +280,9 @@ class SWEGymLiteTask(Task[SWEGymLiteTaskMetadata, ContainerTerminalTool]):
         self.tool.bash_unlimited(f"echo '{b64}' | base64 -d > /tmp/patch.diff")
 
         # Try git apply first
-        # Commands run in tool.working_dir (set by SWEBenchToolConfig) — no need
-        # to cd, and hardcoding '/testbed' breaks when the tool relocated to a
-        # writable copy (see _maybe_relocate_testbed).
+        # Commands run in tool.working_dir (set by SWEGymLiteTaskConfig.make) — no need
+        # to cd, and hardcoding '/testbed' breaks when _make_tool relocated the tool to a
+        # writable copy via relocate_if_readonly.
         result = self.tool.bash_unlimited("git apply /tmp/patch.diff 2>&1", timeout=30)
         if "[exit_code:" not in result and "[error]" not in result:
             return result
@@ -362,7 +362,8 @@ class SWEGymLiteTask(Task[SWEGymLiteTaskMetadata, ContainerTerminalTool]):
         which also carries django/sympy with bespoke runners).
         """
         tests = " ".join(shlex.quote(t) for t in test_directives)
-        # --no-header requires pytest>=6.0; many SWE-bench containers ship older versions.
+        # -rN keeps the summary terse; -p no:cacheprovider avoids writing a .pytest_cache
+        # (some SWE-Gym images mount /testbed read-only at the package root).
         #
         # -p no:snail: some SWE-Gym images (e.g. facebookresearch/hydra) bundle the
         # pytest_snail plugin, whose pytest_unconfigure hook calls
