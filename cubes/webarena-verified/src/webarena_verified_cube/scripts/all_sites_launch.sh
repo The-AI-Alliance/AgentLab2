@@ -5,6 +5,22 @@ set -euo pipefail
 
 echo "[launch] Starting all 6 WebArena-Verified containers …"
 
+dump_service_debug() {
+    local name="$1"
+    local container="webarena_${name}"
+    echo "[launch][debug] $name container status:"
+    docker ps -a --filter "name=${container}" --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
+    echo "[launch][debug] $name recent container logs:"
+    docker logs --tail 200 "${container}" 2>&1 || true
+    if [ "$name" = "wikipedia" ]; then
+        echo "[launch][debug] wikipedia /data details:"
+        docker exec webarena_wikipedia sh -lc \
+            'ls -lah /data && stat /data/wikipedia_en_all_maxi_2022-05.zim || true' 2>&1 || true
+        echo "[launch][debug] wikipedia kiwix version:"
+        docker exec webarena_wikipedia sh -lc 'kiwix-serve --version || true' 2>&1 || true
+    fi
+}
+
 # ── shopping_admin (Magento admin) ────────────────────────────────────────────
 docker run -d --name webarena_shopping_admin \
     -p 7780:80 -p 7781:8877 \
@@ -55,6 +71,7 @@ wait_healthy() {
         sleep 2
     done
     echo "ERROR: $name did not become healthy after $((max_attempts * 2))s" >&2
+    dump_service_debug "$name"
     exit 1
 }
 
@@ -75,4 +92,7 @@ echo "[launch] All 6 sites healthy"
 
 # Magento sites need extra warmup for PHP caches
 sleep 30
+
+# Reddit rate-limit relaxation is appended here from resources.py (_REDDIT_RELAX),
+# shared with reddit_launch.sh — see scripts/reddit_relax_limits.sh.
 echo "[launch] Warmup complete — ready"

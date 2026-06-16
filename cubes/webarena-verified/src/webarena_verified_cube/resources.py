@@ -27,6 +27,13 @@ def _script(name: str) -> str:
     return (_SCRIPTS_DIR / name).read_text()
 
 
+# Reddit rate-limit relaxation, appended to every launch path that starts the
+# reddit container (reddit alone, or all sites together). Single source so the
+# two paths can't drift; shipped inline since launch scripts are passed to the
+# infra host as strings (no sibling files at runtime).
+_REDDIT_RELAX = "\n" + _script("reddit_relax_limits.sh")
+
+
 # ── shopping_admin ────────────────────────────────────────────────────────────
 # Magento admin portal.  184 tasks.
 WEBARENA_SHOPPING_ADMIN = DockerServiceConfig(
@@ -66,7 +73,7 @@ WEBARENA_REDDIT = DockerServiceConfig(
         "reddit_ctrl": 9998,  # env-ctrl (container port 8877)
     },
     endpoint_to_site={"reddit": "reddit"},
-    launch_script=_script("reddit_launch.sh"),
+    launch_script=_script("reddit_launch.sh") + _REDDIT_RELAX,
 )
 
 # ── gitlab ────────────────────────────────────────────────────────────────────
@@ -216,5 +223,5 @@ WEBARENA_ALL = DockerServiceConfig(
         "wikipedia": "wikipedia",
         "map": "map",
     },
-    launch_script=_script("all_sites_launch.sh"),
+    launch_script=_script("all_sites_launch.sh") + _REDDIT_RELAX,
 )

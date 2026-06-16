@@ -17,3 +17,6 @@ if [ "$healthy" -eq 0 ]; then
     echo "ERROR: reddit did not become healthy after 120s" >&2
     exit 1
 fi
+
+# Reddit rate-limit relaxation is appended here from resources.py (_REDDIT_RELAX),
+# shared with all_sites_launch.sh — see scripts/reddit_relax_limits.sh.
