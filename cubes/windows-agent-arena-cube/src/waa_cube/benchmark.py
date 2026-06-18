@@ -176,7 +176,11 @@ class WAABenchmark(BenchmarkConfig):
             "ram_gb": 8,
             "disk_gb": 60,
         },
-        num_tasks=154,
+        # 152 unique tasks: task_metadata.json carries 154 raw entries, but two
+        # pairs share an upstream WAA id (id collision), so the id-keyed
+        # task_metadata dict — and task_execution_info.json — resolve to 152.
+        # num_tasks must match the dict length the harness actually serves.
+        num_tasks=152,
         tags=["desktop", "gui", "windows", "multimodal"],
     )
 

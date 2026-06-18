@@ -56,7 +56,10 @@ class BrowseCompBenchmarkConfig(BenchmarkConfig[BrowseCompTaskMetadata]):
     task_config_class: ClassVar[type[TaskConfig]] = BrowseCompTaskConfig
     benchmark_class: ClassVar[type[Benchmark]] = BrowseCompBenchmark
 
-    scorer_model: str
+    # LLM judge used to grade answers. Has a default so the config is
+    # instantiable for introspection (registry compliance, `cube list`);
+    # override per-experiment. The deterministic debug benchmark doesn't use it.
+    scorer_model: str = "openai/gpt-4o"
 
     @classmethod
     def install(cls) -> None:
