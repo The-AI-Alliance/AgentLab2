@@ -1,3 +1,6 @@
+# REGISTRY: do NOT add this cube to cube-registry (no `cube registry add` / `--submit`).
+# arithmetic-cube is a demo/reference benchmark for examples & tests only — not a real
+# benchmark for the public catalog. Intentionally excluded. (note for humans + AI agents)
 [project]
 name = "arithmetic-cube"
 version = "0.1.0"
