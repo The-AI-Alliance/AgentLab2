@@ -8,7 +8,8 @@ from cube.benchmark import Benchmark, BenchmarkConfig, BenchmarkMetadata
 from cube.infra_local import LocalInfraConfig
 from cube.resource import DockerServiceConfig, InfraConfig, ResourceHandle
 from cube.task import TaskConfig
-from cube.tool import ToolboxConfig
+from cube.tool import ToolboxConfig, ToolConfig
+from pydantic import SerializeAsAny
 from webarena_verified.types.config import EnvironmentConfig, WebArenaVerifiedConfig
 from webarena_verified.types.task import WebArenaSite
 
@@ -185,8 +186,12 @@ class WebArenaVerifiedBenchmarkConfig(BenchmarkConfig[WebArenaVerifiedTaskMetada
     (sites, expected_action, intent_template_id). No heavy execution data exists."""
     task_config_class: ClassVar[type[TaskConfig]] = WebArenaVerifiedTaskConfig
     benchmark_class: ClassVar[type[Benchmark]] = WebArenaVerifiedBenchmark
-    tool_config: ToolboxConfig = ToolboxConfig(tool_configs=[HarPlaywrightConfig(), SubmitResponseConfig()])  # type: ignore
-    """Default ToolboxConfig with tools for HAR-based environment observation and agent response submission."""
+    tool_config: SerializeAsAny[ToolConfig] = ToolboxConfig(
+        tool_configs=[HarPlaywrightConfig(), SubmitResponseConfig()]
+    )
+    """Tool config applied to every task. Any ToolConfig is accepted (the canonical
+    "default" config in configs.py uses a BgymToolConfig); the field default here is a
+    ToolboxConfig with HAR-based observation + agent response submission."""
 
     wav_config: WebArenaVerifiedConfig = WebArenaVerifiedConfig()
     """WAV client configuration.
