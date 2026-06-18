@@ -8,7 +8,9 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "cube-standard[docker]>=0.1.0rc8",
+    # rc9 is the first release with cube.resource.IncompatibleInfraError (used by the
+    # non-root writability probe). The pip-based registry check resolves this from PyPI.
+    "cube-standard[docker]>=0.1.0rc9",
     "datasets",
 ]
 
