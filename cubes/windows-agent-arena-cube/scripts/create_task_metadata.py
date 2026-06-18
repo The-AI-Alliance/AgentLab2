@@ -237,6 +237,13 @@ def generate_task_metadata(
             continue
 
         tm = TaskMetadata(
+            # NOTE: `td["id"]` (the task JSON's internal id) is NOT unique — two
+            # WAA task pairs share an internal id while their filenames (`task_id`,
+            # which carry a -2/-3 suffix) differ. Using td["id"] here collides
+            # those into one dict key and silently drops 2 tasks (154 -> 152). To
+            # recover all 154, switch this to the unique `task_id` (filename) and
+            # regenerate task_execution_info.json with the same key. See the note
+            # in benchmark.py. Left as-is to avoid renaming every shipped task id.
             id=td.get("id", task_id),
             abstract_description=td.get("instruction", ""),
             extra_info={

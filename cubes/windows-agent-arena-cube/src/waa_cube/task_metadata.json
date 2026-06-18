@@ -794,14 +794,6 @@
   {
     "id": "982d12a5-beab-424f-8d38-d2a48429e511-WOS",
     "split": "test",
-    "abstract_description": "Change VS Code's color theme to Solarized Dark.",
-    "recommended_max_steps": null,
-    "container_config": null,
-    "_type": "cube.task.TaskMetadata"
-  },
-  {
-    "id": "982d12a5-beab-424f-8d38-d2a48429e511-WOS",
-    "split": "test",
     "abstract_description": "Please help me change the color theme of VS Code to Visual Studio Dark.",
     "recommended_max_steps": null,
     "container_config": null,
@@ -835,14 +827,6 @@
     "id": "9ed02102-6b28-4946-8339-c028166e9512-WOS",
     "split": "test",
     "abstract_description": "I want to calculate the revenue for each transaction in the sales table considering corresponding retail price and discount. Please help me do this in a new column with header \"Revenue\". Then create a pivot table in a new sheet to show the counts of the websites on which boomerangs were sold. Finally, plot a bar chart in this new sheet for the pivot table with chart title \"Sales frequency by website\" and without legends.",
-    "recommended_max_steps": null,
-    "container_config": null,
-    "_type": "cube.task.TaskMetadata"
-  },
-  {
-    "id": "INF-5ac2891a-eacd-4954-b339-98abba077adb-WOS",
-    "split": "test",
-    "abstract_description": "Could you help me open the folder containing the current video I am playing?",
     "recommended_max_steps": null,
     "container_config": null,
     "_type": "cube.task.TaskMetadata"

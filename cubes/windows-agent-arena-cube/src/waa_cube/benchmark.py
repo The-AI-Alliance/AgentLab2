@@ -176,10 +176,17 @@ class WAABenchmark(BenchmarkConfig):
             "ram_gb": 8,
             "disk_gb": 60,
         },
-        # 152 unique tasks: task_metadata.json carries 154 raw entries, but two
-        # pairs share an upstream WAA id (id collision), so the id-keyed
-        # task_metadata dict — and task_execution_info.json — resolve to 152.
-        # num_tasks must match the dict length the harness actually serves.
+        # 152 tasks. WAA upstream nominally has 154, but two task pairs were
+        # assigned the SAME internal id (an upstream data bug); their
+        # task_execution_info (setup + evaluator) collapsed to one entry each, so
+        # only 152 are actually runnable. We dropped the two metadata entries
+        # whose execution data wasn't shipped, keeping the half that matches the
+        # surviving evaluator:
+        #   - kept "VS Code → Visual Studio Dark"  (dropped "→ Solarized Dark")
+        #   - kept the VLC infeasible task          (dropped "open current video's folder")
+        # To recover the full 154, regenerate from the upstream WAA eval dir with
+        # a unique-filename id scheme — see scripts/create_task_metadata.py (its
+        # id is taken from the task JSON's internal "id", which is what collides).
         num_tasks=152,
         tags=["desktop", "gui", "windows", "multimodal"],
     )
