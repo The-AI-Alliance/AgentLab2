@@ -28,23 +28,26 @@ from cube_harness.recipe import run
 TASK_IDS: list[str] = []  # empty = full benchmark; or an explicit subset to profile
 MODEL = "gpt-5.4-mini"  # cheap; you're profiling infra/harness, not the model
 COST_PER_TASK = 0.50
+MAX_STEPS = 60
 
 # --- assemble -------------------------------------------------------------
 
 agent = GENNY_CONFIGS["swe"]
 agent.llm_config = LLMConfig(model_name=MODEL, temperature=1.0)
-agent.budget.cost_limit = COST_PER_TASK
 
 benchmark = TERMINALBENCH2_CONFIGS["default"]
 if TASK_IDS:
     benchmark = benchmark.subset_from_list(TASK_IDS)
 
+# Budget caps live on Experiment, not the agent config: max_steps →
+# Budget.max_agent_steps, max_cost_usd → Budget.max_cost_usd.
 exp = Experiment(
     name="auto-cube-profile-r<N>",
     agent_config=agent,
     benchmark_config=benchmark,
     infra=INFRA_CONFIGS["local"],
-    max_steps=agent.budget.max_actions or 60,
+    max_steps=MAX_STEPS,
+    max_cost_usd=COST_PER_TASK,
     is_official=False,  # Auto-CUBE iteration run — never a submittable evaluation.
     # Always-on profiling: phase wall-clock + host resource sampling. Set
     # gpu=True only when a self-hosted inference server shares this host (RL).

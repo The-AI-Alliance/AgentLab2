@@ -5,7 +5,7 @@
 
     agent = GENNY_CONFIGS["swe"]
     agent.llm_config = LLMConfig(model_name="gpt-5.4-mini", temperature=1.0)
-    agent.budget.cost_limit = 2.0
+    # Budget caps live on Experiment (max_steps, max_cost_usd), not the agent.
 
 Every lookup returns a fresh deep copy (see `ConfigRegistry`). The building
 blocks below (`INSTANCE_TEMPLATES`, `make_agent_config`) stay public for
