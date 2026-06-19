@@ -3,6 +3,7 @@ from pathlib import Path
 from waa_cube.benchmark import WAABenchmark, WAABenchmarkRuntime, WAATaskConfig
 from waa_cube.computer import ComputerConfig
 from waa_cube.configs import WAA_CONFIGS
+from waa_cube.debug import get_debug_benchmark, make_debug_agent
 from waa_cube.task import WAATask, WAATaskExecutionInfo
 
 
@@ -19,4 +20,6 @@ __all__ = [
     "WAATask",
     "WAATaskExecutionInfo",
     "ComputerConfig",
+    "get_debug_benchmark",
+    "make_debug_agent",
 ]

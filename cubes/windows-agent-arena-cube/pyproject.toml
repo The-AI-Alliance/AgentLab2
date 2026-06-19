@@ -1,6 +1,6 @@
 [project]
 name = "waa-cube"
-version = "0.1.1"
+version = "0.1.2"
 description = "WindowsAgentArena benchmark ported to the CUBE protocol"
 requires-python = ">=3.12"
 dependencies = [
