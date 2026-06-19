@@ -1,7 +1,7 @@
 
 [project]
 name = "cube-harness"
-version = "0.1.0rc1"
+version = "0.1.0rc2"
 description = "cube-harness, open source agentic evaluation and data generation framework."
 readme = "README.md"
 authors = [
