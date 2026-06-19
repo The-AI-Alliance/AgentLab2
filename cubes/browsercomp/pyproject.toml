@@ -1,6 +1,6 @@
 [project]
 name = "browsercomp-cube"
-version = "0.1.1"
+version = "0.1.2"
 description = "BrowseComp benchmark — web browsing information retrieval"
 requires-python = ">=3.12"
 authors = [
