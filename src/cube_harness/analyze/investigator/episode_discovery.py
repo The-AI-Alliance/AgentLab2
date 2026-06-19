@@ -1,8 +1,10 @@
 """Scan and filter the episodes inside an experiment directory.
 
 `discover_episodes(<experiment_dir>)` walks `<experiment_dir>/episodes/` and
-returns one `EpisodeRef` per subdirectory; if the path itself looks like a
-single episode (has `steps/`), it is returned as the only ref.
+returns one `EpisodeRef` per subdirectory; if the path itself is a single
+episode dir (per `storage.is_episode_dir`), it is returned as the only ref.
+The on-disk layout (`events/` vs legacy `steps/`) is owned by `storage`, not
+re-derived here.
 
 `select_episodes(refs, *, ids=..., failures_only=..., overwrite=...)` filters
 the pool. Selection is intentionally explicit — random sampling was removed
@@ -23,6 +25,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from cube_harness.eval_log import EPISODE_RECORD_FILENAME, EpisodeRecord
+from cube_harness.storage import EVENTS_DIR, STEPS_DIR, is_episode_dir
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +53,7 @@ def discover_episodes(experiment_dir: Path) -> list[EpisodeRef]:
     episodes_dir = experiment_dir / "episodes"
     if not episodes_dir.exists():
         # Maybe the user passed a single episode directory.
-        if (experiment_dir / "steps").exists():
+        if is_episode_dir(experiment_dir):
             return [
                 EpisodeRef(
                     trajectory_id=experiment_dir.name,
@@ -59,7 +62,9 @@ def discover_episodes(experiment_dir: Path) -> list[EpisodeRef]:
                     record=load_episode_record(experiment_dir / EPISODE_RECORD_FILENAME),
                 )
             ]
-        raise FileNotFoundError(f"No 'episodes/' under {experiment_dir} and no 'steps/' inside it")
+        raise FileNotFoundError(
+            f"No 'episodes/' under {experiment_dir} and no '{EVENTS_DIR}/' or '{STEPS_DIR}/' inside it"
+        )
 
     refs: list[EpisodeRef] = []
     for ep_dir in sorted(episodes_dir.iterdir()):

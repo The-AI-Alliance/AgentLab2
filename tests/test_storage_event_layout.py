@@ -22,7 +22,20 @@ from cube_harness.core import (
     TrajectoryMetadata,
 )
 from cube_harness.llm import LLMCall, LLMConfig, Prompt, Usage
-from cube_harness.storage import EVENTS_DIR, FileStorage
+from cube_harness.storage import EVENTS_DIR, STEPS_DIR, FileStorage, is_episode_dir
+
+
+def test_is_episode_dir_recognizes_events_steps_and_rejects_others(tmp_path: Path) -> None:
+    events_ep = tmp_path / "events_ep"
+    (events_ep / EVENTS_DIR).mkdir(parents=True)
+    steps_ep = tmp_path / "steps_ep"
+    (steps_ep / STEPS_DIR).mkdir(parents=True)
+    not_ep = tmp_path / "not_ep"
+    not_ep.mkdir()
+
+    assert is_episode_dir(events_ep)
+    assert is_episode_dir(steps_ep)
+    assert not is_episode_dir(not_ep)
 
 
 def _agent_event(tag: str = "act") -> LLMCallEvent:

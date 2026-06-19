@@ -319,6 +319,23 @@ def test_discover_episodes_skips_archived_retry_dirs(tmp_path: Path) -> None:
     assert not any(".archived_" in r.trajectory_id for r in refs)
 
 
+def test_discover_episodes_accepts_single_episode_with_events_dir(tmp_path: Path) -> None:
+    """`ch-investigate run <episode_dir>` must work on the current `events/` layout.
+
+    Regression: single-episode discovery recognized only the legacy `steps/` dir,
+    so pointing at any episode produced by the event-stream storage raised
+    FileNotFoundError. discover_episodes now defers to storage.is_episode_dir.
+    """
+    ep = tmp_path / "click-button_ep0"
+    (ep / "events").mkdir(parents=True)
+    (ep / EPISODE_RECORD_FILENAME).write_text("{}")  # unparseable -> record=None, still discovered
+
+    refs = discover_episodes(ep)
+    assert len(refs) == 1
+    assert refs[0].trajectory_id == "click-button_ep0"
+    assert refs[0].episode_dir == ep
+
+
 def test_select_episodes_failures_only_skips_investigated(tmp_path: Path) -> None:
     exp = _make_experiment(
         tmp_path,

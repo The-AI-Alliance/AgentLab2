@@ -43,6 +43,17 @@ STEPS_DIR = "steps"
 ARCHIVED_MARKER = ".archived_"
 
 
+def is_episode_dir(path: Path) -> bool:
+    """True if ``path`` is a single episode directory.
+
+    The on-disk layout is owned here: a real episode holds an ``events/``
+    (current event-stream) or legacy ``steps/`` subdir. Consumers that need to
+    recognize an episode directory (e.g. the investigator) must call this rather
+    than re-deriving the layout, so they don't drift when storage evolves.
+    """
+    return (path / EVENTS_DIR).is_dir() or (path / STEPS_DIR).is_dir()
+
+
 class LLMCallRef(BaseModel):
     llm_call_id: str
 
