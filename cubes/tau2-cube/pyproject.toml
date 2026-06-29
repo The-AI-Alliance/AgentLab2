@@ -1,0 +1,37 @@
+[project]
+name = "tau2-cube"
+version = "0.1.0"
+description = "tau2-bench conversational tool-use domains wrapped as a CUBE benchmark"
+requires-python = ">=3.12"
+dependencies = [
+    "cube-standard",
+    "tau2",
+]
+
+# tau2 is not on PyPI — pull it from the upstream repo (a git source, not a local
+# `path =`, which the pre-commit hook blocks). Mirrors how miniwob-cube sources
+# cube-browser-tool. For local dev against an editable checkout, override with
+#   uv pip install -e /path/to/tau2-bench
+# (uncommitted) — do NOT add a `path =` source here.
+[tool.uv.sources]
+tau2 = { git = "https://github.com/sierra-research/tau2-bench.git" }
+
+[project.entry-points."cube.benchmarks"]
+# The key is the benchmark name shown by `cube list`.
+# Update "tau2-cube" to match your benchmark_metadata.name,
+# and "CubeBenchmarkConfig" to your BenchmarkConfig subclass name.
+tau2-cube = "tau2_cube.benchmark:CubeBenchmarkConfig"
+
+[build-system]
+requires = ["uv_build>=0.8,<0.9"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0",
+]
+
+[tool.ruff]
+fix = true
+line-length = 120
+indent-width = 4
