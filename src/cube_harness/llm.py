@@ -120,6 +120,7 @@ class LLMConfig(ValidatedConfig):
 
     temperature: float = 1.0
     max_tokens: int = 128000
+    max_model_len: int = 128000
     max_completion_tokens: int = 8192
     timeout: float | None = 120.0
 

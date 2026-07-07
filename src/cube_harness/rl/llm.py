@@ -23,8 +23,12 @@ class RolloutTokenCounter:
         )
 
     def count_prompt_tokens(self, messages, tools=None) -> int:
+        normalized = [
+            m.model_dump(exclude_none=True) if hasattr(m, "model_dump") else m
+            for m in messages
+        ]
         token_ids = self.tokenizer.apply_chat_template(
-            messages,
+            normalized,
             tools=tools,
             add_special_tokens=True,
             add_generation_prompt=True,
@@ -59,7 +63,7 @@ class RolloutLLMConfig(LLMConfig):
     # Lock benchmark/agent-facing features.
     reasoning_effort: None = None
     interleaved_thinking: Literal[False] = False
-    tool_choice: Literal["none"] = "none"
+    # tool_choice: Literal["auto"] = "auto"
     parallel_tool_calls: Literal[False] = False
     set_cache_control: None = None
 

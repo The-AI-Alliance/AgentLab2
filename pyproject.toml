@@ -106,4 +106,4 @@ markers = [
 where = ["src"]
 
 [tool.uv.sources]
-cube-standard = { git = "https://github.com/The-AI-Alliance/cube-standard.git", branch = "dev" }
+cube-standard = { path = "../cube-standard", editable = true }
