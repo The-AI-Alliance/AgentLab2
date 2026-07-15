@@ -659,7 +659,7 @@ wheels = [
 
 [[package]]
 name = "cube-harness"
-version = "0.1.0"
+version = "0.1.0rc1"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },
@@ -753,8 +753,8 @@ dev = [
 
 [[package]]
 name = "cube-standard"
-version = "0.1.0rc9"
-source = { git = "https://github.com/The-AI-Alliance/cube-standard.git?branch=dev#d60c075ca7d4372bbeb053373b33b731d9b6e317" }
+version = "0.1.0rc11"
+source = { git = "https://github.com/The-AI-Alliance/cube-standard.git?branch=dev#9ca7c062d211450df05eb8318a1e847b5373b689" }
 dependencies = [
     { name = "docstring-parser" },
     { name = "fastapi" },
