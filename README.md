@@ -7,8 +7,13 @@ Open source harness for building and evaluating AI agents using the [CUBE Standa
 **[CUBE Standard](https://github.com/The-AI-Alliance/cube-standard)** defines the benchmark protocol. **cube-harness** is the evaluation runtime: it runs agents against any CUBE-compatible benchmark, records trajectories, and scales execution with Ray.
 
 > [!NOTE]
-> **cube-harness is in active development (alpha).** Interfaces may change. We welcome early adopters and contributors who want to shape the framework, not just use it.
+> **cube-harness is now in beta.** Interfaces have stabilized through real-world use.
 > See our [Roadmap](ROADMAP.md) and [Contributing Guide](CONTRIBUTING.md).
+>
+> **CUBE is looking for maintainers**, cube-harness included. The founding
+> ServiceNow Research team has moved on to new roles across the industry, and the
+> project needs people with time to keep growing it. Details and open roles in the
+> [maintainers-wanted discussion](https://github.com/The-AI-Alliance/cube-harness/discussions).
 >
 > **Want to change the harness itself?** Start with [Changing cube-harness](CONTRIBUTING.md#changing-cube-harness) and the project [Design Philosophy](https://the-ai-alliance.github.io/cube-standard/design-philosophy); the `/gatekeep-rfc` skill lets you check your own draft before anyone else reads it.
 >
