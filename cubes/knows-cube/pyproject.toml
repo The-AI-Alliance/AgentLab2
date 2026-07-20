@@ -1,0 +1,54 @@
+[project]
+name = "knows-cube"
+version = "0.1.0"
+description = "KNOWS benchmark cube — 110 Google Workspace (Docs/Sheets/Slides) authoring tasks"
+requires-python = ">=3.12"
+dependencies = [
+    "cube-standard>=0.1.0rc11",  # Task._post_action — the per-action hook browsing history is recorded in
+    "cube-browser-tool[bgym]>=0.3.0",
+    "browsergym-knows",
+    "browsergym-core>=0.14.3",
+]
+
+[project.entry-points."cube.benchmarks"]
+knows-cube = "knows_cube.benchmark:KnowsBenchmarkConfig"
+
+[build-system]
+requires = ["uv_build>=0.8,<0.9"]
+build-backend = "uv_build"
+
+[tool.uv-build]
+include = ["src/knows_cube/task_metadata.json"]
+
+[tool.uv.sources]
+# TODO: drop once cube-browser-tool 0.3.0 ships to PyPI (mirrors cubes/workarena).
+cube-browser-tool = { git = "https://github.com/The-AI-Alliance/cube-standard", subdirectory = "cube-tools/cube-browser-tool" }
+# The KNOWS eval/task layer. This is the upstream benchmark repo — deliberately
+# NOT the BrowserGym-Knows fork: no forked browsergym-core 0.14.3.dev0, no
+# PYTHONPATH injection, no AgentLab-Knows submodule. Stock browsergym-core from
+# PyPI is sufficient; KNOWS only needs `register_task` and `AbstractBrowserTask`.
+#
+# NOTE: this repo is currently PRIVATE and does not build as-is — its
+# `[tool.hatch.version] path` points outside the repo, so `uv build` fails. See
+# README "Upstream prerequisites" for the two-line fix required before this
+# dependency resolves for anyone else.
+browsergym-knows = { git = "https://github.com/alexgill321/Agent-Benchmark", branch = "main" }
+
+[dependency-groups]
+# typer is used by scripts/generate_task_metadata.py and the smoke script, not
+# by the importable package — hence dev-only.
+dev = ["pytest>=8.0", "typer>=0.12"]
+
+[tool.ruff]
+fix = true
+line-length = 120
+indent-width = 4
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint]
+extend-select = ["I"] # sort imports
