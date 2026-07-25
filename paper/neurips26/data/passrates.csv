@@ -1,0 +1,10 @@
+Modality,CUBE,Subset,#Tasks,Haiku 4.5,Sonnet 4.6,GPT-5.4-mini,GPT-5.4
+Web,WorkArena,L1,,,,,
+Web,WorkArena,L2,,,,,
+Web,WebArena-Verified,full,812,,,,
+Web,MiniWoB,full,125,,,,
+CUA,OSWorld,full,368,,,,
+CUA,Windows Agent Arena,full,154,,,,
+SWE,SWE-bench Verified,full,500,,,,
+SWE,SWE-bench Live,lite-gold-226,226,,,,
+SWE,TerminalBench,full,89,,,,

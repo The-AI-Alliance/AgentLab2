@@ -1,0 +1,11 @@
+modality,cube,subset,n_analyzed,model_capability,agent_scaffolding,submission_format,tool_failure,action_space_limited,insufficient_observation,env_failure,task_unclear,eval_brittle,none
+Web,WorkArena,L1,,,,,,,,,,,
+Web,WorkArena,L2,73,72,0,0,0,0,1,0,0,0,0
+Web,WebArena-Verified,full,48,31,4,2,0,0,0,6,0,0,0
+Web,MiniWoB,full,112,28,8,2,1,20,52,0,0,1,0
+CUA,OSWorld-PyAutoGUI,test_nogdrive,,,,,,,,,,,
+CUA,OSWorld-Computer13,test_nogdrive,356,295,1,0,1,2,5,11,6,35,0
+CUA,Windows Agent Arena,full,118,88,0,0,0,0,1,11,2,16,0
+SWE,SWE-bench Verified,full,417,335,40,0,0,0,0,11,0,31,0
+SWE,SWE-bench Live,lite-gold-226,229,207,8,0,1,0,0,5,2,6,0
+SWE,TerminalBench,full,103,59,10,0,0,2,0,9,1,6,16
