@@ -450,20 +450,9 @@ def if_active(tab_name: str, n_out: int = 1) -> Callable:
 # ---------------------------------------------------------------------------
 
 
-_CSS = """
-html {
-    color-scheme: light only;
-}
-/* Stable scroll container for the event rail: overflow lives here (not on the
-   re-rendered inner HTML), so clicking a card keeps the scroll position. */
-#xray_rail {
-    max-height: 72vh;
-    overflow-y: auto;
-    padding: 4px;
-    background: #f8f9fa;
-    border-radius: 8px;
-    border: 1px solid #e2e8f0;
-}
+_CSS = (
+    xray_utils.EVENT_VIEW_CSS
+    + """
 /* Tiny, tight nav buttons (jump-to-first ⤒ · prev ◀ · next ▶ · jump-to-last ⤓),
    centred and hugging the rail. */
 #xray_first_btn, #xray_prev_btn, #xray_next_btn, #xray_last_btn {
@@ -535,15 +524,6 @@ html {
     border-bottom-left-radius: 0 !important;
     border-left: 1px solid rgba(0, 0, 0, 0.18) !important;
 }
-.compact-header {
-    padding: 8px 16px;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border-radius: 8px;
-    color: white;
-}
-.compact-header, .compact-header * {
-    color: white !important;
-}
 .step-details {
     max-height: 600px;
     overflow-y: auto;
@@ -560,35 +540,6 @@ html {
     padding: 8px 12px;
     margin-top: 8px;
 }
-.info-panel {
-    border-radius: 6px;
-    overflow: hidden;
-    border: 1px solid #e2e8f0;
-}
-.info-panel-title {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    padding: 4px 10px;
-    color: #6b7280;
-}
-.info-panel-body {
-    padding: 6px 10px;
-    max-height: 100px;
-    overflow-y: auto;
-    font-size: 13px;
-    line-height: 1.5;
-}
-.info-panel-body code {
-    background: rgba(0,0,0,0.05);
-    border-radius: 3px;
-    padding: 1px 4px;
-    font-size: 12px;
-}
-code {
-    white-space: pre-wrap;
-}
 .help-content {
     max-height: 260px;
     overflow-y: auto;
@@ -597,12 +548,6 @@ code {
 th {
     white-space: normal !important;
     word-wrap: break-word !important;
-}
-#timeline_click_input {
-    height: 0 !important;
-    overflow: hidden !important;
-    margin: 0 !important;
-    padding: 0 !important;
 }
 /* Experiments table: hide entire first header cell (checkbox col has no label) */
 #exp_table table thead tr th:first-child {
@@ -681,6 +626,7 @@ th {
     left: 4px !important;
 }
 """
+)
 
 # Runs once on app load (Blocks js=): force light theme + bind keyboard event
 # navigation. Plain arrows (←/→ or ↑/↓) step to the previous/next event; Shift+↑/↓

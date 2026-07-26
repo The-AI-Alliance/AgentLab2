@@ -54,6 +54,44 @@ The "is the driver alive?" decision lives with the type it queries: see
 `should_sweep_running_to_stale` for episode statuses — predicate over the
 status object, callable from any consumer (viewer, monitoring, reports).
 
+`EVENT_VIEW_CSS` is the stylesheet for the markup these renderers emit (the
+`#xray_rail` scroll container, the `.info-panel` blocks, the hidden
+`#timeline_click_input` Number that card clicks write into). It lives here rather
+than in `xray.py` because more than one Gradio surface embeds the event view —
+each appends its own rules on top.
+
+## Annotation portal (`cube_harness.analyze.annotate`)
+
+A second Gradio surface over the same event view, for human validation of the
+trajectory judge. One shared link serves an episode at a time from a pool, so
+several annotators can label concurrently.
+
+```bash
+ch-annotate serve <study_dir> --share      # study_dir from judge_validation.py sample
+ch-annotate progress <study_dir>
+```
+
+- `store.py` — SQLite (WAL) at `<study_dir>/annotations.db`; `episode` / `lease` /
+  `label` tables. `claim_next` is one `BEGIN IMMEDIATE` transaction, which is the
+  only serialization point in the design. Leases expire (default 45 min) so a
+  closed tab returns its episode to the pool.
+- `panel.py` — loads via `FileStorage.load_episode` → `EpisodeEvents.from_view`
+  (the same path as `XRayState._reload_events`) and calls the `xray_utils`
+  renderers. Adds no renderers of its own.
+- `app.py` / `cli.py` — the portal and its Typer CLI.
+
+**Invariant (blinding).** Nothing in this package reads `judge_key.json`, and
+`xray.py` / `xray_utils.py` contain no reference to findings, blame or the
+investigator — so no renderer has a code path that could surface the judge's
+verdict. Annotators are served the blind `uid` (`E000`…), never the experiment
+name or the results-directory path. `tests/test_annotate_panel.py` and
+`scripts/smoke/annotate_portal.py` assert this over every event of every episode.
+
+**Ordering.** `claim_next` prefers episodes that already carry *some* labels but
+are short of the target coverage, then untouched ones, then extras. Serving
+fewest-labels-first instead would hand concurrent annotators disjoint sets and
+yield no inter-annotator overlap to compute κ from.
+
 ## UI model — event stream
 
 The detail view consumes the trajectory as a **flat, ordered event stream**

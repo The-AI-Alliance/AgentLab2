@@ -58,6 +58,7 @@ src/cube_harness/
 ├── metrics/tracer.py           # OpenTelemetry tracer, Ray env-var propagation
 ├── analyze/
 │   ├── investigator/           # Per-trajectory blame; use_cases/{general_blame, profiling, agent_scaffolding, hinter, fix_audit}
+│   ├── annotate/               # Blind human-annotation portal (ch-annotate) over the XRay event view — judge validation
 │   ├── xray.py                 # Gradio-based XRay viewer
 │   ├── inspect_results.py      # CLI-ish inspection helpers
 │   └── xray_utils.py

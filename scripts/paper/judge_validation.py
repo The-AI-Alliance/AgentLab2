@@ -9,43 +9,40 @@ end-to-end.
                    models, balanced over the judge's own blame categories so the
                    study can detect per-category error rather than only the
                    accuracy on whatever category happens to dominate.
-    2. ``packet``  render a blind annotation instrument: one self-contained HTML
-                   file per annotator holding the same transcript the judge read,
-                   with the judge's verdict withheld. Annotators label outcome and
-                   primary blame from the identical closed taxonomy and export
-                   their answers as JSON.
+    2. ``ch-annotate serve`` (see ``cube_harness.analyze.annotate``) serves the
+                   blind annotation instrument: one shared link, backed by the
+                   XRay viewer, handing each arriving annotator one episode at a
+                   time from a shared SQLite pool.
     3. ``score``   compute Cohen's kappa (human vs judge), inter-annotator kappa,
                    and per-modality/per-bucket breakdowns, and emit the LaTeX
                    tables for the appendix.
 
-Blinding matters: the packet never contains the judge's label, so an annotator
-cannot anchor on it. Stratification is by (modality, judge blame) so that rare
-categories -- the benchmark-side ones that carry the faithfulness argument --
-get enough samples to estimate agreement at all.
+Blinding matters: neither the portal nor its store ever reads
+``judge_key.json``, so an annotator cannot anchor on the judge's label.
+Stratification is by (modality, judge blame) so that rare categories -- the
+benchmark-side ones that carry the faithfulness argument -- get enough samples to
+estimate agreement at all.
 
 Usage
 -----
     scripts/paper/judge_validation.py sample  ~/cube_harness_results --n 100 --out study/
-    scripts/paper/judge_validation.py packet  study/ --annotator alice
-    scripts/paper/judge_validation.py score   study/ --labels study/labels-*.json
+    ch-annotate serve study/ --share
+    scripts/paper/judge_validation.py score   study/
 """
 
 from __future__ import annotations
 
-import html
 import json
 import random
-import tempfile
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 
+from cube_harness.analyze.annotate.store import AnnotationStore
 from cube_harness.analyze.investigator.episode_discovery import discover_episodes
-from cube_harness.analyze.investigator.transcript import extract_transcript
-from cube_harness.eval_log import BlameCategory, Outcome
 
 app = typer.Typer(add_completion=False, help=__doc__)
 
@@ -210,130 +207,6 @@ def sample(
     typer.echo(f"\nwrote {out / SAMPLE_FILENAME} and {out / KEY_FILENAME} (keep the key away from annotators)")
 
 
-def _render_packet(entries: list[dict[str, Any]], transcripts: dict[str, str], annotator: str) -> str:
-    """Build the self-contained blind annotation page."""
-    blames = [b.value for b in BlameCategory]
-    outcomes = [o.value for o in Outcome]
-    payload = json.dumps(
-        [
-            {
-                "uid": e["uid"],
-                "modality": e["modality"],
-                "benchmark": e["benchmark"],
-                "task_id": e["task_id"],
-                "task": e["task_description"],
-                "score": e["score"],
-                "transcript": transcripts.get(e["uid"], "(transcript unavailable)"),
-            }
-            for e in entries
-        ]
-    )
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8"><title>CUBE judge validation — {html.escape(annotator)}</title>
-<style>
- body {{ font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0; display: flex; height: 100vh; }}
- #list {{ width: 200px; overflow-y: auto; border-right: 1px solid #ccc; padding: 8px; }}
- #list div {{ padding: 4px; cursor: pointer; border-radius: 4px; }}
- #list div.done {{ background: #e6f4ea; }}
- #list div.active {{ outline: 2px solid #1a73e8; }}
- #main {{ flex: 1; overflow-y: auto; padding: 16px; }}
- pre {{ background: #f6f8fa; padding: 12px; overflow-x: auto; max-height: 55vh; white-space: pre-wrap; }}
- .task {{ background: #fffbe6; padding: 12px; border-left: 3px solid #f0c000; }}
- label {{ display: block; margin: 4px 0; }}
- button {{ padding: 8px 16px; margin-right: 8px; }}
-</style></head><body>
-<div id="list"></div>
-<div id="main">
-  <h2 id="title"></h2>
-  <div class="task" id="task"></div>
-  <h3>Trajectory</h3>
-  <pre id="transcript"></pre>
-  <h3>Your assessment</h3>
-  <p>Judge the episode on the evidence in the transcript alone. Choose
-     <b>none</b> for blame if the transcript does not support any attribution.</p>
-  <div id="outcome"></div>
-  <div id="blame"></div>
-  <label>Notes (optional)<br><textarea id="notes" rows="3" cols="80"></textarea></label>
-  <button onclick="save()">Save &amp; next</button>
-  <button onclick="exportAll()">Export JSON</button>
-  <span id="status"></span>
-</div>
-<script>
-const DATA = {payload};
-const OUTCOMES = {json.dumps(outcomes)};
-const BLAMES = {json.dumps(blames)};
-const ANNOTATOR = {json.dumps(annotator)};
-const KEY = 'cube-judge-' + ANNOTATOR;
-let labels = JSON.parse(localStorage.getItem(KEY) || '{{}}');
-let idx = 0;
-
-function renderList() {{
-  document.getElementById('list').innerHTML = DATA.map((d, i) =>
-    `<div class="${{labels[d.uid] ? 'done' : ''}} ${{i === idx ? 'active' : ''}}" onclick="go(${{i}})">${{d.uid}} · ${{d.modality}}</div>`).join('');
-}}
-function render() {{
-  const d = DATA[idx];
-  document.getElementById('title').textContent = `${{d.uid}} — ${{d.benchmark}} (${{d.modality}}) — final score ${{d.score}}`;
-  document.getElementById('task').textContent = d.task || '(no task description recorded)';
-  document.getElementById('transcript').textContent = d.transcript;
-  const prev = labels[d.uid] || {{}};
-  document.getElementById('outcome').innerHTML = '<b>Outcome</b>' + OUTCOMES.map(o =>
-    `<label><input type="radio" name="outcome" value="${{o}}" ${{prev.outcome === o ? 'checked' : ''}}> ${{o}}</label>`).join('');
-  document.getElementById('blame').innerHTML = '<b>Primary blame</b>' + BLAMES.map(b =>
-    `<label><input type="radio" name="blame" value="${{b}}" ${{prev.blame === b ? 'checked' : ''}}> ${{b}}</label>`).join('');
-  document.getElementById('notes').value = prev.notes || '';
-  renderList();
-}}
-function go(i) {{ idx = i; render(); window.scrollTo(0, 0); }}
-function save() {{
-  const d = DATA[idx];
-  const outcome = document.querySelector('input[name=outcome]:checked');
-  const blame = document.querySelector('input[name=blame]:checked');
-  if (!outcome || !blame) {{ alert('Pick an outcome and a primary blame.'); return; }}
-  labels[d.uid] = {{ outcome: outcome.value, blame: blame.value, notes: document.getElementById('notes').value }};
-  localStorage.setItem(KEY, JSON.stringify(labels));
-  document.getElementById('status').textContent = Object.keys(labels).length + '/' + DATA.length + ' labelled';
-  if (idx < DATA.length - 1) go(idx + 1); else render();
-}}
-function exportAll() {{
-  const blob = new Blob([JSON.stringify({{annotator: ANNOTATOR, labels}}, null, 2)], {{type: 'application/json'}});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'labels-' + ANNOTATOR + '.json';
-  a.click();
-}}
-render();
-</script></body></html>
-"""
-
-
-@app.command()
-def packet(
-    study_dir: Annotated[Path, typer.Argument(help="Study directory created by `sample`.")],
-    annotator: Annotated[str, typer.Option(help="Annotator name (namespaces local storage).")] = "annotator",
-    max_chars: Annotated[int, typer.Option(help="Transcript truncation budget per episode.")] = 60000,
-) -> None:
-    """Render a blind, self-contained HTML annotation packet."""
-    entries = json.loads((study_dir / SAMPLE_FILENAME).read_text())
-    transcripts: dict[str, str] = {}
-    with tempfile.TemporaryDirectory() as tmp:
-        for entry in entries:
-            episode_dir = Path(entry["episode_dir"])
-            try:
-                out_dir = extract_transcript(episode_dir, Path(tmp) / entry["uid"])
-                text = (out_dir / "transcript.txt").read_text(errors="replace")
-            except Exception as exc:  # noqa: BLE001 — one corrupt episode must not sink the packet
-                text = f"(could not read transcript: {exc})"
-            if len(text) > max_chars:
-                head, tail = text[: max_chars // 2], text[-max_chars // 2 :]
-                text = f"{head}\n\n[... {len(text) - max_chars} characters elided ...]\n\n{tail}"
-            transcripts[entry["uid"]] = text
-
-    dest = study_dir / f"packet-{annotator}.html"
-    dest.write_text(_render_packet(entries, transcripts, annotator))
-    typer.echo(f"wrote {dest} ({len(entries)} episodes, judge labels withheld)")
-
-
 @app.command()
 def snapshot(
     results_dir: Annotated[Path, typer.Argument(help="Root holding experiment directories.")],
@@ -450,15 +323,19 @@ def _interpret(kappa: float) -> str:
 @app.command()
 def score(
     study_dir: Annotated[Path, typer.Argument(help="Study directory.")],
-    labels: Annotated[list[Path] | None, typer.Option(help="One labels-<annotator>.json per annotator.")] = None,
     out: Annotated[Path, typer.Option(help="Where to write the LaTeX table.")] = Path("judge_validation.tex"),
 ) -> None:
-    """Compute human-vs-judge and inter-annotator agreement, and emit LaTeX."""
+    """Compute human-vs-judge and inter-annotator agreement, and emit LaTeX.
+
+    Labels come from the study's annotation store (``annotations.db``), which
+    ``ch-annotate serve`` writes as annotators work. This is the only command
+    that reads ``judge_key.json``; the portal never does.
+    """
     entries = {e["uid"]: e for e in json.loads((study_dir / SAMPLE_FILENAME).read_text())}
     key = json.loads((study_dir / KEY_FILENAME).read_text())
-    annotations = {p.stem.replace("labels-", ""): json.loads(p.read_text())["labels"] for p in labels or []}
+    annotations = AnnotationStore(study_dir).export_labels()
     if not annotations:
-        raise typer.BadParameter("pass at least one --labels file")
+        raise typer.BadParameter(f"no labels yet in {study_dir}/annotations.db — run `ch-annotate serve {study_dir}`")
 
     # Human consensus: majority blame across annotators; ties resolve to the
     # first annotator in sorted order, and are counted so they can be reported.

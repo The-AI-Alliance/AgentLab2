@@ -1433,6 +1433,77 @@ def goal_from_events(events: EpisodeEvents | None) -> str:
     return "*No goal text found*"
 
 
+# --- Shared stylesheet -----------------------------------------------------
+
+#: Styling for the markup the renderers below emit, so every viewer that embeds
+#: the event view looks the same. Consumed by `xray.py`'s full viewer and by the
+#: annotation portal (`analyze/annotate/app.py`); each appends its own rules.
+#:
+#: Card styling itself is inline in `render_event_rail_html`, so what lives here
+#: is only what a class or elem_id selector can reach: the rail's scroll
+#: container, the `.info-panel` blocks, and the hidden Number that
+#: `_card_onclick` writes clicked indices into.
+EVENT_VIEW_CSS = """
+html {
+    color-scheme: light only;
+}
+/* Stable scroll container for the event rail: overflow lives here (not on the
+   re-rendered inner HTML), so clicking a card keeps the scroll position. */
+#xray_rail {
+    max-height: 72vh;
+    overflow-y: auto;
+    padding: 4px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+}
+.compact-header {
+    padding: 8px 16px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 8px;
+    color: white;
+}
+.compact-header, .compact-header * {
+    color: white !important;
+}
+.info-panel {
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid #e2e8f0;
+}
+.info-panel-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    color: #6b7280;
+}
+.info-panel-body {
+    padding: 6px 10px;
+    max-height: 100px;
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.5;
+}
+.info-panel-body code {
+    background: rgba(0,0,0,0.05);
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-size: 12px;
+}
+code {
+    white-space: pre-wrap;
+}
+#timeline_click_input {
+    height: 0 !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+"""
+
+
 # --- Card rail -------------------------------------------------------------
 
 _RAIL_MIN_H = 44  # px — shortest card

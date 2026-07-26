@@ -1,0 +1,360 @@
+\begin{thebibliography}{35}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Abaskohi et~al.(2025)Abaskohi, Chen, Mu{\~n}oz-M{\'a}rmol, Fox,
+  Ramesh, Marcotte, L{\`u}, Chapados, Gella, West, Carenini, Pal, Drouin, and
+  Laradji]{abaskohi2025drbench}
+Amirhossein Abaskohi, Tianyi Chen, Miguel Mu{\~n}oz-M{\'a}rmol, Curtis Fox,
+  Amrutha~Varshini Ramesh, {\'E}tienne Marcotte, Xing~Han L{\`u}, Nicolas
+  Chapados, Spandana Gella, Peter West, Giuseppe Carenini, Christopher Pal,
+  Alexandre Drouin, and Issam~H. Laradji.
+\newblock Drbench: A realistic benchmark for enterprise deep research.
+\newblock \emph{arXiv preprint arXiv:2510.00172}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2510.00172}.
+
+\bibitem[{AgentBeats Team and Berkeley RDI}(2025)]{agentbeats2025}
+{AgentBeats Team and Berkeley RDI}.
+\newblock Agentbeats: Towards agentified agent assessment (aaa).
+\newblock \url{https://agentbeats.dev}, 2025.
+\newblock Platform for standardized agent evaluation using the Agentified Agent
+  Assessment paradigm.
+
+\bibitem[{Anthropic}(2024)]{mcp2024}
+{Anthropic}.
+\newblock Model context protocol (mcp), 2024.
+\newblock URL \url{https://modelcontextprotocol.io/}.
+\newblock Accessed: 2026-01-20.
+
+\bibitem[Bandel et~al.(2026)Bandel, Yehudai, Lacoste, Ghosh, Neubig, Mitchell,
+  Shmueli-Scheuer, and Choshen]{bandel2026agentic}
+Elron Bandel, Asaf Yehudai, Alexandre Lacoste, Avijit Ghosh, Graham Neubig,
+  Margaret Mitchell, Michal Shmueli-Scheuer, and Leshem Choshen.
+\newblock Position: Agentic systems should be general.
+\newblock In \emph{ICLR 2026 Workshop on Agents in the Wild}, 2026.
+\newblock URL \url{https://openreview.net/forum?id=CbJpizP0vJ}.
+
+\bibitem[Bonatti et~al.(2025)Bonatti, Zhao, Bonacci, Dupont, Abdali, Li, Lu,
+  Wagle, Koishida, Bucker, Jang, and Hui]{bonatti2025windows}
+Rogerio Bonatti, Dan Zhao, Francesco Bonacci, Dillon Dupont, Sara Abdali,
+  Yinheng Li, Yadong Lu, Justin Wagle, Kazuhito Koishida, Arthur Bucker,
+  Lawrence~Keunho Jang, and Zheng Hui.
+\newblock Windows agent arena: Evaluating multi-modal {OS} agents at scale.
+\newblock In \emph{Forty-second International Conference on Machine Learning
+  (ICML)}, 2025.
+\newblock URL \url{https://openreview.net/forum?id=W9s817KqYf}.
+
+\bibitem[Cemri et~al.(2025)Cemri, Pan, Yang, et~al.]{cemri2025mast}
+Mert Cemri, Melissa~Z. Pan, Shuyi Yang, et~al.
+\newblock Why do multi-agent {LLM} systems fail?
+\newblock In \emph{Advances in Neural Information Processing Systems (NeurIPS),
+  Datasets and Benchmarks Track}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2503.13657}.
+
+\bibitem[Chowdhury et~al.(2024)Chowdhury, Aung, Shern, Jaffe, Sherburn,
+  Starace, Mays, Dias, Aljubeh, Glaese, Jimenez, Yang, Ho, Patwardhan, Liu, and
+  Madry]{yang2024swebenchverified}
+Neil Chowdhury, James Aung, Chan~Jun Shern, Oliver Jaffe, Dane Sherburn, Giulio
+  Starace, Evan Mays, Rachel Dias, Marwan Aljubeh, Mia Glaese, Carlos~E.
+  Jimenez, John Yang, Leyton Ho, Tejal Patwardhan, Kevin Liu, and Aleksander
+  Madry.
+\newblock Introducing {SWE}-bench verified.
+\newblock OpenAI announcement, 2024.
+\newblock URL \url{https://openai.com/index/introducing-swe-bench-verified/}.
+
+\bibitem[Drouin et~al.(2024)Drouin, Gasse, Caccia, Laradji, Del~Verme, Marty,
+  Vazquez, Chapados, and Lacoste]{drouin2024workarena}
+Alexandre Drouin, Maxime Gasse, Massimo Caccia, Issam~H. Laradji, Manuel
+  Del~Verme, Tom Marty, David Vazquez, Nicolas Chapados, and Alexandre Lacoste.
+\newblock Workarena: How capable are web agents at solving common knowledge
+  work tasks?
+\newblock In \emph{Proceedings of the 41st International Conference on Machine
+  Learning (ICML)}, volume 235 of \emph{Proceedings of Machine Learning
+  Research}, pages 11642--11662, 2024.
+\newblock URL \url{https://proceedings.mlr.press/v235/drouin24a.html}.
+
+\bibitem[Gu et~al.(2024)Gu, Jiang, Shi, Tan, Zhai, Xu, Li, Shen, Ma, Liu, Wang,
+  Zhang, Wang, Gao, Ni, and Guo]{li2024llmjudgesurvey}
+Jiawei Gu, Xuhui Jiang, Zhichao Shi, Hexiang Tan, Xuehao Zhai, Chengjin Xu, Wei
+  Li, Yinghan Shen, Shengjie Ma, Honghao Liu, Saizhuo Wang, Kun Zhang, Yuanzhuo
+  Wang, Wen Gao, Lionel Ni, and Jian Guo.
+\newblock A survey on {LLM}-as-a-judge.
+\newblock \emph{arXiv preprint arXiv:2411.15594}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2411.15594}.
+
+\bibitem[Jimenez et~al.(2024)Jimenez, Yang, Wettig, Yao, Pei, Press, and
+  Narasimhan]{jimenez2023swebench}
+Carlos~E. Jimenez, John Yang, Alexander Wettig, Shunyu Yao, Kexin Pei, Ofir
+  Press, and Karthik~R. Narasimhan.
+\newblock Swe-bench: Can language models resolve real-world github issues?
+\newblock In \emph{The Twelfth International Conference on Learning
+  Representations (ICLR)}, 2024.
+\newblock URL \url{https://openreview.net/forum?id=VTF8yNQM66}.
+
+\bibitem[Jung et~al.(2025)Jung, Brahman, and Choi]{jung2025trustorescalate}
+Jaehun Jung, Faeze Brahman, and Yejin Choi.
+\newblock Trust or escalate: {LLM} judges with provable guarantees for human
+  agreement.
+\newblock In \emph{The Thirteenth International Conference on Learning
+  Representations (ICLR)}, 2025.
+\newblock URL \url{https://openreview.net/forum?id=UHPnqSTBPO}.
+
+\bibitem[Kapoor et~al.(2026)Kapoor, Stroebl, Kirgis, Nadgir, Siegel, Wei, Xue,
+  Chen, Chen, Utpala, Ndzomga, Oruganty, Luskin, Liu, Yu, Arora, Hahm, Trivedi,
+  Sun, Lee, Jin, Mai, Zhou, Zhu, Bommasani, Kang, Song, Henderson, Su, Liang,
+  and Narayanan]{kapoor2025holisticagentleaderboardmissing}
+Sayash Kapoor, Benedikt Stroebl, Peter Kirgis, Nitya Nadgir, Zachary~S. Siegel,
+  Boyi Wei, Tianci Xue, Ziru Chen, Felix Chen, Saiteja Utpala, Franck Ndzomga,
+  Dheeraj Oruganty, Sophie Luskin, Kangheng Liu, Botao Yu, Amit Arora, Dongyoon
+  Hahm, Harsh Trivedi, Huan Sun, Juyong Lee, Tengjun Jin, Yifan Mai, Yifei
+  Zhou, Yuxuan Zhu, Rishi Bommasani, Daniel Kang, Dawn Song, Peter Henderson,
+  Yu~Su, Percy Liang, and Arvind Narayanan.
+\newblock Holistic agent leaderboard: The missing infrastructure for ai agent
+  evaluation.
+\newblock In \emph{The Fourteenth International Conference on Learning
+  Representations (ICLR)}, 2026.
+\newblock URL \url{https://openreview.net/forum?id=vUaY1t64ZZ}.
+
+\bibitem[Khatri et~al.(2025)Khatri, Madaan, Tiwari, Bansal, Duvvuri, Zaheer,
+  Dhillon, Brandfonbrener, and Agarwal]{Khatri2025TheAO}
+Devvrit Khatri, Lovish Madaan, Rishabh Tiwari, Rachit Bansal, Sai~Surya
+  Duvvuri, Manzil Zaheer, Inderjit~S. Dhillon, David Brandfonbrener, and
+  Rishabh Agarwal.
+\newblock The art of scaling reinforcement learning compute for {LLM}s.
+\newblock \emph{arXiv preprint arXiv:2510.13786}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2510.13786}.
+
+\bibitem[Le~Sellier~de Chezelles et~al.(2025)Le~Sellier~de Chezelles, Gasse,
+  Lacoste, Caccia, Drouin, Boisvert, Thakkar, Marty, Assouel, Omidi~Shayegan,
+  Jang, L{\`u}, Yoran, Kong, Xu, Reddy, Neubig, Cappart, Salakhutdinov, and
+  Chapados]{chezelles2025browsergym}
+Thibault Le~Sellier~de Chezelles, Maxime Gasse, Alexandre Lacoste, Massimo
+  Caccia, Alexandre Drouin, L{\'e}o Boisvert, Megh Thakkar, Tom Marty, Rim
+  Assouel, Sahar Omidi~Shayegan, Lawrence~Keunho Jang, Xing~Han L{\`u}, Ori
+  Yoran, Dehan Kong, Frank~F. Xu, Siva Reddy, Graham Neubig, Quentin Cappart,
+  Russ Salakhutdinov, and Nicolas Chapados.
+\newblock The browsergym ecosystem for web agent research.
+\newblock \emph{Transactions on Machine Learning Research}, 2025.
+\newblock ISSN 2835-8856.
+\newblock URL \url{https://openreview.net/forum?id=5298fKGmv3}.
+\newblock Expert Certification.
+
+\bibitem[Liu et~al.(2024)Liu, Yu, Zhang, Xu, Lei, Lai, Gu, Ding, Men, Yang,
+  Zhang, Deng, Zeng, Du, Zhang, Shen, Zhang, Su, Sun, Huang, Dong, and
+  Tang]{Liu2023AgentBenchEL}
+Xiao Liu, Hao Yu, Hanchen Zhang, Yifan Xu, Xuanyu Lei, Hanyu Lai, Yu~Gu,
+  Hangliang Ding, Kaiwen Men, Kejuan Yang, Shudan Zhang, Xiang Deng, Aohan
+  Zeng, Zhengxiao Du, Chenhui Zhang, Sheng Shen, Tianjun Zhang, Yu~Su, Huan
+  Sun, Minlie Huang, Yuxiao Dong, and Jie Tang.
+\newblock Agentbench: Evaluating {LLM}s as agents.
+\newblock In \emph{The Twelfth International Conference on Learning
+  Representations (ICLR)}, 2024.
+\newblock URL \url{https://openreview.net/forum?id=zAdUB0aCTQ}.
+
+\bibitem[L{\`u} et~al.(2025)L{\`u}, Kazemnejad, Meade, Patel, Shin, Zambrano,
+  Sta{\'n}czak, Shaw, Pal, and Reddy]{lu2025agentrewardbench}
+Xing~Han L{\`u}, Amirhossein Kazemnejad, Nicholas Meade, Arkil Patel, Dongchan
+  Shin, Alejandra Zambrano, Karolina Sta{\'n}czak, Peter Shaw, Christopher Pal,
+  and Siva Reddy.
+\newblock Agentrewardbench: Evaluating automatic evaluations of web agent
+  trajectories.
+\newblock In \emph{Conference on Language Modeling (COLM)}, 2025.
+\newblock URL \url{https://openreview.net/forum?id=fQcUZMPIvu}.
+
+\bibitem[Merrill et~al.(2026)Merrill, Shaw, Carlini, Li, Raj, Bercovich, Shi,
+  Shin, Walshe, Buchanan, Shen, Ye, Lin, Poulos, Wang, Nezhurina, Jitsev, Lu,
+  Mastromichalakis, Xu, Chen, Liu, Zhang, Chen, Kashyap, Uslu, Li, Wu, Yan,
+  Bian, Sharma, Sun, Dillmann, Anand, Lanpouthakoun, Koopah, Hu, Guha, Dreiman,
+  Zhu, Krauth, Zhong, Muennighoff, Amanfu, Tan, Pimpalgaonkar, Aggarwal, Lin,
+  Lan, Zhao, Liang, Wang, Wang, Zhou, Heineman, Liu, Trivedi, Yang, Lin,
+  Shetty, Yang, Omi, Raoof, Li, Zhuo, Lin, Dai, Wang, Chai, Zhou, Wahdany, She,
+  Hu, Dong, Zhu, Cui, Saiyed, Kolbeinsson, Hu, Rytting, Marten, Wang, Dimakis,
+  Konwinski, and Schmidt]{merrill2026terminalbenchbenchmarkingagentshard}
+Mike~A. Merrill, Alexander~G. Shaw, Nicholas Carlini, Boxuan Li, Harsh Raj,
+  Ivan Bercovich, Lin Shi, Jeong~Yeon Shin, Thomas Walshe, E.~Kelly Buchanan,
+  Junhong Shen, Guanghao Ye, Haowei Lin, Jason Poulos, Maoyu Wang, Marianna
+  Nezhurina, Jenia Jitsev, Di~Lu, Orfeas~Menis Mastromichalakis, Zhiwei Xu,
+  Zizhao Chen, Yue Liu, Robert Zhang, Leon~Liangyu Chen, Anurag Kashyap,
+  Jan-Lucas Uslu, Jeffrey Li, Jianbo Wu, Minghao Yan, Song Bian, Vedang Sharma,
+  Ke~Sun, Steven Dillmann, Akshay Anand, Andrew Lanpouthakoun, Bardia Koopah,
+  Changran Hu, Etash Guha, Gabriel H.~S. Dreiman, Jiacheng Zhu, Karl Krauth,
+  Li~Zhong, Niklas Muennighoff, Robert Amanfu, Shangyin Tan, Shreyas
+  Pimpalgaonkar, Tushar Aggarwal, Xiangning Lin, Xin Lan, Xuandong Zhao, Yiqing
+  Liang, Yuanli Wang, Zilong Wang, Changzhi Zhou, David Heineman, Hange Liu,
+  Harsh Trivedi, John Yang, Junhong Lin, Manish Shetty, Michael Yang, Nabil
+  Omi, Negin Raoof, Shanda Li, Terry~Yue Zhuo, Wuwei Lin, Yiwei Dai, Yuxin
+  Wang, Wenhao Chai, Shang Zhou, Dariush Wahdany, Ziyu She, Jiaming Hu, Zhikang
+  Dong, Yuxuan Zhu, Sasha Cui, Ahson Saiyed, Arinbj{\"o}rn Kolbeinsson, Jesse
+  Hu, Christopher~Michael Rytting, Ryan Marten, Yixin Wang, Alex Dimakis, Andy
+  Konwinski, and Ludwig Schmidt.
+\newblock Terminal-bench: Benchmarking agents on hard, realistic tasks in
+  command line interfaces.
+\newblock In \emph{The Fourteenth International Conference on Learning
+  Representations (ICLR)}, 2026.
+\newblock URL \url{https://openreview.net/forum?id=a7Qa4CcHak}.
+
+\bibitem[{Meta PyTorch Team and Hugging Face}(2025)]{openenv2025}
+{Meta PyTorch Team and Hugging Face}.
+\newblock Openenv: An interface library for rl post training with environments,
+  2025.
+\newblock URL \url{https://github.com/meta-pytorch/OpenEnv}.
+\newblock GitHub repository.
+
+\bibitem[{METR}(2024)]{metr_task_standard_2024}
+{METR}.
+\newblock {METR} task standard, 2024.
+\newblock URL \url{https://github.com/METR/task-standard}.
+\newblock Portable Docker/VM-based standard for agent task environments;
+  \textasciitilde 200 task families across {METR}, {UK AISI}, and partners.
+
+\bibitem[{NVIDIA}(2025)]{nemo-gym}
+{NVIDIA}.
+\newblock {NeMo Gym}: An open source library for scaling reinforcement learning
+  environments for {LLM}s.
+\newblock \url{https://github.com/NVIDIA-NeMo/Gym}, 2025.
+\newblock GitHub repository.
+
+\bibitem[Pich{\'e} et~al.(2026)Pich{\'e}, Kamalloo, Pardinas, Chen, and
+  Bahdanau]{piche2025pipelinerl}
+Alexandre Pich{\'e}, Ehsan Kamalloo, Rafael Pardinas, Xiaoyin Chen, and Dzmitry
+  Bahdanau.
+\newblock {PipelineRL}: Faster on-policy reinforcement learning for long
+  sequence generation.
+\newblock \emph{Transactions on Machine Learning Research}, 2026.
+\newblock ISSN 2835-8856.
+\newblock URL \url{https://arxiv.org/abs/2509.19128}.
+
+\bibitem[Shaw(2025)]{Shaw_Harbor_Framework_2025}
+Alex Shaw.
+\newblock {Harbor Framework}, November 2025.
+\newblock URL \url{https://github.com/laude-institute/harbor}.
+
+\bibitem[Shi et~al.(2017)Shi, Karpathy, Fan, Hernandez, and
+  Liang]{Shi2017WorldOB}
+Tianlin Shi, Andrej Karpathy, Linxi Fan, Jonathan Hernandez, and Percy Liang.
+\newblock World of bits: An open-domain platform for web-based agents.
+\newblock In \emph{Proceedings of the 34th International Conference on Machine
+  Learning (ICML)}, volume~70 of \emph{Proceedings of Machine Learning
+  Research}, pages 3135--3144, 2017.
+\newblock URL \url{https://proceedings.mlr.press/v70/shi17a.html}.
+
+\bibitem[Tan et~al.(2025)Tan, Zhuang, Montgomery, Tang, Cuadron, Wang, Popa,
+  and Stoica]{tan2025judgebench}
+Sijun Tan, Siyuan Zhuang, Kyle Montgomery, William~Y. Tang, Alejandro Cuadron,
+  Chenguang Wang, Raluca~Ada Popa, and Ion Stoica.
+\newblock {JudgeBench}: A benchmark for evaluating {LLM}-based judges.
+\newblock In \emph{The Thirteenth International Conference on Learning
+  Representations (ICLR)}, 2025.
+\newblock URL \url{https://openreview.net/forum?id=G0dksFayVq}.
+
+\bibitem[Towers et~al.(2024)Towers, Kwiatkowski, Terry, Balis, De~Cola, Deleu,
+  Goul{\~a}o, Kallinteris, Krimmel, KG, Perez-Vicente, Pierr{\'e}, Schulhoff,
+  Tai, Tan, and Younis]{towers2024gymnasium}
+Mark Towers, Ariel Kwiatkowski, Jordan Terry, John~U. Balis, Gianluca De~Cola,
+  Tristan Deleu, Manuel Goul{\~a}o, Andreas Kallinteris, Markus Krimmel, Arjun
+  KG, Rodrigo Perez-Vicente, Andrea Pierr{\'e}, Sander Schulhoff, Jun~Jet Tai,
+  Hannah Tan, and Omar~G. Younis.
+\newblock Gymnasium: A standard interface for reinforcement learning
+  environments.
+\newblock \emph{arXiv preprint arXiv:2407.17032}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2407.17032}.
+
+\bibitem[Trivedi et~al.(2024)Trivedi, Khot, Hartmann, Manku, Dong, Li, Gupta,
+  Sabharwal, and Balasubramanian]{appworld2024}
+Harsh Trivedi, Tushar Khot, Mareike Hartmann, Ruskin Manku, Vinty Dong, Edward
+  Li, Shashank Gupta, Ashish Sabharwal, and Niranjan Balasubramanian.
+\newblock Appworld: A controllable world of apps and people for benchmarking
+  interactive coding agents.
+\newblock In \emph{Proceedings of the 62nd Annual Meeting of the Association
+  for Computational Linguistics (Volume 1: Long Papers) (ACL)}, pages
+  16022--16076, 2024.
+\newblock URL \url{https://aclanthology.org/2024.acl-long.850/}.
+\newblock Best Resource Paper Award.
+
+\bibitem[{UK AI Security Institute}(2024)]{inspect_ai}
+{UK AI Security Institute}.
+\newblock {Inspect AI}: Framework for large language model evaluations, 2024.
+\newblock URL \url{https://github.com/UKGovernmentBEIS/inspect_ai}.
+\newblock Open-source evaluation framework with 200+ pre-built evaluations.
+
+\bibitem[Wei et~al.(2025)Wei, Sun, Papay, McKinney, Han, Fulford, Chung,
+  Passos, Fedus, and Glaese]{wei2025browsecomp}
+Jason Wei, Zhiqing Sun, Spencer Papay, Scott McKinney, Jeffrey Han, Isa
+  Fulford, Hyung~Won Chung, Alex~Tachard Passos, William Fedus, and Amelia
+  Glaese.
+\newblock Browsecomp: A simple yet challenging benchmark for browsing agents,
+  2025.
+\newblock URL \url{https://arxiv.org/abs/2504.12516}.
+
+\bibitem[Xi et~al.(2025)Xi, Ding, Chen, Hong, Guo, Wang, Guo, Yang, Liao, He,
+  Gao, Chen, Zheng, Zou, Gui, Zhang, Qiu, Huang, Wu, and Jiang]{xi2025agentgym}
+Zhiheng Xi, Yiwen Ding, Wenxiang Chen, Boyang Hong, Honglin Guo, Junzhe Wang,
+  Xin Guo, Dingwen Yang, Chenyang Liao, Wei He, Songyang Gao, Lu~Chen, Rui
+  Zheng, Yicheng Zou, Tao Gui, Qi~Zhang, Xipeng Qiu, Xuanjing Huang, Zuxuan Wu,
+  and Yu-Gang Jiang.
+\newblock {A}gent{G}ym: Evaluating and training large language model-based
+  agents across diverse environments.
+\newblock In \emph{Proceedings of the 63rd Annual Meeting of the Association
+  for Computational Linguistics (Volume 1: Long Papers) (ACL)}, pages
+  27914--27961, 2025.
+\newblock URL \url{https://aclanthology.org/2025.acl-long.1355/}.
+
+\bibitem[Xie et~al.(2024)Xie, Zhang, Chen, Li, Zhao, Cao, Hua, Cheng, Shin,
+  Lei, Liu, Xu, Zhou, Savarese, Xiong, Zhong, and Yu]{xie2024osworld}
+Tianbao Xie, Danyang Zhang, Jixuan Chen, Xiaochuan Li, Siheng Zhao, Ruisheng
+  Cao, Toh~Jing Hua, Zhoujun Cheng, Dongchan Shin, Fangyu Lei, Yitao Liu,
+  Yiheng Xu, Shuyan Zhou, Silvio Savarese, Caiming Xiong, Victor Zhong, and Tao
+  Yu.
+\newblock Osworld: Benchmarking multimodal agents for open-ended tasks in real
+  computer environments.
+\newblock In \emph{The Thirty-eighth Annual Conference on Neural Information
+  Processing Systems (NeurIPS) Datasets and Benchmarks Track}, 2024.
+\newblock URL \url{https://openreview.net/forum?id=tN61DTr4Ed}.
+
+\bibitem[Yao et~al.(2025)Yao, Shinn, Razavi, and Narasimhan]{taubench2024}
+Shunyu Yao, Noah Shinn, Pedram Razavi, and Karthik~R. Narasimhan.
+\newblock $\tau$-bench: A benchmark for tool-agent-user interaction in
+  real-world domains.
+\newblock In \emph{The Thirteenth International Conference on Learning
+  Representations (ICLR)}, 2025.
+\newblock URL \url{https://openreview.net/forum?id=roNSXZpUDN}.
+
+\bibitem[Yehudai et~al.(2025)Yehudai, Eden, Li, Uziel, Zhao, Bar-Haim, Cohan,
+  and Shmueli-Scheuer]{yehudai2025surveyevaluationllmbasedagents}
+Asaf Yehudai, Lilach Eden, Alan Li, Guy Uziel, Yilun Zhao, Roy Bar-Haim, Arman
+  Cohan, and Michal Shmueli-Scheuer.
+\newblock Survey on evaluation of {LLM}-based agents, 2025.
+\newblock URL \url{https://arxiv.org/abs/2503.16416}.
+
+\bibitem[Zhang et~al.(2025)Zhang, He, Zhang, Kang, Li, Xie, Wang, Wang, Huang,
+  Fu, Nallipogu, Lin, Dang, Rajmohan, and Zhang]{zhang2025swebenchlive}
+Linghao Zhang, Shilin He, Chaoyun Zhang, Yu~Kang, Bowen Li, Chengxing Xie,
+  Junhao Wang, Maoquan Wang, Yufan Huang, Shengyu Fu, Elsie Nallipogu, Qingwei
+  Lin, Yingnong Dang, Saravan Rajmohan, and Dongmei Zhang.
+\newblock {SWE}-bench goes live!, 2025.
+\newblock URL \url{https://arxiv.org/abs/2505.23419}.
+
+\bibitem[Zheng et~al.(2023)Zheng, Chiang, Sheng, Zhuang, Wu, Zhuang, Lin, Li,
+  Li, Xing, Zhang, Gonzalez, and Stoica]{zheng2023judging}
+Lianmin Zheng, Wei-Lin Chiang, Ying Sheng, Siyuan Zhuang, Zhanghao Wu, Yonghao
+  Zhuang, Zi~Lin, Zhuohan Li, Dacheng Li, Eric~P. Xing, Hao Zhang, Joseph~E.
+  Gonzalez, and Ion Stoica.
+\newblock Judging {LLM}-as-a-judge with {MT}-bench and chatbot arena.
+\newblock In \emph{Advances in Neural Information Processing Systems (NeurIPS)
+  Datasets and Benchmarks Track}, 2023.
+\newblock URL \url{https://openreview.net/forum?id=uccHPGDlao}.
+
+\bibitem[Zhou et~al.(2024)Zhou, Xu, Zhu, Zhou, Lo, Sridhar, Cheng, Ou, Bisk,
+  Fried, Alon, and Neubig]{zhou2024webarena}
+Shuyan Zhou, Frank~F. Xu, Hao Zhu, Xuhui Zhou, Robert Lo, Abishek Sridhar,
+  Xianyi Cheng, Tianyue Ou, Yonatan Bisk, Daniel Fried, Uri Alon, and Graham
+  Neubig.
+\newblock Webarena: A realistic web environment for building autonomous agents.
+\newblock In \emph{The Twelfth International Conference on Learning
+  Representations (ICLR)}, 2024.
+\newblock URL \url{https://openreview.net/forum?id=oKn9c6ytLx}.
+
+\end{thebibliography}

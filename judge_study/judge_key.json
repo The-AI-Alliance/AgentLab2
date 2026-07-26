@@ -1,0 +1,302 @@
+{
+  "E000": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E001": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 4
+  },
+  "E002": {
+    "outcome": "failure",
+    "blame": "insufficient_observation",
+    "confidence": 4
+  },
+  "E003": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E004": {
+    "outcome": "failure",
+    "blame": "agent_scaffolding",
+    "confidence": 5
+  },
+  "E005": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E006": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E007": {
+    "outcome": "failure",
+    "blame": "agent_scaffolding",
+    "confidence": 4
+  },
+  "E008": {
+    "outcome": "almost",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E009": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 4
+  },
+  "E010": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 5
+  },
+  "E011": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E012": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E013": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 5
+  },
+  "E014": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 5
+  },
+  "E015": {
+    "outcome": "failure",
+    "blame": "agent_scaffolding",
+    "confidence": 5
+  },
+  "E016": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E017": {
+    "outcome": "almost",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E018": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 3
+  },
+  "E019": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 4
+  },
+  "E020": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E021": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 5
+  },
+  "E022": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E023": {
+    "outcome": "failure",
+    "blame": "tool_failure",
+    "confidence": 5
+  },
+  "E024": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E025": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E026": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E027": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E028": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E029": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E030": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 5
+  },
+  "E031": {
+    "outcome": "almost",
+    "blame": "agent_scaffolding",
+    "confidence": 3
+  },
+  "E032": {
+    "outcome": "failure",
+    "blame": "insufficient_observation",
+    "confidence": 5
+  },
+  "E033": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 4
+  },
+  "E034": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E035": {
+    "outcome": "almost",
+    "blame": "eval_brittle",
+    "confidence": 2
+  },
+  "E036": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E037": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E038": {
+    "outcome": "almost",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E039": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E040": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 5
+  },
+  "E041": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E042": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E043": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E044": {
+    "outcome": "failure",
+    "blame": "agent_scaffolding",
+    "confidence": 5
+  },
+  "E045": {
+    "outcome": "almost",
+    "blame": "eval_brittle",
+    "confidence": 3
+  },
+  "E046": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E047": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E048": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 4
+  },
+  "E049": {
+    "outcome": "failure",
+    "blame": "tool_failure",
+    "confidence": 5
+  },
+  "E050": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E051": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E052": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E053": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 4
+  },
+  "E054": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  },
+  "E055": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E056": {
+    "outcome": "failure",
+    "blame": "env_failure",
+    "confidence": 4
+  },
+  "E057": {
+    "outcome": "failure",
+    "blame": "action_space_limited",
+    "confidence": 5
+  },
+  "E058": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 5
+  },
+  "E059": {
+    "outcome": "failure",
+    "blame": "model_capability",
+    "confidence": 4
+  }
+}
