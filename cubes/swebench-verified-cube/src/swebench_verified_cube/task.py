@@ -12,7 +12,6 @@ from cube.container import relocate_if_readonly
 from cube.core import Observation
 from cube.resource import IncompatibleInfraError
 from cube.task import RuntimeContext, Task, TaskConfig, TaskExecutionInfo, TaskMetadata
-
 from cube.tools.terminal import ContainerTerminalTool, TerminalToolConfig
 
 logger = logging.getLogger(__name__)
@@ -234,6 +233,11 @@ class SWEBenchVerifiedTask(Task[SWEBenchVerifiedTaskMetadata, ContainerTerminalT
         }
 
     def evaluate(self, obs: Observation | None = None) -> tuple[float, dict[str, Any]]:
+        # Snapshot the agent's diff before anything else touches the tree, so the
+        # episode stays re-gradeable by the upstream SWE-bench harness. Without
+        # it, the artefact upstream grades (the model patch) dies with the
+        # container and cross-harness parity cannot be checked after the fact.
+        model_patch = self._capture_model_patch()
 
         fail_to_pass = self._exec.fail_to_pass
         # auto-fix(430)↓
@@ -313,9 +317,28 @@ class SWEBenchVerifiedTask(Task[SWEBenchVerifiedTaskMetadata, ContainerTerminalT
             "pass_to_pass_baseline_passed": p2p_baseline_passed,
             "fail_to_pass_output": f2p_output,
             "pass_to_pass_output": p2p_output,
+            "model_patch": model_patch,
         }
 
     # ── Private helpers ────────────────────────────────────────────
+
+    _MAX_PATCH_CHARS = 200_000
+
+    def _capture_model_patch(self) -> str:
+        """Return the agent's working-tree diff, for re-grading under another harness.
+
+        Purely diagnostic: it runs before the test patch is applied and never
+        feeds into the reward, so a failure here must not fail the episode.
+        """
+        try:
+            patch = self.tool.bash_unlimited("git diff 2>/dev/null", timeout=30)
+        except Exception as e:  # noqa: BLE001 — diagnostic only; must never fail an episode
+            logger.warning("_capture_model_patch: could not read agent diff for %s: %s", self.metadata.id, e)
+            return ""
+        if len(patch) > self._MAX_PATCH_CHARS:
+            logger.warning("_capture_model_patch: diff for %s exceeds cap, truncating", self.metadata.id)
+            return patch[: self._MAX_PATCH_CHARS] + "\n[truncated]"
+        return patch
 
     def _apply_patch(self, patch: str) -> str:
         """Apply a unified diff patch to /testbed using git apply with fallbacks."""
