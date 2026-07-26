@@ -5,15 +5,18 @@ terminal `claude -p` ↔ `codex exec`, we need our own thin Protocol. Drivers ar
 call-time arguments to `investigate_episode` / `investigate_experiment` — orthogonal to what
 the investigator is asked to do (the `InvestigatorRecipe`).
 
-Two concrete drivers ship in this module:
+Three concrete drivers ship in this module:
 
 - `ClaudeCodeSDKDriver` — wraps `claude-agent-sdk`. Needs an Anthropic API key;
   high parallelism (~8). Reports cost.
 - `TerminalClaudeDriver` — subprocess-wraps the `claude -p` headless CLI. Works
   for subscription holders who don't have an API key; lower parallelism (~2).
   Does not report cost.
+- `CodexDriver` — subprocess-wraps `codex exec`. Runs the investigator on a
+  non-Anthropic backbone, which is what lets a judge's conclusions be checked
+  against a different model family rather than trusted from one.
 
-Both honour `LITELLM_PROXY_URL` / `LITELLM_PROXY_AUTH_TOKEN` by setting
+The Claude drivers honour `LITELLM_PROXY_URL` / `LITELLM_PROXY_AUTH_TOKEN` by setting
 `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` for the SDK / subprocess. The
 proxy URL (without credentials) is recorded on `DriverResult` so investigations
 remain auditable across deployments.
@@ -26,6 +29,7 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
@@ -397,12 +401,26 @@ class TerminalClaudeDriver:
         proxy_url: str | None,
         trace_mode: TraceMode,
     ) -> DriverResult:
-        """Extract the relevant fields from the `claude -p --output-format json` envelope."""
+        """Extract the relevant fields from the `claude -p --output-format json` envelope.
+
+        Two envelope shapes exist. Older CLIs emit a single object. Current ones
+        (>= 2.x) emit a JSON *array* of messages, ending in a ``result`` message
+        that carries the final text, usage, cost and session id, with tool calls
+        appearing as ``tool_use`` blocks on the intervening ``assistant``
+        messages. Assuming the object shape against a 2.x CLI raises
+        ``AttributeError`` and loses the whole batch, so both are handled here.
+        """
         text = stdout_bytes.decode("utf-8", errors="replace").strip()
         try:
-            envelope: dict[str, Any] = json.loads(text)
+            parsed: Any = json.loads(text)
         except json.JSONDecodeError as e:
             raise RuntimeError(f"claude -p emitted non-JSON: {text[:400]!r}") from e
+
+        if isinstance(parsed, list):
+            return self._parse_message_list(
+                parsed, duration_s=duration_s, proxy_url=proxy_url, trace_mode=trace_mode
+            )
+        envelope: dict[str, Any] = parsed
 
         # Envelope shape varies across CLI versions; we look up by best-effort.
         output_text = (
@@ -450,11 +468,75 @@ class TerminalClaudeDriver:
             output_text=str(output_text),
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            cost_usd=0.0,  # claude -p does not surface cost
+            cost_usd=0.0,  # this envelope shape does not surface cost
             duration_s=duration_s,
             actions=actions,
             litellm_proxy_url=proxy_url,
             session_id=envelope.get("session_id"),
+        )
+
+    def _parse_message_list(
+        self,
+        messages: list[Any],
+        *,
+        duration_s: float,
+        proxy_url: str | None,
+        trace_mode: TraceMode,
+    ) -> DriverResult:
+        """Parse the message-array envelope emitted by Claude Code 2.x."""
+        result_msg: dict[str, Any] = {}
+        actions: list[ToolAction] = []
+        assistant_text: list[str] = []
+
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            kind = message.get("type")
+            if kind == "result":
+                result_msg = message
+                continue
+            if kind != "assistant":
+                continue
+            for block in message.get("message", {}).get("content", []) or []:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text" and block.get("text"):
+                    assistant_text.append(str(block["text"]))
+                elif block.get("type") == "tool_use" and trace_mode != "off":
+                    tool_name = str(block.get("name") or "?")
+                    raw = block.get("input") or {}
+                    actions.append(
+                        ToolAction(
+                            tool=tool_name,
+                            input_summary=_summarise(tool_name, raw),
+                            raw_input=raw if (trace_mode == "full" and isinstance(raw, dict)) else None,
+                        )
+                    )
+
+        usage = result_msg.get("usage") or {}
+        prompt_tokens = int(
+            (usage.get("input_tokens", 0) or 0)
+            + (usage.get("cache_read_input_tokens", 0) or 0)
+            + (usage.get("cache_creation_input_tokens", 0) or 0)
+        )
+        output_text = result_msg.get("result") or "\n".join(assistant_text)
+
+        if result_msg.get("is_error"):
+            logger.warning(
+                "claude -p reported is_error=%s (subtype=%s)",
+                result_msg.get("is_error"),
+                result_msg.get("subtype"),
+            )
+
+        return DriverResult(
+            output_text=str(output_text),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=int(usage.get("output_tokens", 0) or 0),
+            cost_usd=float(result_msg.get("total_cost_usd") or 0.0),
+            duration_s=duration_s,
+            actions=actions,
+            litellm_proxy_url=proxy_url,
+            session_id=result_msg.get("session_id"),
         )
 
     async def continue_session(
@@ -475,12 +557,219 @@ class TerminalClaudeDriver:
         )
 
 
+# ---------------------------------------------------------------------------
+# CodexDriver
+# ---------------------------------------------------------------------------
+
+
+class CodexDriver:
+    """Subprocess wrapper around the `codex exec` headless CLI.
+
+    Exists so the investigator's backbone is not tied to one vendor. A judge
+    that only ever runs on Claude cannot distinguish "this is what the
+    trajectory shows" from "this is what Claude thinks about trajectories";
+    re-running the same episodes through Codex is what tests that, and the
+    blame distributions can be compared directly because the recipe, prompts,
+    and output schema are unchanged.
+
+    Codex has no separate system-prompt flag, so the system prompt is prepended
+    to the user prompt under a header. The sandbox is left read-only: the
+    investigator only ever reads a trajectory, and a judge that can write to
+    the experiment directory it is judging is a judge worth distrusting.
+    """
+
+    name: str = "codex"
+    # Deliberately below the Claude drivers. Each `codex exec` is a full CLI
+    # process with its own model session; the ceiling here is host memory, not
+    # API concurrency.
+    max_parallelism: int = 4
+
+    def __init__(self, *, executable: str = "codex", max_parallelism: int | None = None) -> None:
+        self.executable = executable
+        if max_parallelism is not None:
+            self.max_parallelism = max_parallelism
+
+    def _build_args(
+        self,
+        *,
+        prompt: str,
+        cwd: Path,
+        additional_dirs: list[Path],
+        model: str,
+        last_message_path: Path,
+    ) -> list[str]:
+        args: list[str] = [
+            self.executable,
+            "exec",
+            "--model",
+            model,
+            "--sandbox",
+            "read-only",
+            "--skip-git-repo-check",
+            "--json",
+            "--output-last-message",
+            str(last_message_path),
+            "--cd",
+            str(cwd),
+        ]
+        for d in additional_dirs:
+            args.extend(["--add-dir", str(d)])
+        args.append(prompt)
+        return args
+
+    async def run(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        cwd: Path,
+        additional_dirs: list[Path],
+        model: str,
+        allowed_tools: tuple[str, ...] = INVESTIGATOR_ALLOWED_TOOLS,
+        permission_mode: Literal["bypassPermissions", "ask"] = "bypassPermissions",
+        verbose: bool = False,
+        trace_mode: TraceMode = "actions",
+    ) -> DriverResult:
+        prompt = f"{system_prompt}\n\n---\n\n{user_prompt}"
+
+        with tempfile.TemporaryDirectory(prefix="codex-driver-") as tmp:
+            last_message = Path(tmp) / "last_message.txt"
+            args = self._build_args(
+                prompt=prompt,
+                cwd=cwd,
+                additional_dirs=additional_dirs,
+                model=model,
+                last_message_path=last_message,
+            )
+            if verbose:
+                logger.info("CodexDriver.exec: %s", " ".join(args[:10]) + " ...")
+
+            start = time.time()
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(cwd),
+                env=dict(os.environ),
+            )
+            stdout_bytes, stderr_bytes = await proc.communicate()
+            duration_s = time.time() - start
+
+            if proc.returncode != 0:
+                stderr = stderr_bytes.decode("utf-8", errors="replace")
+                raise RuntimeError(
+                    f"codex exec exited with code {proc.returncode}: {stderr.strip()[-400:] or '<no stderr>'}"
+                )
+
+            output_text = last_message.read_text(errors="replace") if last_message.exists() else ""
+
+        return self._parse_events(
+            stdout_bytes,
+            output_text=output_text,
+            duration_s=duration_s,
+            trace_mode=trace_mode,
+        )
+
+    def _parse_events(
+        self,
+        stdout_bytes: bytes,
+        *,
+        output_text: str,
+        duration_s: float,
+        trace_mode: TraceMode,
+    ) -> DriverResult:
+        """Fold the JSONL event stream into a DriverResult.
+
+        The stream is a sequence of ``{"type": ..., "item": {...}}`` envelopes:
+        ``item.completed`` carries either an ``agent_message`` (the assistant's
+        text) or a ``command_execution`` (a shell call), and ``turn.completed``
+        carries usage. Older releases nested the payload under ``msg`` instead,
+        so both shapes are accepted and every field is read defensively: schema
+        drift should cost a token count or a trace line, never the finding.
+        """
+        prompt_tokens = completion_tokens = 0
+        session_id: str | None = None
+        actions: list[ToolAction] = []
+        fallback_text = ""
+
+        for raw_line in stdout_bytes.decode("utf-8", errors="replace").splitlines():
+            line = raw_line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                event: dict[str, Any] = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+            kind = str(event.get("type") or "")
+            item = event.get("item")
+            msg = event.get("msg")
+            payload: dict[str, Any] = item if isinstance(item, dict) else (msg if isinstance(msg, dict) else event)
+            item_kind = str(payload.get("type") or kind)
+
+            session_id = session_id or event.get("thread_id") or event.get("session_id") or payload.get("session_id")
+
+            usage = event.get("usage") or payload.get("usage") or payload.get("token_usage")
+            if isinstance(usage, dict) and usage:
+                prompt_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0) or prompt_tokens
+                completion_tokens = (
+                    int(usage.get("output_tokens") or usage.get("completion_tokens") or 0) or completion_tokens
+                )
+
+            # The last agent_message is the model's final answer; earlier ones
+            # are narration. Overwrite rather than keep the first.
+            if item_kind == "agent_message":
+                fallback_text = str(payload.get("text") or payload.get("message") or "") or fallback_text
+
+            if trace_mode == "off" or kind == "item.started":
+                continue  # item.started duplicates a command we log on completion
+            if item_kind in ("command_execution", "patch_apply", "file_change") or "tool" in item_kind:
+                raw = payload.get("command") or payload.get("input") or payload.get("arguments") or {}
+                raw_dict = raw if isinstance(raw, dict) else {"command": raw}
+                actions.append(
+                    ToolAction(
+                        tool=item_kind,
+                        input_summary=_summarise(item_kind, raw_dict),
+                        raw_input=raw_dict if trace_mode == "full" else None,
+                    )
+                )
+
+        return DriverResult(
+            output_text=output_text or fallback_text,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=0.0,  # codex exec does not surface a per-run cost
+            duration_s=duration_s,
+            actions=actions,
+            litellm_proxy_url=None,
+            session_id=session_id,
+        )
+
+    async def continue_session(
+        self,
+        *,
+        session_id: str,
+        follow_up_prompt: str,
+        verbose: bool = False,
+        trace_mode: TraceMode = "actions",
+    ) -> DriverResult:
+        # `codex exec resume <id>` exists, but the audit pass is equally well
+        # served by a fresh run carrying the prior finding in its prompt, which
+        # is the path the Claude drivers already take.
+        raise NotImplementedError(
+            "CodexDriver.continue_session is not implemented; "
+            "audit pass falls back to a fresh run with prior finding in the prompt."
+        )
+
+
 __all__ = [
+    "INVESTIGATOR_ALLOWED_TOOLS",
     "AgentDriver",
+    "ClaudeCodeSDKDriver",
+    "CodexDriver",
     "DriverResult",
+    "TerminalClaudeDriver",
     "ToolAction",
     "TraceMode",
-    "INVESTIGATOR_ALLOWED_TOOLS",
-    "ClaudeCodeSDKDriver",
-    "TerminalClaudeDriver",
 ]

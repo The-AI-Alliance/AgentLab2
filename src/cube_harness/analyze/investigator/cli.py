@@ -25,7 +25,12 @@ from typing import Annotated
 
 import typer
 
-from cube_harness.analyze.investigator.agent_driver import AgentDriver, ClaudeCodeSDKDriver, TerminalClaudeDriver
+from cube_harness.analyze.investigator.agent_driver import (
+    AgentDriver,
+    ClaudeCodeSDKDriver,
+    CodexDriver,
+    TerminalClaudeDriver,
+)
 from cube_harness.analyze.investigator.benchmark_context_agent import generate_context_file
 from cube_harness.analyze.investigator.core import InvestigationConfig, investigate_experiment
 from cube_harness.analyze.investigator.recipe import InvestigatorRecipe
@@ -70,7 +75,9 @@ def _make_driver(name: str) -> AgentDriver:
         return ClaudeCodeSDKDriver()
     if name == "claude-terminal":
         return TerminalClaudeDriver()
-    raise typer.BadParameter(f"unknown driver {name!r} — choose one of: claude-code-sdk, claude-terminal")
+    if name == "codex":
+        return CodexDriver()
+    raise typer.BadParameter(f"unknown driver {name!r} — choose one of: claude-code-sdk, claude-terminal, codex")
 
 
 app = typer.Typer(
@@ -87,7 +94,7 @@ def run_cmd(
     driver: Annotated[
         str,
         typer.Option(
-            help="Coding-agent driver: 'claude-terminal' (subscription, default) or 'claude-code-sdk' (API key)."
+            help="Coding-agent driver: 'claude-terminal' (subscription, default), 'claude-code-sdk' (API key), or 'codex' (non-Anthropic backbone)."
         ),
     ] = "claude-terminal",
     investigator_model: Annotated[

@@ -30,11 +30,13 @@ from cube_harness.analyze.investigator import (
     EXPERIMENT_INVESTIGATION_SUMMARY_FILENAME,
     AgentDriver,
     AuditOutput,
+    CodexDriver,
     DriverResult,
     InvestigationConfig,
     InvestigatorRecipe,
     SameAgentPreviousIteration,
     SameTaskDifferentAgent,
+    TerminalClaudeDriver,
     ToolAction,
     TopKBySimilarityStub,
     discover_episodes,
@@ -1579,3 +1581,131 @@ def test_run_meta_analysis_retries_on_validation_error(tmp_path: Path) -> None:
     assert "Second attempt" in analysis.markdown_summary
     # Cost accumulates across attempts.
     assert analysis.cost_usd == pytest.approx(0.002)
+
+
+# ---------------------------------------------------------------------------
+# CodexDriver event parsing
+# ---------------------------------------------------------------------------
+
+# One real `codex exec --json` stream, trimmed: thread id, a narration message,
+# a shell call (started then completed), the final answer, and usage.
+_CODEX_STREAM = b"""{"type":"thread.started","thread_id":"019f9a1d-d8d0-73c0"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Reading the trajectory now."}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat trajectory.txt'","status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat trajectory.txt'","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"BLAME=agent"}}
+{"type":"turn.completed","usage":{"input_tokens":22337,"cached_input_tokens":19712,"output_tokens":128}}
+"""
+
+
+def test_codex_driver_parses_event_stream() -> None:
+    """Usage, session id, the final message, and one tool action are recovered."""
+    result = CodexDriver()._parse_events(
+        _CODEX_STREAM, output_text="", duration_s=1.5, trace_mode="actions"
+    )
+    assert result.output_text == "BLAME=agent"  # last agent_message, not the narration
+    assert result.prompt_tokens == 22337
+    assert result.completion_tokens == 128
+    assert result.session_id == "019f9a1d-d8d0-73c0"
+    # item.started duplicates item.completed for the same call; log it once.
+    assert [a.tool for a in result.actions] == ["command_execution"]
+
+
+def test_codex_driver_prefers_last_message_file_over_stream() -> None:
+    """`--output-last-message` is authoritative; the stream is the fallback."""
+    result = CodexDriver()._parse_events(
+        _CODEX_STREAM, output_text="from file", duration_s=1.0, trace_mode="actions"
+    )
+    assert result.output_text == "from file"
+
+
+def test_codex_driver_survives_schema_drift() -> None:
+    """Unknown event shapes must not raise: a finding outranks a trace line."""
+    result = CodexDriver()._parse_events(
+        b'{"type":"mystery.event","payload":{"unexpected":true}}\nnot json at all\n',
+        output_text="ok",
+        duration_s=0.1,
+        trace_mode="actions",
+    )
+    assert result.output_text == "ok"
+    assert result.actions == []
+
+
+def test_codex_driver_satisfies_agent_driver_protocol() -> None:
+    """The investigator accepts any driver; Codex must qualify structurally."""
+    assert isinstance(CodexDriver(), AgentDriver)
+
+
+# ---------------------------------------------------------------------------
+# TerminalClaudeDriver envelope parsing
+# ---------------------------------------------------------------------------
+
+# Claude Code 2.x emits a JSON array of messages rather than one object. Parsing
+# it as an object raised AttributeError and lost an entire investigation batch.
+_CLAUDE_MESSAGE_LIST = json.dumps(
+    [
+        {"type": "system", "subtype": "init", "session_id": "sess-1"},
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "Reading the trajectory."},
+                    {"type": "tool_use", "name": "Read", "input": {"file_path": "/tmp/x/transcript.txt"}},
+                ]
+            },
+        },
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": "BLAME=agent",
+            "session_id": "sess-1",
+            "total_cost_usd": 0.0463,
+            "usage": {
+                "input_tokens": 2,
+                "cache_read_input_tokens": 18177,
+                "cache_creation_input_tokens": 5115,
+                "output_tokens": 147,
+            },
+        },
+    ]
+).encode()
+
+
+def test_terminal_claude_driver_parses_message_list_envelope() -> None:
+    """The 2.x array envelope yields text, cached-inclusive tokens, cost and tools."""
+    result = TerminalClaudeDriver()._parse_envelope(
+        _CLAUDE_MESSAGE_LIST, duration_s=2.0, proxy_url=None, trace_mode="actions"
+    )
+    assert result.output_text == "BLAME=agent"
+    assert result.prompt_tokens == 2 + 18177 + 5115  # cache reads are real input tokens
+    assert result.completion_tokens == 147
+    assert result.cost_usd == pytest.approx(0.0463)  # this envelope does report cost
+    assert result.session_id == "sess-1"
+    assert [a.tool for a in result.actions] == ["Read"]
+
+
+def test_terminal_claude_driver_still_parses_object_envelope() -> None:
+    """Older single-object envelopes keep working."""
+    envelope = json.dumps(
+        {"result": "BLAME=tool", "session_id": "sess-2", "usage": {"input_tokens": 10, "output_tokens": 3}}
+    ).encode()
+    result = TerminalClaudeDriver()._parse_envelope(
+        envelope, duration_s=1.0, proxy_url=None, trace_mode="actions"
+    )
+    assert result.output_text == "BLAME=tool"
+    assert result.prompt_tokens == 10
+    assert result.session_id == "sess-2"
+
+
+def test_terminal_claude_driver_falls_back_to_assistant_text() -> None:
+    """A truncated stream with no result message still yields the assistant text."""
+    messages = json.dumps(
+        [{"type": "assistant", "message": {"content": [{"type": "text", "text": "partial answer"}]}}]
+    ).encode()
+    result = TerminalClaudeDriver()._parse_envelope(
+        messages, duration_s=1.0, proxy_url=None, trace_mode="off"
+    )
+    assert result.output_text == "partial answer"
+    assert result.actions == []
