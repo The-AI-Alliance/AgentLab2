@@ -26,14 +26,27 @@ import json
 from typing import Annotated
 
 import typer
+from pydantic import BaseModel, TypeAdapter, ValidationError
 
 from cube_harness.exp_runner import run_sequentially, run_with_ray
 from cube_harness.experiment import Experiment
 
 
 def _apply_override(exp: Experiment, dotted: str) -> None:
-    """Apply one ``a.b.c=value`` override. Value is JSON-parsed when possible
-    (so ``200`` → int), then assigned — `ValidatedConfig` validates the type."""
+    """Apply one ``a.b.c=value`` override, coerced to the target field's type.
+
+    Values arrive from the CLI as strings, JSON-parsed when possible (so
+    ``200`` → int). They are then validated against the field's declared
+    annotation before assignment.
+
+    The coercion is not optional: `Experiment` subclasses `TypedBaseModel`,
+    **not** `ValidatedConfig`, so `validate_assignment` is off and a bare
+    `setattr` stores whatever it is given. ``--set output_dir=/some/path``
+    therefore used to store a `str` in a `Path | None` field, which survived
+    until the runner did ``exp_dir / EXPERIMENT_STATUS_FILENAME`` and died with
+    a bare ``TypeError: unsupported operand type(s) for /: 'str' and 'str'`` —
+    after the benchmark had been built and every episode config written.
+    """
     path, _, raw = dotted.partition("=")
     if not _:
         raise typer.BadParameter(f"--set expects key=value, got {dotted!r}")
@@ -45,6 +58,14 @@ def _apply_override(exp: Experiment, dotted: str) -> None:
     target = exp
     for part in parents:
         target = getattr(target, part)
+    if isinstance(target, BaseModel):
+        field = type(target).model_fields.get(leaf)
+        if field is None:
+            raise typer.BadParameter(f"--set {path}: {type(target).__name__} has no field {leaf!r}")
+        try:
+            value = TypeAdapter(field.annotation).validate_python(value)
+        except ValidationError as exc:
+            raise typer.BadParameter(f"--set {path}: {exc}") from exc
     setattr(target, leaf, value)
 
 
