@@ -1,0 +1,2538 @@
+diff --git a/cubes/swebench-verified-cube/src/swebench_verified_cube/task.py b/cubes/swebench-verified-cube/src/swebench_verified_cube/task.py
+index 28748613..bb1abc19 100644
+--- a/cubes/swebench-verified-cube/src/swebench_verified_cube/task.py
++++ b/cubes/swebench-verified-cube/src/swebench_verified_cube/task.py
+@@ -12,7 +12,6 @@ from cube.container import relocate_if_readonly
+ from cube.core import Observation
+ from cube.resource import IncompatibleInfraError
+ from cube.task import RuntimeContext, Task, TaskConfig, TaskExecutionInfo, TaskMetadata
+-
+ from cube.tools.terminal import ContainerTerminalTool, TerminalToolConfig
+ 
+ logger = logging.getLogger(__name__)
+@@ -234,6 +233,11 @@ class SWEBenchVerifiedTask(Task[SWEBenchVerifiedTaskMetadata, ContainerTerminalT
+         }
+ 
+     def evaluate(self, obs: Observation | None = None) -> tuple[float, dict[str, Any]]:
++        # Snapshot the agent's diff before anything else touches the tree, so the
++        # episode stays re-gradeable by the upstream SWE-bench harness. Without
++        # it, the artefact upstream grades (the model patch) dies with the
++        # container and cross-harness parity cannot be checked after the fact.
++        model_patch = self._capture_model_patch()
+ 
+         fail_to_pass = self._exec.fail_to_pass
+         # auto-fix(430)↓
+@@ -313,10 +317,29 @@ class SWEBenchVerifiedTask(Task[SWEBenchVerifiedTaskMetadata, ContainerTerminalT
+             "pass_to_pass_baseline_passed": p2p_baseline_passed,
+             "fail_to_pass_output": f2p_output,
+             "pass_to_pass_output": p2p_output,
++            "model_patch": model_patch,
+         }
+ 
+     # ── Private helpers ────────────────────────────────────────────
+ 
++    _MAX_PATCH_CHARS = 200_000
++
++    def _capture_model_patch(self) -> str:
++        """Return the agent's working-tree diff, for re-grading under another harness.
++
++        Purely diagnostic: it runs before the test patch is applied and never
++        feeds into the reward, so a failure here must not fail the episode.
++        """
++        try:
++            patch = self.tool.bash_unlimited("git diff 2>/dev/null", timeout=30)
++        except Exception as e:  # noqa: BLE001 — diagnostic only; must never fail an episode
++            logger.warning("_capture_model_patch: could not read agent diff for %s: %s", self.metadata.id, e)
++            return ""
++        if len(patch) > self._MAX_PATCH_CHARS:
++            logger.warning("_capture_model_patch: diff for %s exceeds cap, truncating", self.metadata.id)
++            return patch[: self._MAX_PATCH_CHARS] + "\n[truncated]"
++        return patch
++
+     def _apply_patch(self, patch: str) -> str:
+         """Apply a unified diff patch to /testbed using git apply with fallbacks."""
+         b64 = base64.b64encode(patch.encode()).decode()
+diff --git a/src/cube_harness/analyze/investigator/agent_driver.py b/src/cube_harness/analyze/investigator/agent_driver.py
+index 913efb3f..8990f9ca 100644
+--- a/src/cube_harness/analyze/investigator/agent_driver.py
++++ b/src/cube_harness/analyze/investigator/agent_driver.py
+@@ -5,15 +5,18 @@ terminal `claude -p` ↔ `codex exec`, we need our own thin Protocol. Drivers ar
+ call-time arguments to `investigate_episode` / `investigate_experiment` — orthogonal to what
+ the investigator is asked to do (the `InvestigatorRecipe`).
+ 
+-Two concrete drivers ship in this module:
++Three concrete drivers ship in this module:
+ 
+ - `ClaudeCodeSDKDriver` — wraps `claude-agent-sdk`. Needs an Anthropic API key;
+   high parallelism (~8). Reports cost.
+ - `TerminalClaudeDriver` — subprocess-wraps the `claude -p` headless CLI. Works
+   for subscription holders who don't have an API key; lower parallelism (~2).
+   Does not report cost.
++- `CodexDriver` — subprocess-wraps `codex exec`. Runs the investigator on a
++  non-Anthropic backbone, which is what lets a judge's conclusions be checked
++  against a different model family rather than trusted from one.
+ 
+-Both honour `LITELLM_PROXY_URL` / `LITELLM_PROXY_AUTH_TOKEN` by setting
++The Claude drivers honour `LITELLM_PROXY_URL` / `LITELLM_PROXY_AUTH_TOKEN` by setting
+ `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` for the SDK / subprocess. The
+ proxy URL (without credentials) is recorded on `DriverResult` so investigations
+ remain auditable across deployments.
+@@ -26,6 +29,7 @@ import json
+ import logging
+ import os
+ import sys
++import tempfile
+ import time
+ from pathlib import Path
+ from typing import Any, Literal, Protocol, runtime_checkable
+@@ -397,13 +401,27 @@ class TerminalClaudeDriver:
+         proxy_url: str | None,
+         trace_mode: TraceMode,
+     ) -> DriverResult:
+-        """Extract the relevant fields from the `claude -p --output-format json` envelope."""
++        """Extract the relevant fields from the `claude -p --output-format json` envelope.
++
++        Two envelope shapes exist. Older CLIs emit a single object. Current ones
++        (>= 2.x) emit a JSON *array* of messages, ending in a ``result`` message
++        that carries the final text, usage, cost and session id, with tool calls
++        appearing as ``tool_use`` blocks on the intervening ``assistant``
++        messages. Assuming the object shape against a 2.x CLI raises
++        ``AttributeError`` and loses the whole batch, so both are handled here.
++        """
+         text = stdout_bytes.decode("utf-8", errors="replace").strip()
+         try:
+-            envelope: dict[str, Any] = json.loads(text)
++            parsed: Any = json.loads(text)
+         except json.JSONDecodeError as e:
+             raise RuntimeError(f"claude -p emitted non-JSON: {text[:400]!r}") from e
+ 
++        if isinstance(parsed, list):
++            return self._parse_message_list(
++                parsed, duration_s=duration_s, proxy_url=proxy_url, trace_mode=trace_mode
++            )
++        envelope: dict[str, Any] = parsed
++
+         # Envelope shape varies across CLI versions; we look up by best-effort.
+         output_text = (
+             envelope.get("result")
+@@ -450,13 +468,77 @@ class TerminalClaudeDriver:
+             output_text=str(output_text),
+             prompt_tokens=prompt_tokens,
+             completion_tokens=completion_tokens,
+-            cost_usd=0.0,  # claude -p does not surface cost
++            cost_usd=0.0,  # this envelope shape does not surface cost
+             duration_s=duration_s,
+             actions=actions,
+             litellm_proxy_url=proxy_url,
+             session_id=envelope.get("session_id"),
+         )
+ 
++    def _parse_message_list(
++        self,
++        messages: list[Any],
++        *,
++        duration_s: float,
++        proxy_url: str | None,
++        trace_mode: TraceMode,
++    ) -> DriverResult:
++        """Parse the message-array envelope emitted by Claude Code 2.x."""
++        result_msg: dict[str, Any] = {}
++        actions: list[ToolAction] = []
++        assistant_text: list[str] = []
++
++        for message in messages:
++            if not isinstance(message, dict):
++                continue
++            kind = message.get("type")
++            if kind == "result":
++                result_msg = message
++                continue
++            if kind != "assistant":
++                continue
++            for block in message.get("message", {}).get("content", []) or []:
++                if not isinstance(block, dict):
++                    continue
++                if block.get("type") == "text" and block.get("text"):
++                    assistant_text.append(str(block["text"]))
++                elif block.get("type") == "tool_use" and trace_mode != "off":
++                    tool_name = str(block.get("name") or "?")
++                    raw = block.get("input") or {}
++                    actions.append(
++                        ToolAction(
++                            tool=tool_name,
++                            input_summary=_summarise(tool_name, raw),
++                            raw_input=raw if (trace_mode == "full" and isinstance(raw, dict)) else None,
++                        )
++                    )
++
++        usage = result_msg.get("usage") or {}
++        prompt_tokens = int(
++            (usage.get("input_tokens", 0) or 0)
++            + (usage.get("cache_read_input_tokens", 0) or 0)
++            + (usage.get("cache_creation_input_tokens", 0) or 0)
++        )
++        output_text = result_msg.get("result") or "\n".join(assistant_text)
++
++        if result_msg.get("is_error"):
++            logger.warning(
++                "claude -p reported is_error=%s (subtype=%s)",
++                result_msg.get("is_error"),
++                result_msg.get("subtype"),
++            )
++
++        return DriverResult(
++            output_text=str(output_text),
++            prompt_tokens=prompt_tokens,
++            completion_tokens=int(usage.get("output_tokens", 0) or 0),
++            cost_usd=float(result_msg.get("total_cost_usd") or 0.0),
++            duration_s=duration_s,
++            actions=actions,
++            litellm_proxy_url=proxy_url,
++            session_id=result_msg.get("session_id"),
++        )
++
+     async def continue_session(
+         self,
+         *,
+@@ -475,12 +557,219 @@ class TerminalClaudeDriver:
+         )
+ 
+ 
++# ---------------------------------------------------------------------------
++# CodexDriver
++# ---------------------------------------------------------------------------
++
++
++class CodexDriver:
++    """Subprocess wrapper around the `codex exec` headless CLI.
++
++    Exists so the investigator's backbone is not tied to one vendor. A judge
++    that only ever runs on Claude cannot distinguish "this is what the
++    trajectory shows" from "this is what Claude thinks about trajectories";
++    re-running the same episodes through Codex is what tests that, and the
++    blame distributions can be compared directly because the recipe, prompts,
++    and output schema are unchanged.
++
++    Codex has no separate system-prompt flag, so the system prompt is prepended
++    to the user prompt under a header. The sandbox is left read-only: the
++    investigator only ever reads a trajectory, and a judge that can write to
++    the experiment directory it is judging is a judge worth distrusting.
++    """
++
++    name: str = "codex"
++    # Deliberately below the Claude drivers. Each `codex exec` is a full CLI
++    # process with its own model session; the ceiling here is host memory, not
++    # API concurrency.
++    max_parallelism: int = 4
++
++    def __init__(self, *, executable: str = "codex", max_parallelism: int | None = None) -> None:
++        self.executable = executable
++        if max_parallelism is not None:
++            self.max_parallelism = max_parallelism
++
++    def _build_args(
++        self,
++        *,
++        prompt: str,
++        cwd: Path,
++        additional_dirs: list[Path],
++        model: str,
++        last_message_path: Path,
++    ) -> list[str]:
++        args: list[str] = [
++            self.executable,
++            "exec",
++            "--model",
++            model,
++            "--sandbox",
++            "read-only",
++            "--skip-git-repo-check",
++            "--json",
++            "--output-last-message",
++            str(last_message_path),
++            "--cd",
++            str(cwd),
++        ]
++        for d in additional_dirs:
++            args.extend(["--add-dir", str(d)])
++        args.append(prompt)
++        return args
++
++    async def run(
++        self,
++        *,
++        system_prompt: str,
++        user_prompt: str,
++        cwd: Path,
++        additional_dirs: list[Path],
++        model: str,
++        allowed_tools: tuple[str, ...] = INVESTIGATOR_ALLOWED_TOOLS,
++        permission_mode: Literal["bypassPermissions", "ask"] = "bypassPermissions",
++        verbose: bool = False,
++        trace_mode: TraceMode = "actions",
++    ) -> DriverResult:
++        prompt = f"{system_prompt}\n\n---\n\n{user_prompt}"
++
++        with tempfile.TemporaryDirectory(prefix="codex-driver-") as tmp:
++            last_message = Path(tmp) / "last_message.txt"
++            args = self._build_args(
++                prompt=prompt,
++                cwd=cwd,
++                additional_dirs=additional_dirs,
++                model=model,
++                last_message_path=last_message,
++            )
++            if verbose:
++                logger.info("CodexDriver.exec: %s", " ".join(args[:10]) + " ...")
++
++            start = time.time()
++            proc = await asyncio.create_subprocess_exec(
++                *args,
++                stdin=asyncio.subprocess.DEVNULL,
++                stdout=asyncio.subprocess.PIPE,
++                stderr=asyncio.subprocess.PIPE,
++                cwd=str(cwd),
++                env=dict(os.environ),
++            )
++            stdout_bytes, stderr_bytes = await proc.communicate()
++            duration_s = time.time() - start
++
++            if proc.returncode != 0:
++                stderr = stderr_bytes.decode("utf-8", errors="replace")
++                raise RuntimeError(
++                    f"codex exec exited with code {proc.returncode}: {stderr.strip()[-400:] or '<no stderr>'}"
++                )
++
++            output_text = last_message.read_text(errors="replace") if last_message.exists() else ""
++
++        return self._parse_events(
++            stdout_bytes,
++            output_text=output_text,
++            duration_s=duration_s,
++            trace_mode=trace_mode,
++        )
++
++    def _parse_events(
++        self,
++        stdout_bytes: bytes,
++        *,
++        output_text: str,
++        duration_s: float,
++        trace_mode: TraceMode,
++    ) -> DriverResult:
++        """Fold the JSONL event stream into a DriverResult.
++
++        The stream is a sequence of ``{"type": ..., "item": {...}}`` envelopes:
++        ``item.completed`` carries either an ``agent_message`` (the assistant's
++        text) or a ``command_execution`` (a shell call), and ``turn.completed``
++        carries usage. Older releases nested the payload under ``msg`` instead,
++        so both shapes are accepted and every field is read defensively: schema
++        drift should cost a token count or a trace line, never the finding.
++        """
++        prompt_tokens = completion_tokens = 0
++        session_id: str | None = None
++        actions: list[ToolAction] = []
++        fallback_text = ""
++
++        for raw_line in stdout_bytes.decode("utf-8", errors="replace").splitlines():
++            line = raw_line.strip()
++            if not line.startswith("{"):
++                continue
++            try:
++                event: dict[str, Any] = json.loads(line)
++            except json.JSONDecodeError:
++                continue
++
++            kind = str(event.get("type") or "")
++            item = event.get("item")
++            msg = event.get("msg")
++            payload: dict[str, Any] = item if isinstance(item, dict) else (msg if isinstance(msg, dict) else event)
++            item_kind = str(payload.get("type") or kind)
++
++            session_id = session_id or event.get("thread_id") or event.get("session_id") or payload.get("session_id")
++
++            usage = event.get("usage") or payload.get("usage") or payload.get("token_usage")
++            if isinstance(usage, dict) and usage:
++                prompt_tokens = int(usage.get("input_tokens") or usage.get("prompt_tokens") or 0) or prompt_tokens
++                completion_tokens = (
++                    int(usage.get("output_tokens") or usage.get("completion_tokens") or 0) or completion_tokens
++                )
++
++            # The last agent_message is the model's final answer; earlier ones
++            # are narration. Overwrite rather than keep the first.
++            if item_kind == "agent_message":
++                fallback_text = str(payload.get("text") or payload.get("message") or "") or fallback_text
++
++            if trace_mode == "off" or kind == "item.started":
++                continue  # item.started duplicates a command we log on completion
++            if item_kind in ("command_execution", "patch_apply", "file_change") or "tool" in item_kind:
++                raw = payload.get("command") or payload.get("input") or payload.get("arguments") or {}
++                raw_dict = raw if isinstance(raw, dict) else {"command": raw}
++                actions.append(
++                    ToolAction(
++                        tool=item_kind,
++                        input_summary=_summarise(item_kind, raw_dict),
++                        raw_input=raw_dict if trace_mode == "full" else None,
++                    )
++                )
++
++        return DriverResult(
++            output_text=output_text or fallback_text,
++            prompt_tokens=prompt_tokens,
++            completion_tokens=completion_tokens,
++            cost_usd=0.0,  # codex exec does not surface a per-run cost
++            duration_s=duration_s,
++            actions=actions,
++            litellm_proxy_url=None,
++            session_id=session_id,
++        )
++
++    async def continue_session(
++        self,
++        *,
++        session_id: str,
++        follow_up_prompt: str,
++        verbose: bool = False,
++        trace_mode: TraceMode = "actions",
++    ) -> DriverResult:
++        # `codex exec resume <id>` exists, but the audit pass is equally well
++        # served by a fresh run carrying the prior finding in its prompt, which
++        # is the path the Claude drivers already take.
++        raise NotImplementedError(
++            "CodexDriver.continue_session is not implemented; "
++            "audit pass falls back to a fresh run with prior finding in the prompt."
++        )
++
++
+ __all__ = [
++    "INVESTIGATOR_ALLOWED_TOOLS",
+     "AgentDriver",
++    "ClaudeCodeSDKDriver",
++    "CodexDriver",
+     "DriverResult",
++    "TerminalClaudeDriver",
+     "ToolAction",
+     "TraceMode",
+-    "INVESTIGATOR_ALLOWED_TOOLS",
+-    "ClaudeCodeSDKDriver",
+-    "TerminalClaudeDriver",
+ ]
+diff --git a/src/cube_harness/analyze/investigator/cli.py b/src/cube_harness/analyze/investigator/cli.py
+index 831a6830..1251221f 100644
+--- a/src/cube_harness/analyze/investigator/cli.py
++++ b/src/cube_harness/analyze/investigator/cli.py
+@@ -25,7 +25,12 @@ from typing import Annotated
+ 
+ import typer
+ 
+-from cube_harness.analyze.investigator.agent_driver import AgentDriver, ClaudeCodeSDKDriver, TerminalClaudeDriver
++from cube_harness.analyze.investigator.agent_driver import (
++    AgentDriver,
++    ClaudeCodeSDKDriver,
++    CodexDriver,
++    TerminalClaudeDriver,
++)
+ from cube_harness.analyze.investigator.benchmark_context_agent import generate_context_file
+ from cube_harness.analyze.investigator.core import InvestigationConfig, investigate_experiment
+ from cube_harness.analyze.investigator.recipe import InvestigatorRecipe
+@@ -70,7 +75,9 @@ def _make_driver(name: str) -> AgentDriver:
+         return ClaudeCodeSDKDriver()
+     if name == "claude-terminal":
+         return TerminalClaudeDriver()
+-    raise typer.BadParameter(f"unknown driver {name!r} — choose one of: claude-code-sdk, claude-terminal")
++    if name == "codex":
++        return CodexDriver()
++    raise typer.BadParameter(f"unknown driver {name!r} — choose one of: claude-code-sdk, claude-terminal, codex")
+ 
+ 
+ app = typer.Typer(
+@@ -87,7 +94,7 @@ def run_cmd(
+     driver: Annotated[
+         str,
+         typer.Option(
+-            help="Coding-agent driver: 'claude-terminal' (subscription, default) or 'claude-code-sdk' (API key)."
++            help="Coding-agent driver: 'claude-terminal' (subscription, default), 'claude-code-sdk' (API key), or 'codex' (non-Anthropic backbone)."
+         ),
+     ] = "claude-terminal",
+     investigator_model: Annotated[
+diff --git a/tests/test_investigator.py b/tests/test_investigator.py
+index b63d06f2..dbf84294 100644
+--- a/tests/test_investigator.py
++++ b/tests/test_investigator.py
+@@ -30,11 +30,13 @@ from cube_harness.analyze.investigator import (
+     EXPERIMENT_INVESTIGATION_SUMMARY_FILENAME,
+     AgentDriver,
+     AuditOutput,
++    CodexDriver,
+     DriverResult,
+     InvestigationConfig,
+     InvestigatorRecipe,
+     SameAgentPreviousIteration,
+     SameTaskDifferentAgent,
++    TerminalClaudeDriver,
+     ToolAction,
+     TopKBySimilarityStub,
+     discover_episodes,
+@@ -1579,3 +1581,131 @@ def test_run_meta_analysis_retries_on_validation_error(tmp_path: Path) -> None:
+     assert "Second attempt" in analysis.markdown_summary
+     # Cost accumulates across attempts.
+     assert analysis.cost_usd == pytest.approx(0.002)
++
++
++# ---------------------------------------------------------------------------
++# CodexDriver event parsing
++# ---------------------------------------------------------------------------
++
++# One real `codex exec --json` stream, trimmed: thread id, a narration message,
++# a shell call (started then completed), the final answer, and usage.
++_CODEX_STREAM = b"""{"type":"thread.started","thread_id":"019f9a1d-d8d0-73c0"}
++{"type":"turn.started"}
++{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Reading the trajectory now."}}
++{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat trajectory.txt'","status":"in_progress"}}
++{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/bin/zsh -lc 'cat trajectory.txt'","exit_code":0,"status":"completed"}}
++{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"BLAME=agent"}}
++{"type":"turn.completed","usage":{"input_tokens":22337,"cached_input_tokens":19712,"output_tokens":128}}
++"""
++
++
++def test_codex_driver_parses_event_stream() -> None:
++    """Usage, session id, the final message, and one tool action are recovered."""
++    result = CodexDriver()._parse_events(
++        _CODEX_STREAM, output_text="", duration_s=1.5, trace_mode="actions"
++    )
++    assert result.output_text == "BLAME=agent"  # last agent_message, not the narration
++    assert result.prompt_tokens == 22337
++    assert result.completion_tokens == 128
++    assert result.session_id == "019f9a1d-d8d0-73c0"
++    # item.started duplicates item.completed for the same call; log it once.
++    assert [a.tool for a in result.actions] == ["command_execution"]
++
++
++def test_codex_driver_prefers_last_message_file_over_stream() -> None:
++    """`--output-last-message` is authoritative; the stream is the fallback."""
++    result = CodexDriver()._parse_events(
++        _CODEX_STREAM, output_text="from file", duration_s=1.0, trace_mode="actions"
++    )
++    assert result.output_text == "from file"
++
++
++def test_codex_driver_survives_schema_drift() -> None:
++    """Unknown event shapes must not raise: a finding outranks a trace line."""
++    result = CodexDriver()._parse_events(
++        b'{"type":"mystery.event","payload":{"unexpected":true}}\nnot json at all\n',
++        output_text="ok",
++        duration_s=0.1,
++        trace_mode="actions",
++    )
++    assert result.output_text == "ok"
++    assert result.actions == []
++
++
++def test_codex_driver_satisfies_agent_driver_protocol() -> None:
++    """The investigator accepts any driver; Codex must qualify structurally."""
++    assert isinstance(CodexDriver(), AgentDriver)
++
++
++# ---------------------------------------------------------------------------
++# TerminalClaudeDriver envelope parsing
++# ---------------------------------------------------------------------------
++
++# Claude Code 2.x emits a JSON array of messages rather than one object. Parsing
++# it as an object raised AttributeError and lost an entire investigation batch.
++_CLAUDE_MESSAGE_LIST = json.dumps(
++    [
++        {"type": "system", "subtype": "init", "session_id": "sess-1"},
++        {
++            "type": "assistant",
++            "message": {
++                "content": [
++                    {"type": "text", "text": "Reading the trajectory."},
++                    {"type": "tool_use", "name": "Read", "input": {"file_path": "/tmp/x/transcript.txt"}},
++                ]
++            },
++        },
++        {
++            "type": "result",
++            "subtype": "success",
++            "is_error": False,
++            "result": "BLAME=agent",
++            "session_id": "sess-1",
++            "total_cost_usd": 0.0463,
++            "usage": {
++                "input_tokens": 2,
++                "cache_read_input_tokens": 18177,
++                "cache_creation_input_tokens": 5115,
++                "output_tokens": 147,
++            },
++        },
++    ]
++).encode()
++
++
++def test_terminal_claude_driver_parses_message_list_envelope() -> None:
++    """The 2.x array envelope yields text, cached-inclusive tokens, cost and tools."""
++    result = TerminalClaudeDriver()._parse_envelope(
++        _CLAUDE_MESSAGE_LIST, duration_s=2.0, proxy_url=None, trace_mode="actions"
++    )
++    assert result.output_text == "BLAME=agent"
++    assert result.prompt_tokens == 2 + 18177 + 5115  # cache reads are real input tokens
++    assert result.completion_tokens == 147
++    assert result.cost_usd == pytest.approx(0.0463)  # this envelope does report cost
++    assert result.session_id == "sess-1"
++    assert [a.tool for a in result.actions] == ["Read"]
++
++
++def test_terminal_claude_driver_still_parses_object_envelope() -> None:
++    """Older single-object envelopes keep working."""
++    envelope = json.dumps(
++        {"result": "BLAME=tool", "session_id": "sess-2", "usage": {"input_tokens": 10, "output_tokens": 3}}
++    ).encode()
++    result = TerminalClaudeDriver()._parse_envelope(
++        envelope, duration_s=1.0, proxy_url=None, trace_mode="actions"
++    )
++    assert result.output_text == "BLAME=tool"
++    assert result.prompt_tokens == 10
++    assert result.session_id == "sess-2"
++
++
++def test_terminal_claude_driver_falls_back_to_assistant_text() -> None:
++    """A truncated stream with no result message still yields the assistant text."""
++    messages = json.dumps(
++        [{"type": "assistant", "message": {"content": [{"type": "text", "text": "partial answer"}]}}]
++    ).encode()
++    result = TerminalClaudeDriver()._parse_envelope(
++        messages, duration_s=1.0, proxy_url=None, trace_mode="off"
++    )
++    assert result.output_text == "partial answer"
++    assert result.actions == []
+diff --git a/scripts/paper/compare_runs.py b/scripts/paper/compare_runs.py
+new file mode 100755
+index 00000000..f690c2c9
+--- /dev/null
++++ b/scripts/paper/compare_runs.py
+@@ -0,0 +1,132 @@
++#!/usr/bin/env python3
++"""compare_runs.py — task-level comparison of two experiment runs.
++
++Built for the scaffold-sensitivity question: when two agent scaffolds are run
++over the identical task set with the identical tool stack, a single aggregate
++pass rate hides the thing that matters. Two scaffolds can land within a point of
++each other while disagreeing on a third of the tasks, which would mean the
++benchmark ranks scaffolds unreliably; or they can agree task for task, which
++means the aggregate difference is real and small.
++
++Reports, for the tasks both runs attempted:
++
++  pass rate per run, and the paired difference with a McNemar exact test
++  per-task agreement, and the discordant tasks in both directions
++  Spearman rank correlation over per-task scores, when tasks carry partial credit
++
++    scripts/paper/compare_runs.py ~/cube_harness_results/<run-a> ~/cube_harness_results/<run-b> \\
++        --label-a genny --label-b react
++"""
++
++from __future__ import annotations
++
++import json
++import math
++from pathlib import Path
++from typing import Annotated
++
++import typer
++
++from cube_harness.analyze.investigator.episode_discovery import discover_episodes
++
++
++def _scores(run_dir: Path) -> dict[str, float]:
++    """Map task id → final score for one run, averaging repeated episodes."""
++    totals: dict[str, list[float]] = {}
++    for ref in discover_episodes(run_dir):
++        record = ref.record
++        if record is None:
++            continue
++        totals.setdefault(record.sample_id, []).append(record.score)
++    return {task: sum(vals) / len(vals) for task, vals in totals.items()}
++
++
++def _binomial_tail(k: int, n: int) -> float:
++    """Two-sided exact binomial p-value at p=0.5, for McNemar on small samples."""
++    if n == 0:
++        return 1.0
++    k = min(k, n - k)
++    tail = sum(math.comb(n, i) for i in range(k + 1)) / (2**n)
++    return min(1.0, 2 * tail)
++
++
++def _spearman(xs: list[float], ys: list[float]) -> float:
++    """Spearman rank correlation with average ranks for ties."""
++
++    def ranks(values: list[float]) -> list[float]:
++        order = sorted(range(len(values)), key=lambda i: values[i])
++        out = [0.0] * len(values)
++        i = 0
++        while i < len(order):
++            j = i
++            while j + 1 < len(order) and values[order[j + 1]] == values[order[i]]:
++                j += 1
++            average = (i + j) / 2 + 1
++            for k in range(i, j + 1):
++                out[order[k]] = average
++            i = j + 1
++        return out
++
++    rx, ry = ranks(xs), ranks(ys)
++    n = len(xs)
++    mx, my = sum(rx) / n, sum(ry) / n
++    num = sum((a - mx) * (b - my) for a, b in zip(rx, ry, strict=True))
++    den = math.sqrt(sum((a - mx) ** 2 for a in rx) * sum((b - my) ** 2 for b in ry))
++    return num / den if den else float("nan")
++
++
++def main(
++    run_a: Annotated[Path, typer.Argument(help="First experiment directory.")],
++    run_b: Annotated[Path, typer.Argument(help="Second experiment directory.")],
++    label_a: Annotated[str, typer.Option(help="Name for the first run.")] = "A",
++    label_b: Annotated[str, typer.Option(help="Name for the second run.")] = "B",
++    out: Annotated[Path | None, typer.Option(help="Write the comparison as JSON.")] = None,
++) -> None:
++    """Compare two runs task by task."""
++    a, b = _scores(run_a), _scores(run_b)
++    shared = sorted(set(a) & set(b))
++    if not shared:
++        raise typer.BadParameter("the two runs share no task ids")
++
++    pass_a = sum(a[t] >= 1.0 for t in shared)
++    pass_b = sum(b[t] >= 1.0 for t in shared)
++    only_a = [t for t in shared if a[t] >= 1.0 > b[t]]
++    only_b = [t for t in shared if b[t] >= 1.0 > a[t]]
++    agree = len(shared) - len(only_a) - len(only_b)
++    p_value = _binomial_tail(len(only_a), len(only_a) + len(only_b))
++    rho = _spearman([a[t] for t in shared], [b[t] for t in shared])
++
++    n = len(shared)
++    typer.echo(f"{n} shared tasks ({len(set(a) ^ set(b))} attempted by only one run)\n")
++    typer.echo(f"  {label_a:10s} pass rate: {pass_a / n * 100:5.1f}%  ({pass_a}/{n})")
++    typer.echo(f"  {label_b:10s} pass rate: {pass_b / n * 100:5.1f}%  ({pass_b}/{n})")
++    typer.echo(f"  difference          : {(pass_b - pass_a) / n * 100:+5.1f} pp\n")
++    typer.echo(f"  same outcome        : {agree}/{n}  ({agree / n * 100:.1f}%)")
++    typer.echo(f"  solved by {label_a} only : {len(only_a):3d}  {', '.join(only_a[:6])}")
++    typer.echo(f"  solved by {label_b} only : {len(only_b):3d}  {', '.join(only_b[:6])}")
++    typer.echo(f"  McNemar exact p     : {p_value:.3f}")
++    typer.echo(f"  Spearman rho        : {rho:.3f}")
++
++    if out:
++        out.write_text(
++            json.dumps(
++                {
++                    "label_a": label_a,
++                    "label_b": label_b,
++                    "n_shared": n,
++                    "pass_a": pass_a,
++                    "pass_b": pass_b,
++                    "agreement": agree / n,
++                    "only_a": only_a,
++                    "only_b": only_b,
++                    "mcnemar_p": p_value,
++                    "spearman_rho": rho,
++                },
++                indent=2,
++            )
++        )
++        typer.echo(f"\nwrote {out}")
++
++
++if __name__ == "__main__":
++    typer.run(main)
+diff --git a/scripts/paper/judge_validation.py b/scripts/paper/judge_validation.py
+new file mode 100755
+index 00000000..d29a70b1
+--- /dev/null
++++ b/scripts/paper/judge_validation.py
+@@ -0,0 +1,535 @@
++#!/usr/bin/env python3
++"""judge_validation.py — human ground-truth validation of the trajectory judge.
++
++Reviewers asked for the one thing agreement-between-judges cannot show: whether
++the judge is *correct*, not merely *consistent*. This tool runs that study
++end-to-end.
++
++    1. ``sample``  draw a stratified sample of episodes across modalities and
++                   models, balanced over the judge's own blame categories so the
++                   study can detect per-category error rather than only the
++                   accuracy on whatever category happens to dominate.
++    2. ``packet``  render a blind annotation instrument: one self-contained HTML
++                   file per annotator holding the same transcript the judge read,
++                   with the judge's verdict withheld. Annotators label outcome and
++                   primary blame from the identical closed taxonomy and export
++                   their answers as JSON.
++    3. ``score``   compute Cohen's kappa (human vs judge), inter-annotator kappa,
++                   and per-modality/per-bucket breakdowns, and emit the LaTeX
++                   tables for the appendix.
++
++Blinding matters: the packet never contains the judge's label, so an annotator
++cannot anchor on it. Stratification is by (modality, judge blame) so that rare
++categories -- the benchmark-side ones that carry the faithfulness argument --
++get enough samples to estimate agreement at all.
++
++Usage
++-----
++    scripts/paper/judge_validation.py sample  ~/cube_harness_results --n 100 --out study/
++    scripts/paper/judge_validation.py packet  study/ --annotator alice
++    scripts/paper/judge_validation.py score   study/ --labels study/labels-*.json
++"""
++
++from __future__ import annotations
++
++import html
++import json
++import random
++import tempfile
++from collections import Counter, defaultdict
++from dataclasses import dataclass
++from pathlib import Path
++from typing import Annotated, Any
++
++import typer
++
++from cube_harness.analyze.investigator.episode_discovery import discover_episodes
++from cube_harness.analyze.investigator.transcript import extract_transcript
++from cube_harness.eval_log import BlameCategory, Outcome
++
++app = typer.Typer(add_completion=False, help=__doc__)
++
++# The three buckets the paper's faithfulness argument rests on. Kappa is
++# reported both on the full 10-way taxonomy and on this coarser grouping,
++# because a judge that confuses model_capability with agent_scaffolding is
++# far less consequential than one that confuses agent-side with benchmark-side.
++BUCKETS: dict[str, str] = {
++    "model_capability": "agent",
++    "agent_scaffolding": "agent",
++    "submission_format": "agent",
++    "tool_failure": "tool",
++    "action_space_limited": "tool",
++    "insufficient_observation": "tool",
++    "env_failure": "benchmark",
++    "task_unclear": "benchmark",
++    "eval_brittle": "benchmark",
++    "none": "none",
++}
++
++SAMPLE_FILENAME = "sample.json"
++KEY_FILENAME = "judge_key.json"
++
++
++@dataclass
++class SampledEpisode:
++    """One episode drawn into the study, with the judge label kept separate."""
++
++    uid: str  # blind identifier shown to annotators
++    experiment: str
++    trajectory_id: str
++    episode_dir: str
++    modality: str
++    benchmark: str
++    model: str
++    task_id: str
++    task_description: str
++    score: float
++    judge_outcome: str
++    judge_blame: str
++    judge_confidence: int
++
++
++def _modality_of(benchmark: str) -> str:
++    """Map a benchmark name onto the paper's modality grouping."""
++    name = benchmark.lower()
++    if any(k in name for k in ("workarena", "webarena", "miniwob", "browsercomp")):
++        return "Web"
++    if any(k in name for k in ("osworld", "windows", "waa")):
++        return "CUA"
++    if any(k in name for k in ("swebench", "swe-bench", "swegym")):
++        return "SWE"
++    if "terminal" in name:
++        return "Terminal"
++    return "Other"
++
++
++def _collect(results_dir: Path) -> list[SampledEpisode]:
++    """Read every investigated episode under ``results_dir``."""
++    found: list[SampledEpisode] = []
++    experiment_dirs = [d for d in results_dir.iterdir() if d.is_dir()] if results_dir.is_dir() else []
++    for exp_dir in sorted(experiment_dirs):
++        try:
++            refs = discover_episodes(exp_dir)
++        except (FileNotFoundError, NotADirectoryError):
++            # A results root accumulates aborted runs with no episodes/ at all.
++            # Skipping them is right: this is a survey, not a validation pass.
++            continue
++        for ref in refs:
++            record = ref.record
++            if record is None or record.findings is None:
++                continue
++            benchmark = getattr(record, "benchmark_name", None) or exp_dir.name
++            model = getattr(record, "model_name", None) or getattr(record, "agent_name", "") or "unknown"
++            found.append(
++                SampledEpisode(
++                    uid="",
++                    experiment=exp_dir.name,
++                    trajectory_id=ref.trajectory_id,
++                    episode_dir=str(ref.episode_dir),
++                    modality=_modality_of(str(benchmark)),
++                    benchmark=str(benchmark),
++                    model=str(model),
++                    task_id=record.sample_id,
++                    task_description=(record.task_description or "")[:4000],
++                    score=record.score,
++                    judge_outcome=record.findings.outcome.value,
++                    judge_blame=record.findings.primary_blame.value,
++                    judge_confidence=record.findings.primary_blame_confidence,
++                )
++            )
++    return found
++
++
++@app.command()
++def sample(
++    results_dir: Annotated[Path, typer.Argument(help="Root holding experiment directories.")],
++    out: Annotated[Path, typer.Option(help="Study directory to create.")] = Path("judge_study"),
++    n: Annotated[int, typer.Option(help="Target sample size.")] = 100,
++    seed: Annotated[int, typer.Option(help="Sampling seed.")] = 20260725,
++    failures_only: Annotated[bool, typer.Option(help="Restrict to episodes that scored 0.")] = True,
++    min_per_cell: Annotated[int, typer.Option(help="Floor per (modality, blame) cell.")] = 3,
++) -> None:
++    """Draw a stratified, blinded sample and write the study directory."""
++    rng = random.Random(seed)
++    episodes = _collect(results_dir)
++    if failures_only:
++        episodes = [e for e in episodes if e.score <= 0.0]
++    if not episodes:
++        raise typer.BadParameter(f"no investigated episodes found under {results_dir}")
++
++    cells: dict[tuple[str, str], list[SampledEpisode]] = defaultdict(list)
++    for ep in episodes:
++        cells[(ep.modality, ep.judge_blame)].append(ep)
++
++    # Floor every cell first so rare benchmark-side categories are represented,
++    # then fill the remaining budget proportionally to cell size.
++    chosen: list[SampledEpisode] = []
++    for key in sorted(cells):
++        pool = cells[key]
++        rng.shuffle(pool)
++        chosen.extend(pool[: min(min_per_cell, len(pool))])
++
++    remaining = [e for e in episodes if e not in chosen]
++    rng.shuffle(remaining)
++    chosen.extend(remaining[: max(0, n - len(chosen))])
++    rng.shuffle(chosen)
++
++    for i, ep in enumerate(chosen):
++        ep.uid = f"E{i:03d}"
++
++    out.mkdir(parents=True, exist_ok=True)
++    blind_fields = (
++        "uid",
++        "experiment",
++        "trajectory_id",
++        "episode_dir",
++        "modality",
++        "benchmark",
++        "model",
++        "task_id",
++        "task_description",
++        "score",
++    )
++    (out / SAMPLE_FILENAME).write_text(
++        json.dumps([{k: getattr(ep, k) for k in blind_fields} for ep in chosen], indent=2)
++    )
++    (out / KEY_FILENAME).write_text(
++        json.dumps(
++            {
++                ep.uid: {"outcome": ep.judge_outcome, "blame": ep.judge_blame, "confidence": ep.judge_confidence}
++                for ep in chosen
++            },
++            indent=2,
++        )
++    )
++
++    dist = Counter((e.modality, e.judge_blame) for e in chosen)
++    typer.echo(f"sampled {len(chosen)} episodes from {len(episodes)} investigated failures")
++    for (modality, blame), count in sorted(dist.items()):
++        typer.echo(f"  {modality:8s} {blame:26s} {count}")
++    typer.echo(f"\nwrote {out / SAMPLE_FILENAME} and {out / KEY_FILENAME} (keep the key away from annotators)")
++
++
++def _render_packet(entries: list[dict[str, Any]], transcripts: dict[str, str], annotator: str) -> str:
++    """Build the self-contained blind annotation page."""
++    blames = [b.value for b in BlameCategory]
++    outcomes = [o.value for o in Outcome]
++    payload = json.dumps(
++        [
++            {
++                "uid": e["uid"],
++                "modality": e["modality"],
++                "benchmark": e["benchmark"],
++                "task_id": e["task_id"],
++                "task": e["task_description"],
++                "score": e["score"],
++                "transcript": transcripts.get(e["uid"], "(transcript unavailable)"),
++            }
++            for e in entries
++        ]
++    )
++    return f"""<!doctype html>
++<html><head><meta charset="utf-8"><title>CUBE judge validation — {html.escape(annotator)}</title>
++<style>
++ body {{ font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 0; display: flex; height: 100vh; }}
++ #list {{ width: 200px; overflow-y: auto; border-right: 1px solid #ccc; padding: 8px; }}
++ #list div {{ padding: 4px; cursor: pointer; border-radius: 4px; }}
++ #list div.done {{ background: #e6f4ea; }}
++ #list div.active {{ outline: 2px solid #1a73e8; }}
++ #main {{ flex: 1; overflow-y: auto; padding: 16px; }}
++ pre {{ background: #f6f8fa; padding: 12px; overflow-x: auto; max-height: 55vh; white-space: pre-wrap; }}
++ .task {{ background: #fffbe6; padding: 12px; border-left: 3px solid #f0c000; }}
++ label {{ display: block; margin: 4px 0; }}
++ button {{ padding: 8px 16px; margin-right: 8px; }}
++</style></head><body>
++<div id="list"></div>
++<div id="main">
++  <h2 id="title"></h2>
++  <div class="task" id="task"></div>
++  <h3>Trajectory</h3>
++  <pre id="transcript"></pre>
++  <h3>Your assessment</h3>
++  <p>Judge the episode on the evidence in the transcript alone. Choose
++     <b>none</b> for blame if the transcript does not support any attribution.</p>
++  <div id="outcome"></div>
++  <div id="blame"></div>
++  <label>Notes (optional)<br><textarea id="notes" rows="3" cols="80"></textarea></label>
++  <button onclick="save()">Save &amp; next</button>
++  <button onclick="exportAll()">Export JSON</button>
++  <span id="status"></span>
++</div>
++<script>
++const DATA = {payload};
++const OUTCOMES = {json.dumps(outcomes)};
++const BLAMES = {json.dumps(blames)};
++const ANNOTATOR = {json.dumps(annotator)};
++const KEY = 'cube-judge-' + ANNOTATOR;
++let labels = JSON.parse(localStorage.getItem(KEY) || '{{}}');
++let idx = 0;
++
++function renderList() {{
++  document.getElementById('list').innerHTML = DATA.map((d, i) =>
++    `<div class="${{labels[d.uid] ? 'done' : ''}} ${{i === idx ? 'active' : ''}}" onclick="go(${{i}})">${{d.uid}} · ${{d.modality}}</div>`).join('');
++}}
++function render() {{
++  const d = DATA[idx];
++  document.getElementById('title').textContent = `${{d.uid}} — ${{d.benchmark}} (${{d.modality}}) — final score ${{d.score}}`;
++  document.getElementById('task').textContent = d.task || '(no task description recorded)';
++  document.getElementById('transcript').textContent = d.transcript;
++  const prev = labels[d.uid] || {{}};
++  document.getElementById('outcome').innerHTML = '<b>Outcome</b>' + OUTCOMES.map(o =>
++    `<label><input type="radio" name="outcome" value="${{o}}" ${{prev.outcome === o ? 'checked' : ''}}> ${{o}}</label>`).join('');
++  document.getElementById('blame').innerHTML = '<b>Primary blame</b>' + BLAMES.map(b =>
++    `<label><input type="radio" name="blame" value="${{b}}" ${{prev.blame === b ? 'checked' : ''}}> ${{b}}</label>`).join('');
++  document.getElementById('notes').value = prev.notes || '';
++  renderList();
++}}
++function go(i) {{ idx = i; render(); window.scrollTo(0, 0); }}
++function save() {{
++  const d = DATA[idx];
++  const outcome = document.querySelector('input[name=outcome]:checked');
++  const blame = document.querySelector('input[name=blame]:checked');
++  if (!outcome || !blame) {{ alert('Pick an outcome and a primary blame.'); return; }}
++  labels[d.uid] = {{ outcome: outcome.value, blame: blame.value, notes: document.getElementById('notes').value }};
++  localStorage.setItem(KEY, JSON.stringify(labels));
++  document.getElementById('status').textContent = Object.keys(labels).length + '/' + DATA.length + ' labelled';
++  if (idx < DATA.length - 1) go(idx + 1); else render();
++}}
++function exportAll() {{
++  const blob = new Blob([JSON.stringify({{annotator: ANNOTATOR, labels}}, null, 2)], {{type: 'application/json'}});
++  const a = document.createElement('a');
++  a.href = URL.createObjectURL(blob);
++  a.download = 'labels-' + ANNOTATOR + '.json';
++  a.click();
++}}
++render();
++</script></body></html>
++"""
++
++
++@app.command()
++def packet(
++    study_dir: Annotated[Path, typer.Argument(help="Study directory created by `sample`.")],
++    annotator: Annotated[str, typer.Option(help="Annotator name (namespaces local storage).")] = "annotator",
++    max_chars: Annotated[int, typer.Option(help="Transcript truncation budget per episode.")] = 60000,
++) -> None:
++    """Render a blind, self-contained HTML annotation packet."""
++    entries = json.loads((study_dir / SAMPLE_FILENAME).read_text())
++    transcripts: dict[str, str] = {}
++    with tempfile.TemporaryDirectory() as tmp:
++        for entry in entries:
++            episode_dir = Path(entry["episode_dir"])
++            try:
++                out_dir = extract_transcript(episode_dir, Path(tmp) / entry["uid"])
++                text = (out_dir / "transcript.txt").read_text(errors="replace")
++            except Exception as exc:  # noqa: BLE001 — one corrupt episode must not sink the packet
++                text = f"(could not read transcript: {exc})"
++            if len(text) > max_chars:
++                head, tail = text[: max_chars // 2], text[-max_chars // 2 :]
++                text = f"{head}\n\n[... {len(text) - max_chars} characters elided ...]\n\n{tail}"
++            transcripts[entry["uid"]] = text
++
++    dest = study_dir / f"packet-{annotator}.html"
++    dest.write_text(_render_packet(entries, transcripts, annotator))
++    typer.echo(f"wrote {dest} ({len(entries)} episodes, judge labels withheld)")
++
++
++@app.command()
++def snapshot(
++    results_dir: Annotated[Path, typer.Argument(help="Root holding experiment directories.")],
++    out: Annotated[Path, typer.Option(help="Where to write the snapshot.")] = Path("judge_snapshot.json"),
++    label: Annotated[str, typer.Option(help="Name for this judging pass, e.g. 'claude' or 'codex'.")] = "pass",
++) -> None:
++    """Freeze the current judge labels so a later pass can be compared against them.
++
++    A second judging pass overwrites ``findings`` in each episode record, so the
++    backbone-swap comparison is only possible if the first pass is captured
++    first. Run this, re-judge with ``ch-investigate --driver codex --overwrite``,
++    snapshot again, then ``swap``.
++    """
++    episodes = _collect(results_dir)
++    out.write_text(
++        json.dumps(
++            {
++                "label": label,
++                "labels": {
++                    f"{e.experiment}/{e.trajectory_id}": {
++                        "outcome": e.judge_outcome,
++                        "blame": e.judge_blame,
++                        "confidence": e.judge_confidence,
++                        "modality": e.modality,
++                        "benchmark": e.benchmark,
++                    }
++                    for e in episodes
++                },
++            },
++            indent=2,
++        )
++    )
++    typer.echo(f"snapshotted {len(episodes)} judged episodes as '{label}' → {out}")
++
++
++@app.command()
++def swap(
++    first: Annotated[Path, typer.Argument(help="Snapshot from the first judging pass.")],
++    second: Annotated[Path, typer.Argument(help="Snapshot from the second (different backbone).")],
++    out: Annotated[Path, typer.Option(help="Where to write the LaTeX table.")] = Path("judge_swap.tex"),
++) -> None:
++    """Compare two judging passes that differ only in the model backbone.
++
++    Answers the question a single-vendor judge cannot: is the blame distribution
++    a property of the trajectories, or of the model reading them? Reports
++    per-episode agreement and, separately, the shift in the aggregate blame
++    distribution, since a judge can disagree episode by episode while producing
++    the same corpus-level picture (which is the claim the paper's 82\\% rests on).
++    """
++    a, b = json.loads(first.read_text()), json.loads(second.read_text())
++    la, lb = a["labels"], b["labels"]
++    shared = sorted(set(la) & set(lb))
++    if not shared:
++        raise typer.BadParameter("the two snapshots share no episodes")
++
++    blame_a = [la[k]["blame"] for k in shared]
++    blame_b = [lb[k]["blame"] for k in shared]
++    bucket_a = [BUCKETS.get(x, "other") for x in blame_a]
++    bucket_b = [BUCKETS.get(x, "other") for x in blame_b]
++    kappa_blame, agree_blame = cohens_kappa(blame_a, blame_b)
++    kappa_bucket, agree_bucket = cohens_kappa(bucket_a, bucket_b)
++
++    typer.echo(f"n = {len(shared)} episodes judged by both backbones ({a['label']} vs {b['label']})\n")
++    typer.echo(f"primary blame  kappa={kappa_blame:.3f}  agreement={agree_blame * 100:.1f}%")
++    typer.echo(f"blame bucket   kappa={kappa_bucket:.3f}  agreement={agree_bucket * 100:.1f}%\n")
++
++    typer.echo(f"{'bucket':12s} {a['label']:>10s} {b['label']:>10s}")
++    ca, cb = Counter(bucket_a), Counter(bucket_b)
++    for bucket in sorted(set(ca) | set(cb)):
++        typer.echo(f"{bucket:12s} {ca[bucket] / len(shared) * 100:9.1f}% {cb[bucket] / len(shared) * 100:9.1f}%")
++
++    lines = [
++        r"\begin{tabular}{lrrr}",
++        r"\toprule",
++        f"\\textbf{{Blame bucket}} & \\textbf{{{a['label']} judge}} & \\textbf{{{b['label']} judge}} & \\textbf{{$\\Delta$}} \\\\",
++        r"\midrule",
++    ]
++    for bucket in sorted(set(ca) | set(cb)):
++        pa, pb = ca[bucket] / len(shared) * 100, cb[bucket] / len(shared) * 100
++        lines.append(f"{bucket} & {pa:.1f}\\% & {pb:.1f}\\% & {pb - pa:+.1f} \\\\")
++    lines += [
++        r"\midrule",
++        (
++            f"\\multicolumn{{4}}{{l}}{{\\small $n={len(shared)}$; per-episode "
++            f"$\\kappa={kappa_bucket:.2f}$ on buckets, ${kappa_blame:.2f}$ on the 10-way taxonomy}} \\\\"
++        ),
++        r"\bottomrule",
++        r"\end{tabular}",
++    ]
++    out.write_text("\n".join(lines))
++    typer.echo(f"\nwrote {out}")
++
++
++def cohens_kappa(a: list[str], b: list[str]) -> tuple[float, float]:
++    """Cohen's kappa and raw agreement for two equal-length label sequences."""
++    if not a:
++        return float("nan"), float("nan")
++    n = len(a)
++    observed = sum(x == y for x, y in zip(a, b, strict=True)) / n
++    ca, cb = Counter(a), Counter(b)
++    expected = sum((ca[k] / n) * (cb[k] / n) for k in set(a) | set(b))
++    kappa = (observed - expected) / (1 - expected) if expected < 1 else 1.0
++    return kappa, observed
++
++
++def _interpret(kappa: float) -> str:
++    """Landis & Koch strength-of-agreement label."""
++    for threshold, label in ((0.81, "almost perfect"), (0.61, "substantial"), (0.41, "moderate"), (0.21, "fair")):
++        if kappa >= threshold:
++            return label
++    return "slight"
++
++
++@app.command()
++def score(
++    study_dir: Annotated[Path, typer.Argument(help="Study directory.")],
++    labels: Annotated[list[Path] | None, typer.Option(help="One labels-<annotator>.json per annotator.")] = None,
++    out: Annotated[Path, typer.Option(help="Where to write the LaTeX table.")] = Path("judge_validation.tex"),
++) -> None:
++    """Compute human-vs-judge and inter-annotator agreement, and emit LaTeX."""
++    entries = {e["uid"]: e for e in json.loads((study_dir / SAMPLE_FILENAME).read_text())}
++    key = json.loads((study_dir / KEY_FILENAME).read_text())
++    annotations = {p.stem.replace("labels-", ""): json.loads(p.read_text())["labels"] for p in labels or []}
++    if not annotations:
++        raise typer.BadParameter("pass at least one --labels file")
++
++    # Human consensus: majority blame across annotators; ties resolve to the
++    # first annotator in sorted order, and are counted so they can be reported.
++    names = sorted(annotations)
++    consensus: dict[str, dict[str, str]] = {}
++    ties = 0
++    for uid in entries:
++        votes = [annotations[a][uid] for a in names if uid in annotations[a]]
++        if not votes:
++            continue
++        blame_counts = Counter(v["blame"] for v in votes)
++        top = blame_counts.most_common()
++        if len(top) > 1 and top[0][1] == top[1][1]:
++            ties += 1
++        consensus[uid] = {
++            "blame": top[0][0],
++            "outcome": Counter(v["outcome"] for v in votes).most_common(1)[0][0],
++        }
++
++    uids = sorted(consensus)
++    human_blame = [consensus[u]["blame"] for u in uids]
++    judge_blame = [key[u]["blame"] for u in uids]
++    human_bucket = [BUCKETS.get(b, "other") for b in human_blame]
++    judge_bucket = [BUCKETS.get(b, "other") for b in judge_blame]
++    human_outcome = [consensus[u]["outcome"] for u in uids]
++    judge_outcome = [key[u]["outcome"] for u in uids]
++
++    rows: list[tuple[str, str, int, float, float]] = []
++
++    def add(label: str, subset: str, gold: list[str], pred: list[str]) -> None:
++        kappa, agree = cohens_kappa(gold, pred)
++        rows.append((label, subset, len(gold), kappa, agree))
++
++    add("Primary blame (10-way)", "all", human_blame, judge_blame)
++    add("Blame bucket (agent/tool/benchmark)", "all", human_bucket, judge_bucket)
++    add("Outcome", "all", human_outcome, judge_outcome)
++
++    for modality in sorted({entries[u]["modality"] for u in uids}):
++        idx = [i for i, u in enumerate(uids) if entries[u]["modality"] == modality]
++        add("Primary blame (10-way)", modality, [human_blame[i] for i in idx], [judge_blame[i] for i in idx])
++        add("Blame bucket", modality, [human_bucket[i] for i in idx], [judge_bucket[i] for i in idx])
++
++    typer.echo(f"{len(uids)} episodes scored, {len(names)} annotators ({', '.join(names)}), {ties} consensus ties\n")
++    typer.echo(f"{'metric':40s} {'subset':10s} {'n':>4s} {'kappa':>7s} {'agree':>7s}")
++    for label, subset, n, kappa, agree in rows:
++        typer.echo(f"{label:40s} {subset:10s} {n:4d} {kappa:7.3f} {agree:7.3f}")
++
++    if len(names) > 1:
++        typer.echo("\ninter-annotator (pairwise Cohen's kappa on primary blame):")
++        for i, a in enumerate(names):
++            for b in names[i + 1 :]:
++                shared = [u for u in entries if u in annotations[a] and u in annotations[b]]
++                kappa, agree = cohens_kappa(
++                    [annotations[a][u]["blame"] for u in shared], [annotations[b][u]["blame"] for u in shared]
++                )
++                typer.echo(f"  {a} vs {b}: n={len(shared)} kappa={kappa:.3f} agreement={agree:.3f}")
++
++    lines = [
++        r"\begin{tabular}{llrrrl}",
++        r"\toprule",
++        r"\textbf{Agreement} & \textbf{Subset} & $n$ & $\kappa$ & \textbf{Raw} & \textbf{Strength} \\",
++        r"\midrule",
++    ]
++    lines += [
++        f"{label} & {subset} & {n} & {kappa:.2f} & {agree * 100:.1f}\\% & {_interpret(kappa)} \\\\"
++        for label, subset, n, kappa, agree in rows
++    ]
++    lines += [r"\bottomrule", r"\end{tabular}"]
++    out.write_text("\n".join(lines))
++    typer.echo(f"\nwrote {out}")
++
++
++if __name__ == "__main__":
++    app()
+diff --git a/scripts/paper/oracle_parity.py b/scripts/paper/oracle_parity.py
+new file mode 100755
+index 00000000..de88a530
+--- /dev/null
++++ b/scripts/paper/oracle_parity.py
+@@ -0,0 +1,97 @@
++#!/usr/bin/env python3
++"""oracle_parity.py — report layer-3 parity: does the wrapper reward the reference solution?
++
++A benchmark ships its own answer key. If a wrapper's evaluator does not award
++full credit to that answer key, the wrapper is broken regardless of what any
++agent scores on it. This script summarises completed oracle runs (the scripted,
++LLM-free gold-patch / ``solve.sh`` agents each CUBE ships) into the parity table
++the paper reports, and writes the resolved-id list that pins the gold-solvable
++subset for later agent evaluation.
++
++Running the oracles (each writes an ordinary experiment directory):
++
++    python -m swebench_verified_cube.gold_patch.recipe --experiment toolkit --ray 50
++    python -m swebench_live_cube.gold_patch.recipe     --experiment daytona --ray 20
++
++Then summarise one or more runs:
++
++    scripts/paper/oracle_parity.py ~/cube_harness_results/gold-patch-verified-* \\
++        --expected 500 --label "SWE-bench Verified"
++
++Passing several directories for the same benchmark reports the *stable* subset
++(resolved in every run) alongside the flaky one, because a task that resolves
++only sometimes is an infrastructure signal, not an evaluator signal.
++"""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++from typing import Annotated
++
++import typer
++
++from cube_harness.analyze.investigator.episode_discovery import discover_episodes
++
++
++def resolved_ids(run_dir: Path) -> tuple[set[str], set[str]]:
++    """Return (resolved, attempted) task ids for one oracle run."""
++    resolved: set[str] = set()
++    attempted: set[str] = set()
++    for ref in discover_episodes(run_dir):
++        record = ref.record
++        if record is None:
++            continue
++        attempted.add(record.sample_id)
++        if record.score >= 1.0:
++            resolved.add(record.sample_id)
++    return resolved, attempted
++
++
++def main(
++    run_dirs: Annotated[list[Path], typer.Argument(help="One or more completed oracle run directories.")],
++    label: Annotated[str, typer.Option(help="Benchmark name for the report.")] = "benchmark",
++    expected: Annotated[int, typer.Option(help="Upstream task count the oracle should resolve.")] = 0,
++    dump_solvable: Annotated[Path | None, typer.Option(help="Write the stable resolved-id list here.")] = None,
++) -> None:
++    """Summarise oracle runs into a parity result."""
++    per_run = [resolved_ids(d) for d in run_dirs]
++    per_run = [(r, a) for r, a in per_run if a]
++    if not per_run:
++        raise typer.BadParameter("no episodes with records found in the given directories")
++
++    attempted = set.union(*(a for _, a in per_run))
++    stable = set.intersection(*(r for r, _ in per_run))
++    ever = set.union(*(r for r, _ in per_run))
++    flaky = ever - stable
++    denominator = expected or len(attempted)
++
++    typer.echo(f"{label}: {len(run_dirs)} oracle run(s)")
++    typer.echo(f"  attempted            : {len(attempted)}")
++    typer.echo(f"  resolved in all runs : {len(stable)}  ({len(stable) / denominator * 100:.1f}% of {denominator})")
++    if len(per_run) > 1:
++        typer.echo(f"  resolved in some runs: {len(flaky)}  (infrastructure flake, not evaluator semantics)")
++    unresolved = sorted(attempted - ever)
++    if unresolved:
++        typer.echo(f"  never resolved       : {len(unresolved)}  e.g. {', '.join(unresolved[:6])}")
++
++    typer.echo(f"\nLaTeX row:\n{label} & {denominator} & {len(stable)} & {len(stable) / denominator * 100:.1f}\\% \\\\")
++
++    if dump_solvable:
++        dump_solvable.write_text(
++            json.dumps(
++                {
++                    "benchmark": label,
++                    "n_tasks": len(stable),
++                    "description": "Task ids resolved by the reference solution under the CUBE evaluator in every listed run.",
++                    "runs": [str(d) for d in run_dirs],
++                    "task_ids": sorted(stable),
++                },
++                indent=2,
++            )
++        )
++        typer.echo(f"\nwrote {dump_solvable}")
++
++
++if __name__ == "__main__":
++    typer.run(main)
+diff --git a/scripts/paper/parity_audit.py b/scripts/paper/parity_audit.py
+new file mode 100755
+index 00000000..fd5b04ab
+--- /dev/null
++++ b/scripts/paper/parity_audit.py
+@@ -0,0 +1,731 @@
++#!/usr/bin/env python3
++"""parity_audit.py — measure how faithfully each CUBE reproduces its upstream benchmark.
++
++The audit answers a question reviewers asked directly: *is the CUBE wrapper the
++same benchmark as the original implementation?* It does so statically, without
++running an agent, by classifying each CUBE into one of three provenance classes
++and then verifying the class-appropriate evidence:
++
++  package    evaluation is delegated to the upstream authors' published package,
++             so the scoring code is upstream's by construction. Verified by
++             reading the declared dependency out of ``pyproject.toml``.
++  vendored   evaluator source was copied at a pinned upstream commit. Verified
++             by an *AST-level* comparison of every evaluator function against
++             its upstream counterpart, which ignores formatting-only edits
++             (quote style, trailing commas, line wrapping) and reports genuine
++             semantic divergence.
++  image      the benchmark's own container images and test commands are executed
++             verbatim. Static evidence is the image reference; empirical
++             evidence comes from the oracle run (``oracle_parity.py``).
++
++Task-set identity (do we ship exactly the upstream task list, with byte-identical
++instruction strings?) is checked for every CUBE whose upstream index is available.
++
++Usage
++-----
++    # clone the upstream repos (~2 min) then audit
++    scripts/paper/parity_audit.py --clone
++
++    # reuse an existing clone directory
++    scripts/paper/parity_audit.py --upstream-dir ~/parity-upstream
++
++Outputs ``parity_audit.json`` plus a LaTeX table on stdout.
++"""
++
++from __future__ import annotations
++
++import ast
++import copy
++import difflib
++import json
++import re
++import subprocess
++from dataclasses import asdict, dataclass, field
++from pathlib import Path
++from typing import Annotated, Any
++
++import typer
++
++REPO_ROOT = Path(__file__).resolve().parents[2]
++CUBES = REPO_ROOT / "cubes"
++
++
++# ─────────────────────────────────────────────────────────────────────────────
++# Declarative audit spec: one entry per CUBE in the paper's corpus.
++# ─────────────────────────────────────────────────────────────────────────────
++@dataclass(frozen=True)
++class UpstreamRepo:
++    """An upstream benchmark repository to clone for comparison."""
++
++    url: str
++    commit: str | None = None  # None → default branch tip
++
++
++@dataclass(frozen=True)
++class CubeSpec:
++    """How to audit one CUBE against its upstream implementation."""
++
++    cube: str  # display name in the paper
++    package_dir: str  # path under cubes/
++    provenance: str  # "package" | "vendored" | "image"
++    repo: UpstreamRepo | None = None
++    # Some CUBEs vendor from more than one upstream: Windows Agent Arena is a
++    # fork of OSWorld and shares its metric implementations, so its Windows
++    # getters come from WAA while its metrics track OSWorld. Auditing every
++    # directory against a single repo would report that split as divergence.
++    extra_repos: tuple[tuple[str, UpstreamRepo], ...] = ()
++    # vendored: (cube-relative dir, upstream-relative dir, upstream repo key)
++    vendored_pairs: tuple[tuple[str, str, str], ...] = ()
++    # task-set identity
++    task_metadata: str | None = None  # cube-relative task_metadata.json
++    upstream_tasks_glob: str | None = None  # upstream glob of per-task json
++    task_id_key: str = "id"
++    task_text_key: str | None = "instruction"
++    cube_text_key: str = "abstract_description"
++    # package provenance: dependency that carries upstream evaluation code
++    upstream_package: str | None = None
++    # image provenance: where the upstream container reference lives
++    image_evidence: str | None = None
++
++
++SPECS: tuple[CubeSpec, ...] = (
++    CubeSpec(
++        cube="OSWorld",
++        package_dir="osworld-cube",
++        provenance="vendored",
++        repo=UpstreamRepo("https://github.com/xlang-ai/OSWorld.git", "e695a10"),
++        vendored_pairs=(
++            ("src/osworld_cube/vm_backend/getters", "desktop_env/evaluators/getters", "primary"),
++            ("src/osworld_cube/vm_backend/metrics", "desktop_env/evaluators/metrics", "primary"),
++        ),
++        task_metadata="src/osworld_cube/task_metadata.json",
++        upstream_tasks_glob="evaluation_examples/examples/*/*.json",
++        cube_text_key="instruction",
++    ),
++    CubeSpec(
++        cube="Windows Agent Arena",
++        package_dir="windows-agent-arena-cube",
++        provenance="vendored",
++        repo=UpstreamRepo("https://github.com/microsoft/WindowsAgentArena.git"),
++        extra_repos=(("osworld", UpstreamRepo("https://github.com/xlang-ai/OSWorld.git", "e695a10")),),
++        vendored_pairs=(
++            (
++                "src/waa_cube/vm_backend/getters",
++                "src/win-arena-container/client/desktop_env/evaluators/getters",
++                "primary",
++            ),
++            ("src/waa_cube/vm_backend/metrics", "desktop_env/evaluators/metrics", "osworld"),
++        ),
++        task_metadata="src/waa_cube/task_metadata.json",
++        upstream_tasks_glob="src/win-arena-container/client/evaluation_examples_windows/examples*/*/*.json",
++    ),
++    CubeSpec(
++        cube="WebArena-Verified",
++        package_dir="webarena-verified",
++        provenance="package",
++        upstream_package="webarena-verified",
++    ),
++    CubeSpec(
++        cube="WorkArena",
++        package_dir="workarena",
++        provenance="package",
++        upstream_package="browsergym-workarena",
++    ),
++    CubeSpec(
++        cube="MiniWoB",
++        package_dir="miniwob",
++        provenance="package",
++        upstream_package="miniwob",
++    ),
++    CubeSpec(
++        cube="SWE-bench Verified",
++        package_dir="swebench-verified-cube",
++        provenance="image",
++        task_metadata="src/swebench_verified_cube/task_metadata.json",
++        image_evidence="swebench/sweb.eval.x86_64.*",
++    ),
++    CubeSpec(
++        cube="SWE-bench Live",
++        package_dir="swebench-live-cube",
++        provenance="image",
++        task_metadata="src/swebench_live_cube/task_metadata.json",
++        image_evidence="starryzhang/sweb.eval.x86_64.*",
++    ),
++    CubeSpec(
++        cube="Terminal-Bench",
++        package_dir="terminalbench2-cube",
++        provenance="image",
++        task_metadata="src/terminalbench2_cube/task_metadata.json",
++        image_evidence="upstream per-task image",
++    ),
++)
++
++
++# ─────────────────────────────────────────────────────────────────────────────
++# AST-level function comparison
++# ─────────────────────────────────────────────────────────────────────────────
++_LOG_ROOTS = frozenset({"logger", "logging", "print", "log", "_logger"})
++
++
++class _SemanticNormaliser(ast.NodeTransformer):
++    """Strip edits that cannot change a score: docstrings, logging, annotations.
++
++    Wrapping a benchmark inevitably reflows docstrings, drops the upstream
++    logging calls that would spam a Ray worker's stdout, and modernises type
++    annotations under ``ruff``. None of that can change what ``evaluate()``
++    returns, so comparing *scoring behaviour* means normalising it away first.
++    Everything that survives this pass is a candidate for genuine divergence
++    and is enumerated in the report rather than silently absorbed.
++    """
++
++    _BODY_FIELDS = ("body", "orelse", "finalbody")
++
++    @staticmethod
++    def _is_logging(stmt: ast.stmt) -> bool:
++        """True for a bare ``logger.info(...)`` / ``print(...)`` statement."""
++        if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)):
++            return False
++        root: ast.expr = stmt.value.func
++        while isinstance(root, ast.Attribute):
++            root = root.value
++        return isinstance(root, ast.Name) and root.id in _LOG_ROOTS
++
++    @staticmethod
++    def _is_docstring(stmt: ast.stmt) -> bool:
++        return isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str)
++
++    def generic_visit(self, node: ast.AST) -> ast.AST:
++        """Strip docstrings and logging from every statement list in the tree."""
++        node = super().generic_visit(node)
++        is_scope = isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Module)
++        for fieldname in self._BODY_FIELDS:
++            body = getattr(node, fieldname, None)
++            if not isinstance(body, list) or not body or not isinstance(body[0], ast.stmt):
++                continue
++            kept = [
++                stmt
++                for i, stmt in enumerate(body)
++                if not self._is_logging(stmt)
++                and not (is_scope and fieldname == "body" and i == 0 and self._is_docstring(stmt))
++            ]
++            setattr(node, fieldname, kept or ([ast.Pass()] if fieldname != "orelse" else []))
++        return node
++
++    def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
++        """Drop annotations and decorators: neither can change a returned score."""
++        node.returns = None
++        node.decorator_list = []
++        for arg in [*node.args.args, *node.args.kwonlyargs, *node.args.posonlyargs]:
++            arg.annotation = None
++        return self.generic_visit(node)
++
++    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
++        return self.visit_FunctionDef(node)  # type: ignore[arg-type]
++
++    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> ast.AST:
++        """``except E as e`` ≡ ``except E`` when the binding is never read.
++
++        A bare ``except:`` is also normalised to ``except Exception:``: the
++        ``ruff`` E722 fix rewrites one into the other and no evaluator in the
++        corpus relies on catching ``BaseException``.
++        """
++        if node.type is None:
++            node.type = ast.Name(id="Exception", ctx=ast.Load())
++        if node.name and not any(
++            isinstance(n, ast.Name) and n.id == node.name for n in ast.walk(ast.Module(body=node.body, type_ignores=[]))
++        ):
++            node.name = None
++        return self.generic_visit(node)
++
++    def visit_AnnAssign(self, node: ast.AnnAssign) -> ast.AST:
++        """``x: T = v`` → ``x = v``; a bare ``x: T`` declaration disappears."""
++        visited = self.generic_visit(node)
++        if not isinstance(visited, ast.AnnAssign) or visited.value is None:
++            return ast.Pass()
++        return ast.Assign(targets=[visited.target], value=visited.value)
++
++    def visit_Compare(self, node: ast.Compare) -> ast.AST:
++        """``type(x) == T`` ≡ ``isinstance(x, T)`` for the equality lint rewrite."""
++        visited = self.generic_visit(node)
++        if not isinstance(visited, ast.Compare):
++            return visited
++        left, ops, comparators = visited.left, visited.ops, visited.comparators
++        is_type_call = (
++            isinstance(left, ast.Call)
++            and isinstance(left.func, ast.Name)
++            and left.func.id == "type"
++            and len(left.args) == 1
++        )
++        if is_type_call and len(ops) == 1 and isinstance(ops[0], ast.Eq | ast.NotEq):
++            call = ast.Call(
++                func=ast.Name(id="isinstance", ctx=ast.Load()),
++                args=[left.args[0], comparators[0]],
++                keywords=[],
++            )
++            return ast.UnaryOp(op=ast.Not(), operand=call) if isinstance(ops[0], ast.NotEq) else call
++        return visited
++
++
++def _dump(node: ast.AST) -> str:
++    """Position-free AST dump: quote style, wrapping and comments all vanish."""
++    return ast.dump(node, annotate_fields=True, include_attributes=False)
++
++
++class _AlphaRenamer(ast.NodeTransformer):
++    """Rename local bindings to positional slots, making renames invisible.
++
++    Lint rules like ``ruff`` E741 force renames such as ``l`` → ``row``. Those
++    cannot change a score, but they defeat a structural comparison. Renaming
++    every local binding to ``v0, v1, …`` in order of first binding makes two
++    alpha-equivalent functions compare equal while still distinguishing
++    functions that genuinely use different variables in different places.
++    Attributes, globals, and keyword argument names are untouched.
++    """
++
++    def __init__(self, locals_: list[str]) -> None:
++        self._map = {name: f"v{i}" for i, name in enumerate(locals_)}
++
++    def visit_Name(self, node: ast.Name) -> ast.AST:
++        if node.id in self._map:
++            node.id = self._map[node.id]
++        return node
++
++    def visit_arg(self, node: ast.arg) -> ast.AST:
++        if node.arg in self._map:
++            node.arg = self._map[node.arg]
++        return node
++
++    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> ast.AST:
++        if node.name and node.name in self._map:
++            node.name = self._map[node.name]
++        return self.generic_visit(node)
++
++
++def _local_bindings(node: ast.AST) -> list[str]:
++    """Names bound inside a function, in order of first binding."""
++    order: list[str] = []
++
++    def note(name: str) -> None:
++        if name not in order:
++            order.append(name)
++
++    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
++        for arg in [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]:
++            note(arg.arg)
++    for sub in ast.walk(node):
++        if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store):
++            note(sub.id)
++        elif isinstance(sub, ast.ExceptHandler) and sub.name:
++            note(sub.name)
++    return order
++
++
++def _normalised_node(node: ast.AST) -> ast.AST:
++    """A copy of ``node`` with score-irrelevant edits stripped."""
++    stripped = ast.fix_missing_locations(_SemanticNormaliser().visit(copy.deepcopy(node)))
++    renamed = _AlphaRenamer(_local_bindings(stripped)).visit(stripped)
++    return ast.fix_missing_locations(renamed)
++
++
++def _semantic_dump(node: ast.AST) -> str:
++    """AST dump after stripping score-irrelevant edits (see _SemanticNormaliser)."""
++    return _dump(_normalised_node(node))
++
++
++def _semantic_source(node: ast.AST) -> list[str]:
++    """Canonical source lines for the normalised form, for readable diffing."""
++    return ast.unparse(_normalised_node(node)).splitlines()
++
++
++def _functions(path: Path) -> dict[str, tuple[str, str, ast.AST]]:
++    """Map function name → (verbatim dump, semantic dump, node) for one module."""
++    try:
++        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
++    except SyntaxError:
++        return {}
++    out: dict[str, tuple[str, str, ast.AST]] = {}
++
++    def add(name: str, node: ast.AST) -> None:
++        out[name] = (_dump(node), _semantic_dump(node), node)
++
++    for node in tree.body:
++        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
++            add(node.name, node)
++        elif isinstance(node, ast.ClassDef):
++            for sub in node.body:
++                if isinstance(sub, ast.FunctionDef | ast.AsyncFunctionDef):
++                    add(f"{node.name}.{sub.name}", sub)
++    return out
++
++
++def _imports(path: Path) -> set[str]:
++    """Top-level imported module names for one module."""
++    try:
++        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
++    except SyntaxError:
++        return set()
++    names: set[str] = set()
++    for node in ast.walk(tree):
++        if isinstance(node, ast.Import):
++            names.update(a.name.split(".")[0] for a in node.names)
++        elif isinstance(node, ast.ImportFrom) and node.module:
++            names.add(node.module.split(".")[0])
++    return names
++
++
++def classify_divergence(diff: str) -> str:
++    """Bucket one residual diff into a reviewable category.
++
++    Vendoring an evaluator into a wrapper produces a few recurring, benign
++    edit shapes. Naming them keeps the headline count honest: a single
++    mechanical refactor applied to ninety functions is not ninety independent
++    deviations from the original benchmark.
++
++    ``helper_refactor``    the per-OS path-resolution preamble upstream repeats
++                           in every getter is replaced by a call to one
++                           module-private helper.
++    ``platform_pruning``   branches for operating systems the CUBE never runs
++                           (a Windows-only or Linux-only VM image) are dropped.
++    ``transport``          the VM/file access path changes to the CUBE's
++                           controller, leaving the comparison logic intact.
++    ``behaviour_change``   anything else: enumerated individually in the report.
++    """
++    removed = [ln[1:] for ln in diff.splitlines() if ln.startswith("-") and not ln.startswith("---")]
++    added = [ln[1:] for ln in diff.splitlines() if ln.startswith("+") and not ln.startswith("+++")]
++    removed_text, added_text = "\n".join(removed), "\n".join(added)
++
++    os_markers = ("vm_platform", "os_type", "platform.machine", "Darwin", "Linux", "LOCALAPPDATA")
++    transport_markers = ("controller.", "execute_python_command", "get_file(", "relocate", "requests.get")
++    helper_call = re.compile(r"=\s*_[a-z][a-z0-9_]*\(")
++
++    touches_os = any(m in removed_text for m in os_markers)
++    if touches_os and helper_call.search(added_text):
++        return "helper_refactor"
++    if touches_os:
++        return "platform_pruning"
++    if any(m in removed_text or m in added_text for m in transport_markers) and len(added) <= 8:
++        return "transport"
++    if len(added) + len(removed) <= 4:
++        return "minor_edit"
++    return "behaviour_change"
++
++
++@dataclass
++class VendorReport:
++    """AST-comparison result for one vendored directory pair.
++
++    Two identity levels are tracked. *verbatim* means the function's AST is
++    byte-for-byte the upstream one (only whitespace/quote/comment edits).
++    *semantic* additionally normalises docstrings, logging calls and type
++    annotations, which cannot change a score. Functions that differ even
++    semantically are listed in ``residual_diffs`` for manual classification.
++    """
++
++    files_compared: int = 0
++    functions_upstream: int = 0
++    functions_verbatim: int = 0
++    functions_semantic: int = 0
++    functions_divergent: list[str] = field(default_factory=list)
++    functions_removed: list[str] = field(default_factory=list)
++    functions_added: list[str] = field(default_factory=list)
++    imports_dropped: list[str] = field(default_factory=list)
++    residual_diffs: dict[str, str] = field(default_factory=dict)
++    divergence_classes: dict[str, str] = field(default_factory=dict)
++
++    @property
++    def class_counts(self) -> dict[str, int]:
++        counts: dict[str, int] = {}
++        for cls in self.divergence_classes.values():
++            counts[cls] = counts.get(cls, 0) + 1
++        return counts
++
++    def _pct(self, n: int) -> float:
++        return 100.0 * n / self.functions_upstream if self.functions_upstream else 0.0
++
++    @property
++    def verbatim_pct(self) -> float:
++        return self._pct(self.functions_verbatim)
++
++    @property
++    def semantic_pct(self) -> float:
++        return self._pct(self.functions_semantic)
++
++
++def compare_vendored(cube_dir: Path, upstream_dir: Path) -> VendorReport:
++    """Compare every ``*.py`` in a vendored directory against upstream."""
++    rep = VendorReport()
++    for up_file in sorted(upstream_dir.glob("*.py")):
++        cube_file = cube_dir / up_file.name
++        if not cube_file.exists():
++            continue
++        rep.files_compared += 1
++        up_fns, cube_fns = _functions(up_file), _functions(cube_file)
++        rep.functions_upstream += len(up_fns)
++        for name, (verbatim, semantic, node) in up_fns.items():
++            if name not in cube_fns:
++                rep.functions_removed.append(f"{up_file.name}:{name}")
++                continue
++            cube_verbatim, cube_semantic, cube_node = cube_fns[name]
++            if cube_verbatim == verbatim:
++                rep.functions_verbatim += 1
++                rep.functions_semantic += 1
++            elif cube_semantic == semantic:
++                rep.functions_semantic += 1
++            else:
++                key = f"{up_file.name}:{name}"
++                rep.functions_divergent.append(key)
++                diff_text = "\n".join(
++                    difflib.unified_diff(
++                        _semantic_source(node),
++                        _semantic_source(cube_node),
++                        fromfile="upstream",
++                        tofile="cube",
++                        lineterm="",
++                        n=1,
++                    )
++                )
++                rep.residual_diffs[key] = diff_text
++                rep.divergence_classes[key] = classify_divergence(diff_text)
++        rep.functions_added.extend(f"{up_file.name}:{n}" for n in cube_fns if n not in up_fns)
++        dropped = _imports(up_file) - _imports(cube_file)
++        rep.imports_dropped.extend(f"{up_file.name}:{m}" for m in sorted(dropped))
++    return rep
++
++
++# ─────────────────────────────────────────────────────────────────────────────
++# Task-set identity
++# ─────────────────────────────────────────────────────────────────────────────
++@dataclass
++class TaskSetReport:
++    """Task-id and instruction-string comparison against the upstream index."""
++
++    cube_tasks: int = 0
++    upstream_tasks: int = 0
++    ids_matched: int = 0
++    ids_only_in_cube: list[str] = field(default_factory=list)
++    ids_only_upstream: list[str] = field(default_factory=list)
++    text_compared: int = 0
++    text_identical: int = 0
++
++    @property
++    def text_identical_pct(self) -> float:
++        if not self.text_compared:
++            return 0.0
++        return 100.0 * self.text_identical / self.text_compared
++
++
++def compare_task_sets(spec: CubeSpec, cube_root: Path, upstream_root: Path | None) -> TaskSetReport:
++    """Compare the CUBE's shipped task list against the upstream task index."""
++    rep = TaskSetReport()
++    meta_path = cube_root / (spec.task_metadata or "")
++    if not spec.task_metadata or not meta_path.exists():
++        return rep
++    cube_meta = json.loads(meta_path.read_text())
++    cube_by_id = {e[spec.task_id_key]: e for e in cube_meta}
++    rep.cube_tasks = len(cube_by_id)
++
++    if upstream_root is None or not spec.upstream_tasks_glob:
++        return rep
++
++    up_by_id: dict[str, dict[str, Any]] = {}
++    for path in upstream_root.glob(spec.upstream_tasks_glob):
++        try:
++            data = json.loads(path.read_text())
++        except (json.JSONDecodeError, UnicodeDecodeError):
++            continue
++        if isinstance(data, dict) and spec.task_id_key in data:
++            up_by_id[data[spec.task_id_key]] = data
++    rep.upstream_tasks = len(up_by_id)
++
++    matched = set(cube_by_id) & set(up_by_id)
++    rep.ids_matched = len(matched)
++    rep.ids_only_in_cube = sorted(set(cube_by_id) - set(up_by_id))[:20]
++    rep.ids_only_upstream = sorted(set(up_by_id) - set(cube_by_id))[:20]
++
++    if spec.task_text_key:
++        for tid in sorted(matched):
++            up_text = up_by_id[tid].get(spec.task_text_key)
++            cube_text = cube_by_id[tid].get(spec.cube_text_key)
++            if up_text is None or cube_text is None:
++                continue
++            rep.text_compared += 1
++            if str(up_text).strip() == str(cube_text).strip():
++                rep.text_identical += 1
++    return rep
++
++
++# ─────────────────────────────────────────────────────────────────────────────
++# Provenance evidence
++# ─────────────────────────────────────────────────────────────────────────────
++def declared_dependency(cube_root: Path, package: str) -> str | None:
++    """Return the raw dependency line declaring ``package`` in pyproject.toml."""
++    pyproject = cube_root / "pyproject.toml"
++    if not pyproject.exists():
++        return None
++    for line in pyproject.read_text().splitlines():
++        stripped = line.strip().strip(",").strip('"')
++        if stripped.split(">")[0].split("[")[0].split("=")[0].strip() == package:
++            return stripped
++    return None
++
++
++def clone_upstream(repo: UpstreamRepo, dest: Path) -> None:
++    """Shallow-clone (blobless) an upstream repo and pin it to the audit commit."""
++    if dest.exists():
++        return
++    dest.parent.mkdir(parents=True, exist_ok=True)
++    subprocess.run(
++        ["git", "clone", "--quiet", "--filter=blob:none", repo.url, str(dest)],
++        check=True,
++    )
++    if repo.commit:
++        subprocess.run(["git", "-C", str(dest), "checkout", "--quiet", repo.commit], check=True)
++
++
++def upstream_head(dest: Path) -> str:
++    """Short commit hash of a cloned upstream repo."""
++    out = subprocess.run(
++        ["git", "-C", str(dest), "rev-parse", "--short", "HEAD"],
++        capture_output=True,
++        text=True,
++        check=False,
++    )
++    return out.stdout.strip()
++
++
++# ─────────────────────────────────────────────────────────────────────────────
++# Reporting
++# ─────────────────────────────────────────────────────────────────────────────
++def latex_table(rows: list[dict[str, Any]]) -> str:
++    """Render the audit as the LaTeX table used in the paper appendix."""
++    lines = [
++        r"\begin{tabular}{llrrr}",
++        r"\toprule",
++        (
++            r"\textbf{CUBE} & \textbf{Evaluation provenance} & \textbf{Tasks} "
++            r"& \textbf{Task-set match} & \textbf{Evaluator match} \\"
++        ),
++        r"\midrule",
++    ]
++    for r in rows:
++        task_match = (
++            "---"
++            if r["task_set"]["upstream_tasks"] == 0
++            else f"{r['task_set']['ids_matched']}/{r['task_set']['upstream_tasks']}"
++        )
++        if r["provenance"] == "vendored":
++            v = r["vendored"]
++            eval_match = f"{v['functions_semantic']}/{v['functions_upstream']} fn ({v['semantic_pct']:.1f}\\%)"
++        elif r["provenance"] == "package":
++            eval_match = r"upstream pkg \texttt{" + (r.get("upstream_package") or "") + "}"
++        else:
++            eval_match = "upstream image + tests"
++        lines.append(
++            f"{r['cube']} & {r['provenance']} & {r['task_set']['cube_tasks'] or '---'} & {task_match} & {eval_match} \\\\"
++        )
++    lines += [r"\bottomrule", r"\end{tabular}"]
++    return "\n".join(lines)
++
++
++def main(
++    upstream_dir: Annotated[Path | None, typer.Option(help="Directory holding upstream clones.")] = None,
++    clone: Annotated[bool, typer.Option(help="Clone missing upstream repos first.")] = False,
++    out: Annotated[Path, typer.Option(help="Where to write the JSON report.")] = Path("parity_audit.json"),
++) -> None:
++    """Audit every CUBE in the paper corpus against its upstream implementation."""
++    upstream_dir = upstream_dir or Path.home() / ".cache" / "cube-parity-upstream"
++    rows: list[dict[str, Any]] = []
++
++    for spec in SPECS:
++        cube_root = CUBES / spec.package_dir
++        if not cube_root.exists():
++            typer.echo(f"skip {spec.cube}: {cube_root} missing")
++            continue
++
++        repo_dirs: dict[str, Path] = {}
++        for key, repo in (("primary", spec.repo), *spec.extra_repos):
++            if repo is None:
++                continue
++            path = upstream_dir / (spec.package_dir if key == "primary" else key)
++            if clone:
++                clone_upstream(repo, path)
++            if path.exists():
++                repo_dirs[key] = path
++            else:
++                typer.echo(f"warn {spec.cube}: no upstream clone at {path} (pass --clone)")
++        repo_dir = repo_dirs.get("primary")
++
++        vendored = VendorReport()
++        for cube_rel, up_rel, repo_key in spec.vendored_pairs:
++            source = repo_dirs.get(repo_key)
++            if source is not None:
++                part = compare_vendored(cube_root / cube_rel, source / up_rel)
++                vendored.files_compared += part.files_compared
++                vendored.functions_upstream += part.functions_upstream
++                vendored.functions_verbatim += part.functions_verbatim
++                vendored.functions_semantic += part.functions_semantic
++                vendored.functions_divergent += part.functions_divergent
++                vendored.functions_removed += part.functions_removed
++                vendored.functions_added += part.functions_added
++                vendored.imports_dropped += part.imports_dropped
++                vendored.residual_diffs.update(part.residual_diffs)
++                vendored.divergence_classes.update(part.divergence_classes)
++
++        task_set = compare_task_sets(spec, cube_root, repo_dir)
++
++        row: dict[str, Any] = {
++            "cube": spec.cube,
++            "provenance": spec.provenance,
++            "upstream_repo": spec.repo.url if spec.repo else None,
++            "upstream_commit": upstream_head(repo_dir) if repo_dir else None,
++            "upstream_package": spec.upstream_package,
++            "declared_dependency": (
++                declared_dependency(cube_root, spec.upstream_package) if spec.upstream_package else None
++            ),
++            "image_evidence": spec.image_evidence,
++            "vendored": {
++                **{k: v for k, v in asdict(vendored).items() if k != "residual_diffs"},
++                "verbatim_pct": vendored.verbatim_pct,
++                "semantic_pct": vendored.semantic_pct,
++                "class_counts": vendored.class_counts,
++            },
++            "task_set": {**asdict(task_set), "text_identical_pct": task_set.text_identical_pct},
++        }
++        rows.append(row)
++
++        typer.echo(f"\n── {spec.cube} [{spec.provenance}]")
++        if spec.upstream_package:
++            typer.echo(f"   upstream package dependency: {row['declared_dependency']}")
++        if vendored.functions_upstream:
++            typer.echo(
++                f"   evaluator functions: {vendored.functions_upstream} upstream over "
++                f"{vendored.files_compared} files\n"
++                f"     verbatim AST match:  {vendored.functions_verbatim} ({vendored.verbatim_pct:.1f}%)\n"
++                f"     semantic match:      {vendored.functions_semantic} ({vendored.semantic_pct:.1f}%)\n"
++                f"     divergent:           {len(vendored.functions_divergent)}\n"
++                f"     absent in cube:      {len(vendored.functions_removed)}"
++            )
++            if vendored.functions_divergent:
++                classes = ", ".join(f"{k}={v}" for k, v in sorted(vendored.class_counts.items()))
++                typer.echo(f"   divergence classes: {classes}")
++                behaviour = [k for k, v in sorted(vendored.divergence_classes.items()) if v == "behaviour_change"]
++                if behaviour:
++                    typer.echo(f"   behaviour changes ({len(behaviour)}): {', '.join(behaviour[:10])}")
++            if vendored.functions_removed:
++                typer.echo(f"   absent:    {', '.join(vendored.functions_removed[:8])}")
++            diff_path = out.with_name(f"{spec.package_dir}-residual-diffs.txt")
++            diff_path.write_text("\n\n".join(f"=== {k}\n{v}" for k, v in sorted(vendored.residual_diffs.items())))
++        if task_set.cube_tasks:
++            typer.echo(
++                f"   task set: {task_set.cube_tasks} shipped, {task_set.upstream_tasks} upstream, "
++                f"{task_set.ids_matched} ids matched, "
++                f"{task_set.text_identical}/{task_set.text_compared} instruction strings byte-identical"
++            )
++
++    out.write_text(json.dumps(rows, indent=2))
++    typer.echo(f"\nwrote {out}\n")
++    typer.echo(latex_table(rows))
++
++
++if __name__ == "__main__":
++    typer.run(main)
+diff --git a/scripts/paper/swebench_cross_harness.py b/scripts/paper/swebench_cross_harness.py
+new file mode 100755
+index 00000000..5eb1969b
+--- /dev/null
++++ b/scripts/paper/swebench_cross_harness.py
+@@ -0,0 +1,144 @@
++#!/usr/bin/env python3
++"""swebench_cross_harness.py — re-grade CUBE episodes with the upstream SWE-bench harness.
++
++The sharpest parity test available for a wrapped benchmark: hold the *artefact*
++constant and vary the *grader*. Every CUBE SWE-bench episode records the agent's
++model patch; this script exports those patches in the upstream predictions
++format, hands them to the official SWE-bench harness, and compares the two
++verdicts task by task.
++
++Any disagreement is a wrapper-vs-original difference in evaluation, measured
++directly rather than inferred from a judge. Our evaluator makes three
++deliberate, documented relaxations against upstream (pre-existing
++``PASS_TO_PASS`` failures are not charged to the agent; known
++network-dependent tests are skipped; ``pytest`` "no tests collected" is not a
++failure), so a small, one-directional disagreement is the expected result. The
++point is to publish its size and direction instead of assuming it is zero.
++
++    # 1. export patches from a completed CUBE run
++    scripts/paper/swebench_cross_harness.py export ~/cube_harness_results/<run> --out preds.jsonl
++
++    # 2. grade them upstream (either path)
++    python -m swebench.harness.run_evaluation --dataset_name princeton-nlp/SWE-bench_Verified \\
++        --predictions_path preds.jsonl --run_id cube_parity --max_workers 8
++    sb-cli submit swe-bench_verified test --predictions_path preds.jsonl --run_id cube_parity
++
++    # 3. compare verdicts
++    scripts/paper/swebench_cross_harness.py compare ~/cube_harness_results/<run> \\
++        --upstream cube_parity.json
++"""
++
++from __future__ import annotations
++
++import json
++from pathlib import Path
++from typing import Annotated, Any
++
++import typer
++
++from cube_harness.analyze.investigator.episode_discovery import discover_episodes
++
++app = typer.Typer(add_completion=False, help=__doc__)
++
++MODEL_FIELD = "model_name_or_path"
++
++
++def _episodes(run_dir: Path) -> list[tuple[str, dict[str, Any]]]:
++    """Yield (instance_id, reward_info) for every completed episode in a run."""
++    out: list[tuple[str, dict[str, Any]]] = []
++    for ref in discover_episodes(run_dir):
++        record = ref.record
++        if record is None:
++            continue
++        info = dict(getattr(record, "reward_info", {}) or {})
++        out.append((record.sample_id, info))
++    return out
++
++
++@app.command()
++def export(
++    run_dir: Annotated[Path, typer.Argument(help="A completed CUBE SWE-bench experiment directory.")],
++    out: Annotated[Path, typer.Option(help="Where to write predictions.jsonl.")] = Path("predictions.jsonl"),
++    model_name: Annotated[str, typer.Option(help="Value for the predictions' model field.")] = "cube-genny",
++) -> None:
++    """Export recorded model patches in the upstream predictions format."""
++    rows, missing = [], []
++    for instance_id, info in _episodes(run_dir):
++        patch = info.get("model_patch")
++        if not patch:
++            missing.append(instance_id)
++            continue
++        rows.append({"instance_id": instance_id, MODEL_FIELD: model_name, "model_patch": patch})
++
++    out.write_text("\n".join(json.dumps(r) for r in rows) + "\n")
++    typer.echo(f"wrote {len(rows)} predictions to {out}")
++    if missing:
++        typer.echo(
++            f"{len(missing)} episodes carried no model_patch (runs predating patch capture, "
++            f"or episodes that crashed before evaluate): {', '.join(missing[:5])}"
++        )
++
++
++def _upstream_resolved(path: Path) -> dict[str, bool]:
++    """Parse resolved-instance ids out of an upstream harness report."""
++    data = json.loads(path.read_text())
++    if isinstance(data, dict) and "resolved_ids" in data:  # run_evaluation report
++        resolved = set(data.get("resolved_ids", []))
++        attempted = set(data.get("resolved_ids", [])) | set(data.get("unresolved_ids", []))
++        return {i: i in resolved for i in attempted}
++    if isinstance(data, dict):  # sb-cli style {instance_id: {resolved: bool}}
++        return {k: bool(v.get("resolved", False)) for k, v in data.items() if isinstance(v, dict)}
++    raise typer.BadParameter(f"unrecognised upstream report shape in {path}")
++
++
++@app.command()
++def compare(
++    run_dir: Annotated[Path, typer.Argument(help="The same CUBE run that produced the predictions.")],
++    upstream: Annotated[Path, typer.Option(help="Upstream harness report JSON.")] = Path("report.json"),
++    out: Annotated[Path, typer.Option(help="Where to write the LaTeX row.")] = Path("cross_harness.tex"),
++) -> None:
++    """Compare CUBE verdicts against upstream verdicts on the identical patches."""
++    cube = {iid: bool(info.get("resolved", False)) for iid, info in _episodes(run_dir)}
++    up = _upstream_resolved(upstream)
++    shared = sorted(set(cube) & set(up))
++    if not shared:
++        raise typer.BadParameter("no overlapping instance ids between the run and the upstream report")
++
++    both = sum(cube[i] and up[i] for i in shared)
++    neither = sum(not cube[i] and not up[i] for i in shared)
++    cube_only = [i for i in shared if cube[i] and not up[i]]
++    up_only = [i for i in shared if not cube[i] and up[i]]
++    agreement = (both + neither) / len(shared)
++
++    typer.echo(f"n = {len(shared)} instances graded by both harnesses")
++    typer.echo(f"  resolved by both      : {both}")
++    typer.echo(f"  resolved by neither   : {neither}")
++    typer.echo(f"  CUBE only (lenient)   : {len(cube_only)}  {', '.join(cube_only[:8])}")
++    typer.echo(f"  upstream only (strict): {len(up_only)}  {', '.join(up_only[:8])}")
++    typer.echo(f"  verdict agreement     : {agreement * 100:.1f}%")
++    typer.echo(
++        f"  pass rate  CUBE {sum(cube[i] for i in shared) / len(shared) * 100:.1f}%"
++        f"  upstream {sum(up[i] for i in shared) / len(shared) * 100:.1f}%"
++    )
++
++    out.write_text(
++        f"{len(shared)} & {both} & {neither} & {len(cube_only)} & {len(up_only)} & {agreement * 100:.1f}\\% \\\\\n"
++    )
++    (out.with_suffix(".json")).write_text(
++        json.dumps(
++            {
++                "n": len(shared),
++                "both": both,
++                "neither": neither,
++                "cube_only": cube_only,
++                "upstream_only": up_only,
++                "agreement": agreement,
++            },
++            indent=2,
++        )
++    )
++    typer.echo(f"\nwrote {out}")
++
++
++if __name__ == "__main__":
++    app()
+diff --git a/scripts/paper/wrapping_effort.py b/scripts/paper/wrapping_effort.py
+new file mode 100755
+index 00000000..91d9e6c4
+--- /dev/null
++++ b/scripts/paper/wrapping_effort.py
+@@ -0,0 +1,159 @@
++#!/usr/bin/env python3
++"""wrapping_effort.py — how much code does wrapping a benchmark as a CUBE take?
++
++The paper claims wrapping collapses to "a handful of typed classes plus
++metadata". Reviewers asked for that claim to be quantified and compared across
++frameworks. This script measures it directly from the corpus.
++
++Counted per CUBE, in non-blank non-comment lines:
++
++  authored   code written by the CUBE author: task, benchmark, tool, configs,
++             debug suite. This is the wrapping cost.
++  vendored   upstream evaluator source copied in verbatim (see parity_audit.py).
++             Not wrapping effort: it is the original benchmark's own scoring
++             code, and its provenance is audited separately.
++  debug      the LLM-free debug suite the registry's compliance check runs.
++             Broken out because it is the one artefact the standard *requires*
++             beyond the wrapper itself.
++
++Usage
++-----
++    scripts/paper/wrapping_effort.py
++    scripts/paper/wrapping_effort.py --latex
++"""
++
++from __future__ import annotations
++
++import ast
++import json
++from dataclasses import asdict, dataclass
++from pathlib import Path
++from typing import Annotated
++
++import typer
++
++REPO_ROOT = Path(__file__).resolve().parents[2]
++CUBES = REPO_ROOT / "cubes"
++
++# Directories holding upstream evaluator source rather than authored glue.
++VENDORED_DIRS = ("vm_backend", "_vendor", "third_party")
++
++# Corpus order follows the paper's Table 5 (registry at submission).
++CORPUS: tuple[tuple[str, str], ...] = (
++    ("WorkArena", "workarena"),
++    ("WebArena-Verified", "webarena-verified"),
++    ("MiniWoB", "miniwob"),
++    ("BrowseComp", "browsercomp"),
++    ("OSWorld", "osworld-cube"),
++    ("Windows Agent Arena", "windows-agent-arena-cube"),
++    ("SWE-bench Verified", "swebench-verified-cube"),
++    ("SWE-bench Live", "swebench-live-cube"),
++    ("Terminal-Bench", "terminalbench2-cube"),
++)
++
++
++@dataclass
++class Effort:
++    """Line counts for one CUBE package."""
++
++    cube: str
++    package_dir: str
++    authored: int = 0
++    vendored: int = 0
++    debug: int = 0
++    files: int = 0
++
++    @property
++    def authored_excl_debug(self) -> int:
++        return self.authored - self.debug
++
++
++def sloc(path: Path) -> int:
++    """Non-blank, non-comment, non-docstring lines of Python."""
++    try:
++        source = path.read_text(encoding="utf-8", errors="replace")
++        tree = ast.parse(source)
++    except (SyntaxError, OSError):
++        return 0
++    docstring_lines: set[int] = set()
++    for node in ast.walk(tree):
++        if not isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
++            continue
++        body = getattr(node, "body", [])
++        if (
++            body
++            and isinstance(body[0], ast.Expr)
++            and isinstance(body[0].value, ast.Constant)
++            and isinstance(body[0].value.value, str)
++        ):
++            first = body[0]
++            docstring_lines.update(range(first.lineno, (first.end_lineno or first.lineno) + 1))
++    count = 0
++    for i, line in enumerate(source.splitlines(), start=1):
++        stripped = line.strip()
++        if not stripped or stripped.startswith("#") or i in docstring_lines:
++            continue
++        count += 1
++    return count
++
++
++def measure(cube: str, package_dir: str) -> Effort:
++    """Walk one cube package and split its lines into the three buckets."""
++    effort = Effort(cube=cube, package_dir=package_dir)
++    src = CUBES / package_dir / "src"
++    if not src.exists():
++        return effort
++    for path in sorted(src.rglob("*.py")):
++        if "__pycache__" in path.parts or ".venv" in path.parts:
++            continue
++        lines = sloc(path)
++        effort.files += 1
++        if any(part in VENDORED_DIRS for part in path.parts):
++            effort.vendored += lines
++            continue
++        effort.authored += lines
++        if path.stem.startswith("debug"):
++            effort.debug += lines
++    return effort
++
++
++def main(
++    latex: Annotated[bool, typer.Option(help="Emit the LaTeX table instead of plain text.")] = False,
++    out: Annotated[Path | None, typer.Option(help="Also write the raw measurements as JSON.")] = None,
++) -> None:
++    """Measure authored wrapping effort for every CUBE in the paper corpus."""
++    efforts = [measure(cube, package_dir) for cube, package_dir in CORPUS]
++    measured = [e for e in efforts if e.files]
++
++    if latex:
++        print(r"\begin{tabular}{lrrr}")
++        print(r"\toprule")
++        print(r"\textbf{CUBE} & \textbf{Wrapper SLOC} & \textbf{Debug suite} & \textbf{Vendored evaluator} \\")
++        print(r"\midrule")
++        for e in measured:
++            vendored = f"{e.vendored:,}" if e.vendored else "---"
++            print(f"{e.cube} & {e.authored_excl_debug:,} & {e.debug:,} & {vendored} \\\\")
++        print(r"\midrule")
++        median = sorted(e.authored_excl_debug for e in measured)[len(measured) // 2]
++        print(f"\\textbf{{Median}} & \\textbf{{{median:,}}} & & \\\\")
++        print(r"\bottomrule")
++        print(r"\end{tabular}")
++    else:
++        print(f"{'CUBE':24s} {'wrapper':>8s} {'debug':>7s} {'vendored':>9s} {'files':>6s}")
++        for e in measured:
++            print(f"{e.cube:24s} {e.authored_excl_debug:8d} {e.debug:7d} {e.vendored:9d} {e.files:6d}")
++        totals = (
++            sum(e.authored_excl_debug for e in measured),
++            sum(e.debug for e in measured),
++            sum(e.vendored for e in measured),
++        )
++        median = sorted(e.authored_excl_debug for e in measured)[len(measured) // 2]
++        print(f"\n{'TOTAL':24s} {totals[0]:8d} {totals[1]:7d} {totals[2]:9d}")
++        print(f"median wrapper SLOC per CUBE: {median}")
++
++    if out:
++        out.write_text(json.dumps([asdict(e) for e in measured], indent=2))
++
++
++if __name__ == "__main__":
++    typer.run(main)
+diff --git a/recipes/paper/miniwob_scaffold_model_matrix.py b/recipes/paper/miniwob_scaffold_model_matrix.py
+new file mode 100644
+index 00000000..1434f96d
+--- /dev/null
++++ b/recipes/paper/miniwob_scaffold_model_matrix.py
+@@ -0,0 +1,91 @@
++"""Scaffold × model matrix on MiniWoB — holds the benchmark and tool stack fixed.
++
++Two questions the paper's single-scaffold table cannot answer:
++
++  * **Scaffold sensitivity.** Does the ranking survive a change of agent loop?
++    Genny (rolling-summary context management) and ReAct (think/act transcript)
++    are run over the identical 125-task set with the identical BrowserGym tool
++    stack, so any difference is attributable to the scaffold alone.
++  * **Open-weight coverage.** The RL post-training motivation needs at least one
++    model with updatable weights. Qwen3-VL-235B runs through the same LiteLLM
++    gateway as the closed models; MiniWoB's observation is html+screenshot, so
++    the open-weight model has to be vision-capable for the comparison to hold
++    the tool stack constant.
++
++Every cell is the same benchmark, same tool config, same step cap — only the
++agent scaffold and the model change.
++
++    # one cell, in-process, first 5 tasks (smoke)
++    .venv/bin/python recipes/paper/miniwob_scaffold_model_matrix.py -e genny-gpt5mini --limit 5
++
++    # one cell, full 125 tasks, 4 Ray workers
++    .venv/bin/python recipes/paper/miniwob_scaffold_model_matrix.py -e react-gpt5mini --ray 4
++"""
++
++import os
++
++from miniwob_cube import MINIWOB_CONFIGS
++
++from cube_harness.agents.genny_configs import GENNY_CONFIGS
++from cube_harness.agents.react_configs import REACT_CONFIGS
++from cube_harness.experiment import Experiment
++from cube_harness.llm import LLMConfig
++from cube_harness.recipe import run
++
++MAX_STEPS = 10  # MiniWoB episodes are short; matches the paper's MiniWoB runs
++
++# Model ids as LiteLLM resolves them. Two routes to an open-weight model: a
++# hosted gateway (OpenRouter, needs OPENROUTER_API_KEY) or a self-served vLLM
++# endpoint (the `qwenlocal` cell — set CUBE_HARNESS_OPENWEIGHT_BASE_URL). The
++# self-served route is the one that composes with the RL rollout service, which
++# needs weights you control anyway.
++OPENWEIGHT_BASE_URL = os.getenv("CUBE_HARNESS_OPENWEIGHT_BASE_URL", "http://localhost:8000/v1")
++OPENWEIGHT_MODEL = os.getenv("CUBE_HARNESS_OPENWEIGHT_MODEL", "hosted_vllm/Qwen/Qwen3-VL-30B-A3B-Instruct")
++
++MODELS: dict[str, str] = {
++    "gpt5mini": "gpt-5.4-mini",
++    "qwen3vl": "openrouter/qwen/qwen3-vl-235b-a22b-instruct",
++    "qwenlocal": OPENWEIGHT_MODEL,
++}
++
++
++def _llm(model: str) -> LLMConfig:
++    """Point self-served models at the local endpoint; leave gateways to LiteLLM."""
++    if model.startswith("hosted_vllm/"):
++        return LLMConfig(
++            model_name=model,
++            temperature=1.0,
++            api_base=OPENWEIGHT_BASE_URL,
++            api_key=os.getenv("CUBE_HARNESS_LLM_API_KEY", "EMPTY"),
++        )
++    return LLMConfig(model_name=model, temperature=1.0)
++
++
++def _genny(model: str) -> object:
++    agent = GENNY_CONFIGS["default"]
++    agent.llm_config = _llm(model)
++    return agent
++
++
++def _react(model: str) -> object:
++    agent = REACT_CONFIGS["default"]
++    agent.llm_config = _llm(model)
++    return agent
++
++
++SCAFFOLDS = {"genny": _genny, "react": _react}
++
++EXPERIMENTS: dict[str, Experiment] = {
++    f"{scaffold}-{model_key}": Experiment(
++        name=f"miniwob-{scaffold}-{model_key}",
++        agent_config=build(model_id),  # type: ignore[arg-type]
++        benchmark_config=MINIWOB_CONFIGS["default"],
++        max_steps=MAX_STEPS,
++    )
++    for scaffold, build in SCAFFOLDS.items()
++    for model_key, model_id in MODELS.items()
++}
++EXPERIMENTS["default"] = EXPERIMENTS["genny-gpt5mini"]
++
++if __name__ == "__main__":
++    run(EXPERIMENTS)

@@ -197,9 +197,15 @@ stacks held constant per modality, exposing capability profiles that
 per-benchmark leaderboards do not surface and pinpointing where
 failures live: roughly 82\,\% trace to the LLM itself, with the rest
 concentrating on specific tool stacks and on wrapper bugs that the
-judge surfaces and that we then fix in place. Wrapping a new
-benchmark reduces to a few typed classes plus metadata, and a Claude
-skill turns even that into an afternoon of work.
+judge surfaces and that we then fix in place. Because a wrapped
+benchmark is only useful if it is the same benchmark, we measure
+wrapper fidelity directly rather than inferring it: task-set identity
+against the upstream index (368/368 and 152/152 instructions
+byte-identical for OSWorld and Windows Agent Arena), evaluation
+provenance per CUBE, and oracle parity against each benchmark's own
+reference solution. Wrapping a new benchmark reduces to a few typed
+classes plus metadata (median 508 lines across our corpus), and a
+Claude skill turns even that into an afternoon of work.
 \end{abstract}
 
 
@@ -366,6 +372,62 @@ NeMo Gym \citep{nemo-gym} provides high-throughput RL training infrastructure wi
 PipelineRL \citep{piche2025pipelinerl} streams weight updates to inference workers to overlap generation and training on long-trajectory rollouts, and Harbor \citep{Shaw_Harbor_Framework_2025} grew out of Terminal-Bench as a container-based post-training pipeline.
 
 These systems operate at distinct layers: image conventions (METR), evaluation orchestration (Inspect), curated training suites (AgentGym), and RL execution (the rest). CUBE sits at the wrapping layer with a Python-native typed object model for tasks, benchmarks, tools, and the resource lifecycle, a JSON-RPC contract for non-Python clients, a registry for third-party contributions, and reference connectors that expose any CUBE benchmark as a NeMo Gym environment or an AgentBeats green agent.
+
+Table~\ref{tab:framework-comparison} makes the comparison concrete. The axis
+that separates CUBE from the rest is the \emph{resource lifecycle}: a
+per-task hermetic container is the only provisioning pattern most frameworks
+model, which structurally excludes benchmarks built on one shared server
+reused across tasks (WebArena, WorkArena) and benchmarks that need a running
+desktop (OSWorld, Windows Agent Arena). Harbor covers more benchmarks than we
+do and ships a stronger RL data path; its per-task container model cannot
+express those two patterns. The comparison also surfaces a practice we adopt
+from Harbor rather than claim over it: Harbor requires every adapter to pass a
+quantified parity experiment against the original benchmark before it enters
+the registry. We report parity measurements for our own corpus in
+\S\ref{sec:parity} and add a parity record to the registry contract.
+
+\begin{table*}[t]
+\centering
+\caption{Frameworks for agentic benchmark execution, on the axes that decide
+which benchmarks a framework can host. \emph{Prov.} lists the resource patterns
+modelled: \textbf{C}~per-task container, \textbf{S}~shared service reused
+across tasks, \textbf{V}~VM snapshot with a running desktop. \emph{Tools swap}
+means the action space is a declared, replaceable object rather than fixed by
+the benchmark or by the evaluated agent's binary. Counts are as of the sources
+we inspected (May~2026); environments and adapters are not equivalent units
+across projects, so we also give each framework's wrapping unit.}
+\label{tab:framework-comparison}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\renewcommand{\arraystretch}{1.12}
+\begin{tabular}{llccccccl}
+\toprule
+\textbf{Framework} & \textbf{Envs} & \textbf{Modalities} & \textbf{Prov.}
+& \textbf{Tools} & \textbf{Non-Py} & \textbf{Registry} & \textbf{RL}
+& \textbf{Wrapping unit} \\
+ & & \small W\,/\,G\,/\,S & & \small swap & \small client & \small +\,CI & \small path & \\
+\midrule
+\textbf{CUBE} (ours) & 10 & \cmark\,\cmark\,\cmark & C\,S\,V & \cmark & \cmark & \cmark & \pmark
+  & Typed Python classes \\
+Harbor \citep{Shaw_Harbor_Framework_2025} & ${\sim}65$ & \xmark\,\xmark\,\cmark & C & \pmark & \cmark & \cmark & \cmark
+  & \texttt{task.toml} + Dockerfile \\
+NeMo Gym \citep{nemo-gym} & 40+ & \xmark\,\xmark\,\cmark & C & \pmark & \cmark & \xmark & \cmark
+  & FastAPI microservice \\
+OpenEnv \citep{openenv2025} & ${\sim}20$ & \pmark\,\xmark\,\cmark & C & \xmark & \cmark & \pmark & \cmark
+  & Docker + \texttt{EnvClient} \\
+AgentBeats \citep{agentbeats2025} & 38+ & \cmark\,\pmark\,\cmark & --- & \cmark & \cmark & \cmark & \pmark
+  & A2A ``green agent'' \\
+Inspect AI \citep{inspect_ai} & 200+ & \pmark\,\xmark\,\cmark & C & \cmark & \xmark & \xmark & \xmark
+  & Task + solver + scorer \\
+METR standard \citep{metr_task_standard_2024} & ${\sim}200$ & \xmark\,\xmark\,\cmark & C\,V & \xmark & \xmark & \xmark & \xmark
+  & Task family image \\
+BrowserGym \citep{chezelles2025browsergym} & ${\sim}10$ & \cmark\,\xmark\,\xmark & C\,S & \cmark & \xmark & \xmark & \xmark
+  & Gym env (web only) \\
+AgentGym \citep{xi2025agentgym} & 14 & \pmark\,\xmark\,\pmark & C & \xmark & \cmark & \xmark & \cmark
+  & HTTP env server \\
+\bottomrule
+\end{tabular}
+\end{table*}
 
 \paragraph{RL post-training over agentic environments.}
 Reinforcement learning post-training is now central to frontier LLM development and
@@ -669,6 +731,11 @@ the agent reaches reward~1.0 on every debug task. Passing both earns a
 compliance badge; failing the full check flags the entry degraded until a
 fix is submitted. This lets the registry accept third-party CUBEs at scale
 without trusting any individual submitter.
+Following Harbor \citep{Shaw_Harbor_Framework_2025}, which requires every
+adapter to pass a quantified parity experiment before acceptance, an entry also
+carries a \emph{parity record}: upstream commit, provenance class, and oracle
+result (\S\ref{sec:parity}). The debug suite proves a CUBE \emph{runs}; the
+parity record is what argues it is the \emph{same benchmark}.
 
 
 % ===========================================================================
@@ -676,18 +743,15 @@ without trusting any individual submitter.
 \label{sec:experiments}
 % ===========================================================================
 
-Our experiments answer three questions.
-First, can a single generalist agent configuration produce useful baselines
+Our experiments answer four questions.
+First, and most critically for an evaluation suite: are the CUBE wrappers
+faithful implementations of the underlying benchmarks (\S\ref{sec:parity})?
+Second, can a single generalist agent configuration produce useful baselines
 across the corpus (\S\ref{sec:exp-baselines})?
-Second, where do its failures originate: the LLM, the agent scaffolding,
+Third, where do its failures originate: the LLM, the agent scaffolding,
 the tool stack, or the wrapped benchmark itself (\S\ref{sec:exp-judge-results})?
-Third, and most critically for an evaluation suite: are the CUBE wrappers
-faithful implementations of the underlying benchmarks? Reproducing published
-leaderboard numbers proved too noisy a signal for this purpose
-(Appendix~\ref{apdx:reproducibility}); we used the judge's benchmark-side
-blame rate instead, which enabled iterative wrapper debugging and yielded
-direct evidence of faithfulness once benchmark-side blame converged to a
-low share.
+Fourth, do those conclusions survive a change of agent scaffold
+(\S\ref{sec:exp-scaffold})?
 
 % --- 7.1 Setup -------------------------------------------------------------
 \subsection{Setup}
@@ -733,14 +797,74 @@ callback multiplied by published model rates. Each task is hard-capped at
 GPT-5.4-mini) or \$3 (large models: Sonnet~4.6, GPT-5.4). Tasks that
 exhaust either limit are counted as failures.
 
-\mypar{Faithfulness validation.}
-We use the judge's benchmark-side blame rate as the primary
-faithfulness signal: when \texttt{env\_failure}, \texttt{eval\_brittle},
-and \texttt{task\_unclear} are rare, the wrapper is not the bottleneck.
-This signal drove several rounds of wrapper debugging before the final
-runs, each round flagging a specific evaluator error, provisioning issue,
-or tool misconfiguration that we then fixed
-(Appendix~\ref{apdx:reproducibility}).
+
+% --- 7.2 Wrapper faithfulness ----------------------------------------------
+\subsection{Are the wrappers faithful?}
+\label{sec:parity}
+
+A wrapped benchmark is only useful if it is the same benchmark. We treat that
+as a measurement problem with four layers, each catching a different way a
+wrapper can silently diverge, all reproducible from \texttt{scripts/paper/}.
+
+\mypar{Layer 1: task-set identity.}
+Every shipped task id and instruction string is compared against the upstream
+task index at the pinned commit. OSWorld matches on \textbf{368/368} ids with
+\textbf{368/368} byte-identical instructions; Windows Agent Arena on
+\textbf{152/152} and \textbf{152/152}. Agents read exactly what upstream
+specifies.
+
+\mypar{Layer 2: evaluation provenance.}
+Scoring code reaches a CUBE by one of three routes, each admitting a different
+check (Table~\ref{tab:parity}). Three CUBEs \emph{delegate} scoring to the
+original authors' published package (\texttt{browsergym-workarena},
+\texttt{miniwob}, \texttt{webarena-verified}), so the evaluator is upstream's by
+construction. Three run the benchmark's \emph{own image and test commands} (the
+official \texttt{swebench/sweb.eval.*} images; Terminal-Bench's per-task
+images). The two CUA CUBEs \emph{vendor} upstream evaluator source, which we
+audit function by function at the AST level, normalising edits that cannot
+change a score (docstrings, logging, annotations, lint-driven renames). Of 236
+OSWorld evaluator functions \textbf{90.3\,\%} are semantically identical, with
+13 possibly score-affecting; for Windows Agent Arena, \textbf{74.5\,\%} of 274,
+with 23. The residue is dominated by two mechanical patterns, extraction of
+upstream's repeated per-OS path-resolution preamble into one helper and pruning
+of branches for operating systems the CUBE image never runs, plus the evaluator
+bug fixes the judge surfaced (\S\ref{sec:exp-qualitative}). Every residual diff
+ships with the paper.
+
+\mypar{Layer 3: oracle parity.}
+Does the evaluator award full credit to the benchmark's own reference solution?
+Each SWE CUBE ships a scripted, LLM-free gold-patch agent; Terminal-Bench
+exposes the same check through \texttt{oracle\_mode}, which uploads upstream's
+own \texttt{solve.sh}. On SWE-bench Live's 300-task lite split, \textbf{275}
+tasks resolve under the CUBE evaluator. The residue is why we report the check
+rather than assume it: an earlier run on non-root infrastructure resolved only
+223, so roughly 62 tasks turn on whether the container runs as root, not on
+evaluation semantics. Agents are evaluated on the gold-solvable subset, which
+is what \emph{lite-gold} in Table~\ref{tab:passrate} means.
+
+\mypar{Layer 4: cross-harness verdict agreement.}
+The sharpest test holds the artefact fixed and varies the grader. Episodes now
+record the agent's model patch, so identical patches can be re-graded by the
+upstream SWE-bench harness and verdicts compared task by task. We expect a
+small, one-directional disagreement, because our evaluator makes three
+deliberate relaxations that we state rather than hide: \texttt{PASS\_TO\_PASS}
+tests already failing before the agent touches the repository are not charged
+to it, a fixed list of network-dependent tests is skipped offline, and
+\texttt{pytest}'s ``no tests collected'' is not a failure where upstream task
+data carries untokenisable test ids. Each avoids scoring a correct fix as~0 for
+reasons outside the agent's control; each also makes our SWE numbers a possible
+upper bound against the official harness, which is precisely the kind of
+difference a parity check exists to quantify.
+
+\mypar{What the judge's blame rate is, and is not.}
+An earlier version of this work used the judge's benchmark-side blame rate as
+the primary faithfulness signal. It is not one: it is the wrapper's own
+instrument, and a low rate cannot certify the wrapper any more than a compiler
+can certify its own output. Its real role is \emph{monitoring}, surfacing
+candidate wrapper defects at corpus scale, and it found real ones, including an
+escape-sequence bug in an evaluator path that suppressed five Windows Agent
+Arena scores (\S\ref{sec:exp-qualitative}). Layers~1 to~4 establish
+faithfulness; the blame rate keeps finding the next defect.
 
 
 % --- 6.3 Baseline pass rates -----------------------------------------------
@@ -812,7 +936,7 @@ benchmark-side (rose) buckets.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=0.92\linewidth]{figures/blame_distribution_bench}
+  \includegraphics[width=0.82\linewidth]{figures/blame_distribution_bench}
   \caption{Blame distribution per benchmark.
   Each bar spans 100\,\% of tasks: the pale left segment is the pass rate
   (averaged over Sonnet~4.6 and GPT-5.4); the remainder is divided among
@@ -835,7 +959,36 @@ Windows~Agent~Arena and TerminalBench; each flagged case is a queued
 issue we are iterating on
 (Appendix~\ref{apdx:judge-cases}).
 
-% --- 7.5 Qualitative judge findings ----------------------------------------
+% --- 7.5 Scaffold sensitivity ----------------------------------------------
+\subsection{Does the picture survive a change of scaffold?}
+\label{sec:exp-scaffold}
+
+Table~\ref{tab:passrate} measures one agent. Since two scaffolds calling the
+same model can differ substantially on the same benchmark
+(Appendix~\ref{apdx:reproducibility}), a single-scaffold table invites the
+question of whether it measures the models or the scaffold. We therefore ran a
+second, structurally different public scaffold over an identical task set with
+an identical tool stack and model: \texttt{ReAct}, a think/act transcript loop,
+against \texttt{Genny}'s rolling-summary context management, both on
+GPT-5.4-mini over all 125 MiniWoB tasks through the same BrowserGym action set
+(one seed, 10-step cap; this is a controlled scaffold comparison, not a
+re-run of Table~\ref{tab:passrate}'s configuration).
+
+Aggregate pass rates are close: \textbf{66.1\,\%} (Genny) against
+\textbf{69.4\,\%} (ReAct) on the 124 tasks both completed, a \textbf{+3.2\,pp}
+difference a paired exact McNemar test does not distinguish from zero
+($p{=}0.42$). The task-level view is more informative: the scaffolds reach the
+\emph{same} outcome on \textbf{88.7\,\%} of tasks (Spearman $\rho{=}0.74$),
+with 14 discordant tasks split 5 to 9. Roughly one MiniWoB task in nine is
+decided by the scaffold rather than the model, while the benchmark-level
+reading is stable across both. Holding the tool stack constant is what keeps
+that variance small: the two loops differ in context management but act through
+the identical action space, so neither can win by having better tools. It also
+bounds our claim. Table~\ref{tab:passrate} reports platform measurements of one
+configuration; conclusions resting on gaps of a few points should not be drawn
+from a single-scaffold table, including ours.
+
+% --- 7.6 Qualitative judge findings ----------------------------------------
 \subsection{Qualitative findings from the judge}
 \label{sec:exp-qualitative}
 
@@ -887,13 +1040,30 @@ runs into a shared queue of triaged, evidence-backed issues for the
 entire benchmark ecosystem.
 
 \mypar{Limitations.}
-Streaming actions/observations and multi-agent settings are not yet
-supported and are the next protocol extensions we plan to ship;
-dataset-only benchmarks remain out of scope. ``Tools held constant''
-is harness-enforced rather than standard-enforced; the compliance
-suite is a floor, not a correctness guarantee; faithfulness is
-bounded by judge accuracy (Appendix~\ref{apdx:judge-meta}); claims
-extend only to the \NUMEXP{} CUBEs evaluated.
+Three bear directly on how far our claims should be read.
+\emph{The RL post-training motivation is untested end-to-end}: we motivate CUBE
+by multi-environment RL and demonstrate evaluation of four closed API models.
+CUBE supplies what such a pipeline needs (common task interface, resource
+lifecycle, trajectory export, NeMo Gym connector), and the episode loop that
+feeds it sustains ${\approx}1{,}200$ complete MiniWoB rollouts per hour on a
+single 8-core laptop with four Ray workers, but this paper reports no training
+run and no open-weight model, so the RL argument is a design argument, not a
+result.
+\emph{Faithfulness is argued, not proven}: each layer in \S\ref{sec:parity} has
+a boundary. Task-set identity and provenance are static and cannot catch a
+runtime divergence; oracle parity covers only benchmarks shipping a reference
+solution, excluding the CUA CUBEs; cross-harness agreement exists only where a
+second harness does. For web and CUA we have provenance and task identity but
+no independent second grader.
+\emph{Scaffold and tool choices are part of every number}:
+\S\ref{sec:exp-scaffold} bounds scaffold variance on one benchmark and does not
+license extrapolating that bound to the longer horizons of CUA and SWE.
+Beyond these, streaming and multi-agent settings are not yet supported and are
+the next protocol extensions we plan to ship; dataset-only benchmarks remain
+out of scope; ``tools held constant'' is harness-enforced rather than
+standard-enforced; the compliance suite is a floor, not a correctness
+guarantee; and all empirical claims extend only to the \NUMEXP{} CUBEs
+evaluated.
 
 
 \bibliography{references}
@@ -963,6 +1133,77 @@ Terminal-Bench        & Terminal & 89     & Per-task Docker \\
 DRBench              & Research & 100    & Per-task Docker (Nextcloud, Mattermost, IMAP) \\
 \midrule
 \textbf{Total}       &          & \textbf{5{,}642} & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Static parity audit of the corpus (\texttt{scripts/paper/parity\_audit.py}).
+Task-set match compares shipped task ids and instruction strings against the
+upstream index at the pinned commit. Evaluator match is AST-level semantic
+identity of upstream evaluator functions, ignoring edits that cannot change a
+score.}
+\label{tab:parity}
+\small
+\setlength{\tabcolsep}{5pt}
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{llrl}
+\toprule
+\textbf{CUBE} & \textbf{Evaluation provenance} & \textbf{Task-set match} & \textbf{Evaluator match} \\
+\midrule
+WorkArena           & upstream package & \NA & \texttt{browsergym-workarena} \\
+WebArena-Verified   & upstream package & \NA & \texttt{webarena-verified} \\
+MiniWoB             & upstream package & \NA & \texttt{miniwob} \\
+OSWorld             & vendored source  & 368/368 & 213/236 fn (90.3\,\%) \\
+Windows Agent Arena & vendored source  & 152/152 & 204/274 fn (74.5\,\%) \\
+SWE-bench Verified  & upstream image + tests & 500/500 & official image, 3 documented relaxations \\
+SWE-bench Live      & upstream image + tests & 300/300 (lite) & 275 gold-solvable (oracle) \\
+Terminal-Bench      & upstream image + tests & 89/89 & upstream \texttt{solve.sh} oracle \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Wrapping effort}
+\label{apdx:wrapping-effort}
+
+Section~\ref{sec:discussion} claims that wrapping collapses to a handful of
+typed classes. Table~\ref{tab:wrapping-effort} measures it
+(\texttt{scripts/paper/wrapping\_effort.py}), in non-blank, non-comment,
+non-docstring lines. Vendored upstream evaluator source is excluded from the
+wrapper column: it is the original benchmark's own scoring code, not authoring
+effort, and its provenance is audited separately in \S\ref{sec:parity}. The
+debug suite is broken out because it is the one artefact the standard requires
+beyond the wrapper itself, and it is what the registry's compliance check runs.
+
+The median CUBE is \textbf{508} lines of authored wrapper plus a 33 to 144 line
+debug suite. The spread is informative: the cheapest wrappers are the ones whose
+upstream ships an importable evaluation package (MiniWoB, WorkArena), and the
+most expensive are those that must reconstruct a provisioning path the upstream
+project only expressed as a run script (OSWorld, Terminal-Bench).
+
+\begin{table}[h]
+\centering
+\caption{Authored wrapping effort per CUBE, in SLOC.}
+\label{tab:wrapping-effort}
+\footnotesize
+\setlength{\tabcolsep}{6pt}
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{lrrr}
+\toprule
+\textbf{CUBE} & \textbf{Wrapper} & \textbf{Debug suite} & \textbf{Vendored evaluator} \\
+\midrule
+WorkArena            & 325 &  33 & \NA \\
+WebArena-Verified    & 508 &  37 & \NA \\
+MiniWoB              & 264 &  67 & \NA \\
+BrowseComp           & 253 & 113 & \NA \\
+OSWorld              & 798 & 144 & 8{,}225 \\
+Windows Agent Arena  & 571 &  85 & 8{,}771 \\
+SWE-bench Verified   & 460 &  38 & \NA \\
+SWE-bench Live       & 561 &  38 & \NA \\
+Terminal-Bench       & 593 &  73 & \NA \\
+\midrule
+\textbf{Median}      & \textbf{508} & \textbf{67} & \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -1093,6 +1334,13 @@ SWE-bench Live     & Sonnet~4.6 &  83 &  77 &  6 & 0 & 92.8 & 100.0 \\
 \end{tabular}
 \end{table}
 
+\paragraph{What this does and does not show.}
+Agreement is a measure of \emph{consistency}, not of \emph{correctness}: three
+judges can agree and all be wrong, and nothing in this table rules that out.
+Appendix~\ref{apdx:judge-human} reports the two checks that do bear on
+correctness, namely agreement against human labels and against a judge running
+on a different model family.
+
 \paragraph{Takeaways.}
 Majority (${\geq}2/3$) agreement is \textbf{97–100\,\%} across every
 condition for both blame and outcome, meaning the modal vote is almost
@@ -1113,6 +1361,70 @@ difficult judgement call even for human annotators.
 Notably, the \emph{all-differ} rate (complete three-way disagreement)
 stays below 2.5\,\% in every condition, confirming that true confusion is
 rare and that majority voting is a robust aggregation strategy.
+
+\section{Judge validation against humans and across model families}
+\label{apdx:judge-human}
+
+Appendix~\ref{apdx:judge-meta} establishes that the judge is stable. Stability
+is necessary and not sufficient, so we run two further checks. Both are
+released as tooling (\texttt{scripts/paper/judge\_validation.py}) rather than
+one-off analysis, because a judge protocol that other groups adopt should ship
+with the means to re-validate it on their own corpora.
+
+\mypar{Human gold labels.}
+We draw a stratified sample of failed episodes, balanced over
+(modality, judge blame category) with a floor per cell so that the rare
+benchmark-side categories, which carry the faithfulness argument, are estimable
+at all rather than swamped by \texttt{model\_capability}. Annotators receive a
+blind packet: the same task description and step-indexed trajectory the judge
+read, the identical closed taxonomy, and no sight of the judge's verdict, which
+removes the anchoring that makes post-hoc ``does this look right?'' review
+worthless. Each episode is labelled independently by at least two annotators.
+We report Cohen's $\kappa$ between the human consensus and the judge on the
+10-category taxonomy and on the three-bucket grouping
+(agent / tool / benchmark), plus inter-annotator $\kappa$ as the ceiling any
+automated judge could reach on this task. The bucket-level number is the one
+the paper's conclusions rest on: confusing \texttt{model\_capability} with
+\texttt{agent\_scaffolding} barely moves the accountability picture, whereas
+confusing agent-side with benchmark-side moves it entirely.
+
+\mypar{Swapping the judge's backbone.}
+A judge that only ever runs on one model family cannot separate what the
+trajectory shows from what that family believes about trajectories. The
+investigator's driver is a Protocol, so the backbone is a call-time argument:
+alongside the two Claude drivers we ship \texttt{CodexDriver}, which runs the
+identical recipe, prompts, and output schema through \texttt{codex exec} on a
+non-Anthropic model. Re-judging the same episodes on both backbones yields
+per-episode agreement and, separately, the shift in the aggregate blame
+distribution. The distinction matters: the corpus-level claim
+(\S\ref{sec:exp-judge-results}) needs the \emph{distribution} to be stable, and
+a judge pair can disagree on individual hard episodes while agreeing on the
+shape of the corpus.
+
+In a pilot on six MiniWoB episodes, a Sonnet-class judge and a GPT-5.4 judge
+selected the same outcome and the same primary blame on every episode
+($\kappa{=}1.0$), including the two episodes both attributed to
+\texttt{action\_space\_limited} rather than to the model. Six short episodes
+from one benchmark cannot bound cross-backbone disagreement and we do not
+present this as an estimate: MiniWoB trajectories are brief and unusually
+legible, which is the easy end of the judging task. It establishes that the
+comparison runs end to end and that the closed taxonomy transfers across model
+families without prompt surgery. The corpus-scale swap is the number that
+belongs in this table.
+
+\mypar{Reproducing these checks.}
+\begin{verbatim}
+# 1. human study
+judge_validation.py sample  <results> --n 100 --out study/
+judge_validation.py packet  study/ --annotator <name>
+judge_validation.py score   study/ --labels study/labels-*.json
+
+# 2. backbone swap
+judge_validation.py snapshot <results> --label claude --out claude.json
+ch-investigate run <results> --driver codex --overwrite
+judge_validation.py snapshot <results> --label codex  --out codex.json
+judge_validation.py swap claude.json codex.json
+\end{verbatim}
 
 % \newpage
 

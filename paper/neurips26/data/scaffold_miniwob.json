@@ -1,0 +1,28 @@
+{
+  "label_a": "Genny",
+  "label_b": "ReAct",
+  "n_shared": 124,
+  "pass_a": 82,
+  "pass_b": 86,
+  "agreement": 0.8870967741935484,
+  "only_a": [
+    "bisect-angle",
+    "click-collapsible-nodelay",
+    "form-sequence",
+    "guess-number",
+    "order-food"
+  ],
+  "only_b": [
+    "choose-date-easy",
+    "click-tab-2-medium",
+    "count-shape",
+    "drag-cube",
+    "enter-date",
+    "login-user-popup",
+    "multi-orderings",
+    "scroll-text-2",
+    "search-engine"
+  ],
+  "mcnemar_p": 0.4239501953125,
+  "spearman_rho": 0.7439983727804863
+}

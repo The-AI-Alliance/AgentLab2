@@ -1,0 +1,1268 @@
+=== calc.py:get_conference_city_in_order
+--- upstream
++++ cube
+@@ -2,6 +2,6 @@
+     v2 = v1['csv_path']
+-    with open(v2, 'r') as v4:
+-        v5 = csv.reader(v4)
+-    next(v5)
+-    v3 = [v6[2] for v6 in v5]
+-    return v3
++    with open(v2, 'r') as v3:
++        v4 = csv.reader(v3)
++        next(v4)
++        v5 = [v6[2] for v6 in v4]
++    return v5
+
+=== chrome.py:get_active_tab_info
+--- upstream
++++ cube
+@@ -20,4 +20,4 @@
+                 try:
+-                    v12.goto(v2, wait_until='load', timeout=v7)
+-                    v12.wait_for_load_state('load', timeout=v7)
++                    v12.goto(v2, wait_until='networkidle', timeout=v7)
++                    v12.wait_for_load_state('networkidle', timeout=v7)
+                     v11 = {'title': v12.title(), 'url': v12.url, 'content': v12.content()}
+
+=== chrome.py:get_extensions_installed_from_shop
+--- upstream
++++ cube
+@@ -8,3 +8,3 @@
+         if 'arm' in platform.machine():
+-            v10 = v0.controller.execute_python_command("import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Extensions/'))")['output'].strip()
++            v5 = v0.controller.execute_python_command("import os; print(os.path.join(os.getenv('HOME'), 'snap/chromium/common/chromium/Default/Extensions/'))")['output'].strip()
+         else:
+@@ -21,6 +21,6 @@
+                 if os.path.isfile(v9):
+-                    with open(v9, 'r') as v11:
++                    with open(v9, 'r') as v10:
+                         try:
+-                            v12 = json.load(v11)
+-                            v3.append(v12)
++                            v11 = json.load(v10)
++                            v3.append(v11)
+                         except json.JSONDecodeError:
+
+=== chrome.py:get_gotoRecreationPage_and_get_html_content
+--- upstream
++++ cube
+@@ -11,3 +11,3 @@
+         import urllib.request
+-        v12 = urllib.request.urlopen('http://www.google.com', timeout=10)
++        urllib.request.urlopen('http://www.google.com', timeout=10)
+     except Exception as v10:
+@@ -16,38 +16,38 @@
+         try:
+-            with sync_playwright() as v13:
++            with sync_playwright() as v12:
+                 try:
+-                    v19 = v13.chromium.connect_over_cdp(v6)
++                    v18 = v12.chromium.connect_over_cdp(v6)
+                 except Exception as v10:
+-                    v26 = 'chromium' if 'arm' in platform.machine() else 'google-chrome'
+-                    v27 = [v26, '--remote-debugging-port=1337', '--no-sandbox', '--disable-web-security', '--disable-features=VizDisplayCompositor', '--disable-dev-shm-usage', '--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36']
++                    v25 = 'chromium' if 'arm' in platform.machine() else 'google-chrome'
++                    v26 = [v25, '--remote-debugging-port=1337', '--no-sandbox', '--disable-web-security', '--disable-features=VizDisplayCompositor', '--disable-dev-shm-usage', '--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36']
+                     if v5:
+-                        v27.append(f'--proxy-server=127.0.0.1:18888')
+-                    v28 = json.dumps({'command': v27, 'shell': False})
+-                    v29 = {'Content-Type': 'application/json'}
+-                    requests.post(v7 + '/setup/launch', headers=v29, data=v28)
++                        v26.append('--proxy-server=127.0.0.1:18888')
++                    v27 = json.dumps({'command': v26, 'shell': False})
++                    v28 = {'Content-Type': 'application/json'}
++                    requests.post(v7 + '/setup/launch', headers=v28, data=v27)
+                     time.sleep(8)
+-                    v19 = v13.chromium.connect_over_cdp(v6)
+-                v14 = v19.new_page()
+-                v14.set_default_timeout(v9)
+-                v14.set_extra_http_headers({'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8', 'Accept-Language': 'en-US,en;q=0.9', 'Accept-Encoding': 'gzip, deflate, br', 'DNT': '1', 'Connection': 'keep-alive', 'Upgrade-Insecure-Requests': '1'})
+-                v15 = ['https://www.recreation.gov/', 'http://www.recreation.gov/', 'https://recreation.gov/']
+-                v16 = None
+-                for v17 in v15:
++                    v18 = v12.chromium.connect_over_cdp(v6)
++                v13 = v18.new_page()
++                v13.set_default_timeout(v9)
++                v13.set_extra_http_headers({'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8', 'Accept-Language': 'en-US,en;q=0.9', 'Accept-Encoding': 'gzip, deflate, br', 'DNT': '1', 'Connection': 'keep-alive', 'Upgrade-Insecure-Requests': '1'})
++                v14 = ['https://www.recreation.gov/', 'http://www.recreation.gov/', 'https://recreation.gov/']
++                v15 = None
++                for v16 in v14:
+                     try:
+-                        v30 = ['domcontentloaded', 'load', 'networkidle']
+-                        for v31 in v30:
++                        v29 = ['domcontentloaded', 'load', 'networkidle']
++                        for v30 in v29:
+                             try:
+-                                v14.goto(v17, wait_until=v31, timeout=v9)
+-                                v16 = v17
++                                v13.goto(v16, wait_until=v30, timeout=v9)
++                                v15 = v16
+                                 break
+-                            except Exception as v35:
++                            except Exception as v34:
+                                 continue
+-                        if v16:
++                        if v15:
+                             break
+-                    except Exception as v20:
++                    except Exception as v19:
+                         continue
+-                if not v16:
++                if not v15:
+                     raise Exception('Failed to navigate to any recreation.gov URL variant')
+                 try:
+-                    v14.wait_for_load_state('networkidle', timeout=30000)
++                    v13.wait_for_load_state('networkidle', timeout=30000)
+                 except Exception as v10:
+@@ -55,4 +55,4 @@
+                 try:
+-                    v14.wait_for_selector('input#hero-search-input', state='visible', timeout=v9)
+-                    v14.fill('input#hero-search-input', 'Diamond')
++                    v13.wait_for_selector('input#hero-search-input', state='visible', timeout=v9)
++                    v13.fill('input#hero-search-input', 'Diamond')
+                 except Exception as v10:
+@@ -60,4 +60,4 @@
+                 try:
+-                    v14.wait_for_selector('button.nav-search-button', state='visible', timeout=v9)
+-                    v14.click('button.nav-search-button')
++                    v13.wait_for_selector('button.nav-search-button', state='visible', timeout=v9)
++                    v13.click('button.nav-search-button')
+                     time.sleep(10)
+@@ -66,5 +66,5 @@
+                 try:
+-                    v14.wait_for_selector('.search-result-highlight--success', state='visible', timeout=v9)
+-                    with v14.expect_popup() as v32:
+-                        v14.click('.search-result-highlight--success')
++                    v13.wait_for_selector('.search-result-highlight--success', state='visible', timeout=v9)
++                    with v13.expect_popup() as v31:
++                        v13.click('.search-result-highlight--success')
+                     time.sleep(30)
+@@ -73,6 +73,6 @@
+                 try:
+-                    v21 = v32.value
+-                    v21.set_default_timeout(v9)
+-                    v21.wait_for_load_state('networkidle', timeout=v9)
+-                    v22 = v21.title()
++                    v20 = v31.value
++                    v20.set_default_timeout(v9)
++                    v20.wait_for_load_state('networkidle', timeout=v9)
++                    v21 = v20.title()
+                     time.sleep(2)
+@@ -81,13 +81,13 @@
+                 try:
+-                    v23 = ['button.next-available', "button[class*='next-available']", "button[class*='next']", '.next-available', "[data-testid*='next']"]
+-                    v24 = False
+-                    for v25 in v23:
++                    v22 = ['button.next-available', "button[class*='next-available']", "button[class*='next']", '.next-available', "[data-testid*='next']"]
++                    v23 = False
++                    for v24 in v22:
+                         try:
+-                            v21.wait_for_selector(v25, state='visible', timeout=30000)
+-                            v21.click(v25, timeout=30000)
+-                            v24 = True
++                            v20.wait_for_selector(v24, state='visible', timeout=30000)
++                            v20.click(v24, timeout=30000)
++                            v23 = True
+                             break
+-                        except Exception as v33:
++                        except Exception as v32:
+                             continue
+-                    if not v24:
++                    if not v23:
+                         pass
+@@ -95,36 +95,36 @@
+                     pass
+-                v18 = {}
+-                v18['expected'] = {}
++                v17 = {}
++                v17['expected'] = {}
+                 try:
+                     if v1['selector'] == 'class':
+-                        v34 = v1['class']
++                        v33 = v1['class']
+                         if 'order' in v1.keys():
+                             try:
+-                                v36 = v21.query_selector_all('.' + v34)
+-                                v37 = int(v1['order'])
+-                                if len(v36) > v37:
+-                                    v39 = v36[v37].text_content()
+-                                    if v39:
+-                                        v39 = v39.strip()
+-                                    v18['expected'][v34] = v39
++                                v35 = v20.query_selector_all('.' + v33)
++                                v36 = int(v1['order'])
++                                if len(v35) > v36:
++                                    v38 = v35[v36].text_content()
++                                    if v38:
++                                        v38 = v38.strip()
++                                    v17['expected'][v33] = v38
+                                 else:
+-                                    v18['expected'][v34] = '__EVALUATION_FAILED__'
++                                    v17['expected'][v33] = '__EVALUATION_FAILED__'
+                             except Exception as v10:
+-                                v18['expected'][v34] = '__EVALUATION_FAILED__'
++                                v17['expected'][v33] = '__EVALUATION_FAILED__'
+                         else:
+                             try:
+-                                v38 = v21.query_selector('.' + v34)
+-                                if v38:
+-                                    v39 = v38.text_content()
+-                                    if v39:
+-                                        v39 = v39.strip()
+-                                    v18['expected'][v34] = v39
++                                v37 = v20.query_selector('.' + v33)
++                                if v37:
++                                    v38 = v37.text_content()
++                                    if v38:
++                                        v38 = v38.strip()
++                                    v17['expected'][v33] = v38
+                                 else:
+-                                    v18['expected'][v34] = '__EVALUATION_FAILED__'
++                                    v17['expected'][v33] = '__EVALUATION_FAILED__'
+                             except Exception as v10:
+-                                v18['expected'][v34] = '__EVALUATION_FAILED__'
++                                v17['expected'][v33] = '__EVALUATION_FAILED__'
+                 except Exception as v10:
+-                    v18['expected'] = {'extraction_error': '__EVALUATION_FAILED__'}
+-                v19.close()
+-                return v18
++                    v17['expected'] = {'extraction_error': '__EVALUATION_FAILED__'}
++                v18.close()
++                return v17
+         except Exception as v10:
+
+=== chrome.py:get_info_from_website
+--- upstream
++++ cube
+@@ -15,3 +15,3 @@
+                 if v8:
+-                    v19.append(f'--proxy-server=127.0.0.1:18888')
++                    v19.append('--proxy-server=127.0.0.1:18888')
+                 v20 = json.dumps({'command': v19, 'shell': False})
+
+=== chrome.py:get_macys_product_url_parse
+--- upstream
++++ cube
+@@ -40,3 +40,3 @@
+             if v12 == 'Price_discount_range':
+-                if v7[v12] is not None and '50_PERCENT_ off & more' in v7[v12] and (not '30_PERCENT_ off & more' in v7[v12]) and (not '20_PERCENT_ off & more' in v7[v12]):
++                if v7[v12] is not None and '50_PERCENT_ off & more' in v7[v12] and ('30_PERCENT_ off & more' not in v7[v12]) and ('20_PERCENT_ off & more' not in v7[v12]):
+                     v2[v12] = '50_PERCENT_ off & more'
+
+=== chrome.py:get_page_info
+--- upstream
++++ cube
+@@ -12,45 +12,26 @@
+                 try:
+-                    v12 = v11.chromium.connect_over_cdp(v6)
++                    v13 = v11.chromium.connect_over_cdp(v6)
+                 except Exception as v10:
+-                    try:
+-                        v23 = (v0.controller.get_vm_machine() or '').lower()
+-                    except Exception as v16:
+-                        v23 = ''
+-                    v17 = 'arm' in v23 or 'aarch' in v23
+-                    v18 = ['chromium', '--remote-debugging-port=1337'] if v17 else ['google-chrome', '--remote-debugging-port=1337']
+-                    v19 = json.dumps({'command': v18, 'shell': False})
+-                    v20 = {'Content-Type': 'application/json'}
+-                    requests.post(f'http://{v2}:{v4}/setup/launch', headers=v20, data=v19, timeout=30)
++                    platform.machine()
++                    if 'arm' in platform.machine():
++                        v17 = json.dumps({'command': ['chromium', '--remote-debugging-port=1337'], 'shell': False})
++                    else:
++                        v17 = json.dumps({'command': ['google-chrome', '--remote-debugging-port=1337'], 'shell': False})
++                    v16 = {'Content-Type': 'application/json'}
++                    requests.post('http://' + v2 + ':' + v4 + '/setup' + '/launch', headers=v16, data=v17)
+                     time.sleep(5)
+-                    v12 = v11.chromium.connect_over_cdp(v6)
++                    v13 = v11.chromium.connect_over_cdp(v6)
++                v12 = v13.new_page()
++                v12.set_default_timeout(v8)
++                v12.goto(v5, wait_until='networkidle', timeout=v8)
+                 try:
+-                    if getattr(v12, 'contexts', None) and len(v12.contexts) > 0:
+-                        v21 = v12.contexts[0]
+-                        v22 = v21.new_page()
+-                    else:
+-                        v21 = v12.new_context()
+-                        v22 = v21.new_page()
++                    v12.wait_for_load_state('networkidle', timeout=v8)
++                    v14 = v12.title()
++                    v5 = v12.url
++                    v15 = {'title': v14, 'url': v5, 'content': v12.content()}
++                except TimeoutError:
++                    v15 = {'title': 'Load timeout', 'url': v12.url, 'content': v12.content()}
+                 except Exception as v10:
+-                    v12.close()
+-                    raise
+-                v22.set_default_timeout(v8)
+-                v22.goto(v5, wait_until='networkidle', timeout=v8)
+-                try:
+-                    v22.wait_for_load_state('networkidle', timeout=v8)
+-                    v13 = v22.title()
+-                    v14 = v22.url
+-                    v15 = {'title': v13, 'url': v14, 'content': v22.content()}
+-                except TimeoutError:
+-                    v15 = {'title': 'Load timeout', 'url': v22.url, 'content': v22.content()}
+-                except Exception as v10:
+-                    v15 = {'title': 'Error encountered', 'url': v22.url, 'content': v22.content()}
+-                try:
+-                    v22.close()
+-                except Exception:
+-                    pass
+-                try:
+-                    pass
+-                except Exception:
+-                    pass
+-                v12.close()
++                    v15 = {'title': 'Error encountered', 'url': v12.url, 'content': v12.content()}
++                v13.close()
+                 return v15
+
+=== chrome.py:is_shortcut_on_desktop
+--- upstream
++++ cube
+@@ -2,34 +2,10 @@
+     if v1['type'] == 'name':
+-        v2 = v1['name']
+-        for v3, v4 in v0.items():
+-            v5 = 'Name=' + v2 + '\n'
+-            if v5 in v4:
++        for v2, v3 in v0.items():
++            if 'Name=' + v1['name'] + '\n' in v3:
+                 return 1.0
+-            v6 = v4.split('\n')
+-            for v7 in v6:
+-                if v7.startswith('Name='):
+-                    v9 = v7[5:]
+-                    if v9 == v2:
+-                        return 1.0
+-                    elif v2.lower() in v9.lower():
+-                        return 1.0
+-                    elif v9.lower() in v2.lower():
+-                        return 1.0
+         return 0.0
+     elif v1['type'] == 'exec':
+-        v8 = v1['exec']
+-        for v3, v4 in v0.items():
+-            v5 = 'Exec=' + v8 + '\n'
+-            if v5 in v4:
++        for v2, v3 in v0.items():
++            if 'Exec=' + v1['exec'] + '\n' in v3:
+                 return 1.0
+-            v6 = v4.split('\n')
+-            for v7 in v6:
+-                if v7.startswith('Exec='):
+-                    v10 = v7[5:]
+-                    if v10 == v8:
+-                        return 1.0
+-                    elif v8 in v10:
+-                        return 1.0
+-                    elif v10 in v8:
+-                        return 1.0
+         return 0.0
+
+=== docs.py:check_tabstops
+--- upstream
++++ cube
+@@ -4,8 +4,8 @@
+     try:
+-        v10 = Document(v0)
+-        v11 = Document(v1)
++        v9 = Document(v0)
++        v10 = Document(v1)
+     except Exception as v2:
+         return 0.0
+-    v3 = [v19 for v19 in v10.paragraphs if v19.text.strip()]
+-    v4 = [v19 for v19 in v11.paragraphs if v19.text.strip()]
++    v3 = [v18 for v18 in v9.paragraphs if v18.text.strip()]
++    v4 = [v18 for v18 in v10.paragraphs if v18.text.strip()]
+     if len(v3) != len(v4):
+@@ -13,27 +13,29 @@
+     if kwargs.get('word_number_split_by_tabstop', None) is not None:
+-        v12 = kwargs['word_number_split_by_tabstop']
+-        v13 = kwargs.get('index', 0)
+-        for v14 in v3:
+-            v20 = v14.text.split('\t')
+-            if len(v20) == 0:
++        v11 = kwargs['word_number_split_by_tabstop']
++        v12 = kwargs.get('index', 0)
++        for v13 in v3:
++            v19 = v13.text.split('\t')
++            if len(v19) == 0:
+                 return 0.0
+-            v21 = list(filter(lambda x: x.strip(), re.split('\\s', v20[v13])))
+-            if len(v21) != v12:
++            v20 = list(filter(lambda x: x.strip(), re.split('\\s', v19[v12])))
++            if len(v20) != v11:
+                 return 0.0
+-    v5 = v11.sections[0]
++    v5 = v10.sections[0]
+     v6 = v5.page_width - v5.left_margin - v5.right_margin
+-    v7 = lambda x: x.alignment == WD_TAB_ALIGNMENT.CLEAR or (x.alignment == WD_TAB_ALIGNMENT.LEFT and x.position == 0)
+-    v8 = 0.0
+-    for v14, v15 in zip(v3, v4):
+-        v16 = [v24 for v24 in v14.paragraph_format.tab_stops if not v7(v24)]
+-        v17 = [v24 for v24 in v15.paragraph_format.tab_stops if not v7(v24)]
+-        if len(v16) != len(v17):
++
++    def ignore_tabs(x):
++        return x.alignment == WD_TAB_ALIGNMENT.CLEAR or (x.alignment == WD_TAB_ALIGNMENT.LEFT and x.position == 0)
++    v7 = 0.0
++    for v13, v14 in zip(v3, v4):
++        v15 = [v23 for v23 in v13.paragraph_format.tab_stops if not ignore_tabs(v23)]
++        v16 = [v23 for v23 in v14.paragraph_format.tab_stops if not ignore_tabs(v23)]
++        if len(v15) != len(v16):
+             return 0.0
+-        v18 = 0.0
+-        for v22, v23 in zip(v16, v17):
+-            if v22.alignment != v23.alignment:
++        v17 = 0.0
++        for v21, v22 in zip(v15, v16):
++            if v21.alignment != v22.alignment:
+                 return 0.0
+-            v18 += abs(v22.position - v23.position)
+-        v8 += v18 / v6
+-    v9 = 1 - v8 / len(v3)
+-    return v9
++            v17 += abs(v21.position - v22.position)
++        v7 += v17 / v6
++    v8 = 1 - v7 / len(v3)
++    return v8
+
+=== docs.py:compare_image_text
+--- upstream
++++ cube
+@@ -29,3 +29,3 @@
+                                 v5 = subprocess.run(['xwdtopnm', v0], stdout=subprocess.PIPE, check=True)
+-                                v20 = subprocess.run(['pnmtopng'], input=v5.stdout, stdout=v19, check=True)
++                                subprocess.run(['pnmtopng'], input=v5.stdout, stdout=v19, check=True)
+                             v3 = v2
+
+=== docs.py:read_x11_image
+--- upstream
++++ cube
+@@ -4,26 +4,26 @@
+         v3 = struct.unpack('>I', v2[0:4])[0]
+-        v4 = struct.unpack('>I', v2[4:8])[0]
+-        v5 = struct.unpack('>I', v2[8:12])[0]
+-        v6 = struct.unpack('>I', v2[12:16])[0]
+-        v7 = struct.unpack('>I', v2[16:20])[0]
+-        v8 = struct.unpack('>I', v2[20:24])[0]
++        struct.unpack('>I', v2[4:8])[0]
++        struct.unpack('>I', v2[8:12])[0]
++        v4 = struct.unpack('>I', v2[12:16])[0]
++        v5 = struct.unpack('>I', v2[16:20])[0]
++        v6 = struct.unpack('>I', v2[20:24])[0]
+         v1.seek(v3)
+-        if v6 == 32:
+-            v9 = 4
+-            v10 = v7 * v8
+-            v11 = v1.read(v10 * v9)
+-            v12 = np.frombuffer(v11, dtype=np.uint8)
+-            v12 = v12.reshape((v8, v7, v9))
+-            v13 = v12[:, :, [2, 1, 0]]
+-            v14 = Image.fromarray(v13, 'RGB')
+-            return v14
+-        elif v6 == 24:
+-            v9 = 3
+-            v10 = v7 * v8
+-            v11 = v1.read(v10 * v9)
+-            v12 = np.frombuffer(v11, dtype=np.uint8)
+-            v12 = v12.reshape((v8, v7, v9))
+-            v14 = Image.fromarray(v12, 'RGB')
+-            return v14
++        if v4 == 32:
++            v7 = 4
++            v8 = v5 * v6
++            v9 = v1.read(v8 * v7)
++            v10 = np.frombuffer(v9, dtype=np.uint8)
++            v10 = v10.reshape((v6, v5, v7))
++            v11 = v10[:, :, [2, 1, 0]]
++            v12 = Image.fromarray(v11, 'RGB')
++            return v12
++        elif v4 == 24:
++            v7 = 3
++            v8 = v5 * v6
++            v9 = v1.read(v8 * v7)
++            v10 = np.frombuffer(v9, dtype=np.uint8)
++            v10 = v10.reshape((v6, v5, v7))
++            v12 = Image.fromarray(v10, 'RGB')
++            return v12
+         else:
+-            raise ValueError(f'Unsupported X11 pixel depth: {v6}. Only 24-bit and 32-bit formats are supported.')
++            raise ValueError(f'Unsupported X11 pixel depth: {v4}. Only 24-bit and 32-bit formats are supported.')
+
+=== slides.py:check_left_panel
+--- upstream
++++ cube
+@@ -1,6 +1,5 @@
+ def check_left_panel(v0):
+-    v1 = {'st': 'uri:deskat:state.at-spi.gnome.org', 'cp': 'uri:deskat:component.at-spi.gnome.org'}
+-    v2 = ET.fromstring(v0)
+-    for v3 in v2.iter('document-frame'):
+-        if v3.attrib.get('name') == 'Slides View':
++    v1 = ET.fromstring(v0)
++    for v2 in v1.iter('document-frame'):
++        if v2.attrib.get('name') == 'Slides View':
+             return 1.0
+
+=== slides.py:check_page_number_colors
+--- upstream
++++ cube
+@@ -3,89 +3,34 @@
+ 
+-    def parse_rgb(v4):
+-        if v4 is None:
+-            return None
+-        v4 = v4.lstrip('#')
+-        if len(v4) != 6:
+-            return None
+-        try:
+-            v7 = int(v4[0:2], 16)
+-            v8 = int(v4[2:4], 16)
+-            v9 = int(v4[4:6], 16)
+-            return (v7, v8, v9)
+-        except ValueError:
+-            return None
++    def is_red(rgb_str, threshold=50):
++        v5, v6, v7 = (int(rgb_str[1:3], 16), int(rgb_str[3:5], 16), int(rgb_str[5:7], 16))
++        return v5 > v6 + threshold and v5 > v7 + threshold
+ 
+-    def is_red(v3, threshold=50):
+-        if v3 is None:
+-            return False
+-        v7, v8, v9 = v3
+-        return v7 > v8 + threshold and v7 > v9 + threshold
++    def is_blue(rgb_str, threshold=50):
++        v5, v6, v7 = (int(rgb_str[1:3], 16), int(rgb_str[3:5], 16), int(rgb_str[5:7], 16))
++        return v7 > v6 + threshold and v7 > v5 + threshold
+ 
+-    def is_blue(v3, threshold=50):
+-        if v3 is None:
+-            return False
+-        v7, v8, v9 = v3
+-        return v9 > v8 + threshold and v9 > v7 + threshold
++    def is_green(rgb_str, threshold=50):
++        v5, v6, v7 = (int(rgb_str[1:3], 16), int(rgb_str[3:5], 16), int(rgb_str[5:7], 16))
++        return v6 > v5 + threshold and v6 > v7 + threshold
+ 
+-    def is_green(v3, threshold=50):
+-        if v3 is None:
+-            return False
+-        v7, v8, v9 = v3
+-        return v8 > v7 + threshold and v8 > v9 + threshold
+-
+-    def is_black(v3, threshold=50):
+-        if v3 is None:
+-            return False
+-        v7, v8, v9 = v3
+-        return v7 < threshold and v8 < threshold and (v9 < threshold)
+-    with zipfile.ZipFile(v0, 'r') as v5:
+-        v6 = 'ppt/slideMasters/slideMaster1.xml'
+-        with v5.open(v6) as v10:
+-            v11 = ET.parse(v10)
+-            v12 = v11.getroot()
+-            v13 = {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main', 'p': 'http://schemas.openxmlformats.org/presentationml/2006/main'}
+-            v14 = v12.find('.//p:ph[@type="sldNum"]', v13)
+-            v15 = None
+-            if v14 is not None:
+-                v16 = v14.find('.//a:solidFill//a:srgbClr', v13)
+-                if v16 is not None:
+-                    v15 = v16.get('val')
+-            if v15 is None:
+-                v17 = v12.findall('.//p:ph', v13)
+-                for v18 in v17:
+-                    v21 = v18.get('type')
+-                    if v21 == 'sldNum' or v21 == 'ftr' or v21 == 'dt':
+-                        v16 = v18.find('.//a:solidFill//a:srgbClr', v13)
+-                        if v16 is not None:
+-                            v15 = v16.get('val')
+-                            break
+-            if v15 is None:
+-                v19 = v12.findall('.//a:rPr//a:solidFill//a:srgbClr', v13)
+-                if v19:
+-                    for v16 in reversed(v19):
+-                        v22 = v16.get('val')
+-                        if v22 and v22 != '000000':
+-                            v15 = v22
+-                            break
+-            if v15 is None:
+-                v20 = v12.findall('.//a:solidFill//a:srgbClr', v13)
+-                for v16 in reversed(v20):
+-                    v22 = v16.get('val')
+-                    if v22 and v22 != '000000':
+-                        v15 = v22
+-                        break
+-                if v15 is None and v20:
+-                    v15 = v20[-1].get('val')
+-    if v15 is None:
++    def is_black(rgb_str, threshold=50):
++        v5, v6, v7 = (int(rgb_str[1:3], 16), int(rgb_str[3:5], 16), int(rgb_str[5:7], 16))
++        return v5 < threshold and v6 < threshold and (v7 < threshold)
++    with zipfile.ZipFile(v0, 'r') as v3:
++        v4 = 'ppt/slideMasters/slideMaster1.xml'
++        with v3.open(v4) as v8:
++            v9 = ET.parse(v8)
++            v10 = v9.getroot()
++            v11 = {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main', 'p': 'http://schemas.openxmlformats.org/presentationml/2006/main'}
++            v12 = v10.findall('.//a:solidFill//a:srgbClr', v11)
++            v13 = v12[-2].get('val')
++    if v13 is None:
+         return 0
+-    v3 = parse_rgb(v15)
+-    if v3 is None:
++    elif v2 == 'red' and (not is_red(v13)):
+         return 0
+-    if v2 == 'red' and (not is_red(v3)):
++    elif v2 == 'blue' and (not is_blue(v13)):
+         return 0
+-    elif v2 == 'blue' and (not is_blue(v3)):
++    elif v2 == 'green' and (not is_green(v13)):
+         return 0
+-    elif v2 == 'green' and (not is_green(v3)):
+-        return 0
+-    elif v2 == 'black' and (not is_black(v3)):
++    elif v2 == 'black' and (not is_black(v13)):
+         return 0
+
+=== slides.py:check_slide_numbers_color
+--- upstream
++++ cube
+@@ -6,4 +6,3 @@
+                 if v4.text.isdigit():
+-                    v5 = v4.text
+-                    v6 = get_master_placeholder_color(v1)
+-                    return 1 if v6 is not None and is_red_color(v6) else 0
++                    v5 = get_master_placeholder_color(v1)
++                    return 1 if v5 is not None and is_red_color(v5) else 0
+
+=== slides.py:compare_pptx_files
+--- upstream
++++ cube
+@@ -6,3 +6,3 @@
+         enable_debug_logging()
+-        debug_logger.debug(f'=== COMPARING PPTX FILES ===')
++        debug_logger.debug('=== COMPARING PPTX FILES ===')
+         debug_logger.debug(f'File 1: {v0}')
+@@ -21,5 +21,2 @@
+         return abs(val1 - val2) / max(abs(val1), abs(val2)) <= tolerance
+-
+-    def nonempty_runs(para):
+-        return [v38 for v38 in para.runs if (v38.text or '').strip() != '']
+     v6 = options.get('examine_number_of_slides', True)
+@@ -62,5 +59,5 @@
+             elif v34.type == 5:
+-                v44 = slide.slide_layout.slide_master.background.fill
+-                if v44.type == 1:
+-                    return v44.fore_color.rgb
++                v43 = slide.slide_layout.slide_master.background.fill
++                if v43.type == 1:
++                    return v43.fore_color.rgb
+                 else:
+@@ -148,70 +145,65 @@
+             if v36.shape_type == MSO_SHAPE_TYPE.TABLE:
+-                v39 = v36.table
+-                v40 = v37.table
++                v38 = v36.table
++                v39 = v37.table
+                 if v4:
+-                    debug_logger.debug(f'  Shape {v33} - Comparing TABLE with {len(v39.rows)} rows and {len(v39.columns)} columns')
+-                    debug_logger.debug(f'  Shape {v33} - Table2 has {len(v40.rows)} rows and {len(v40.columns)} columns')
+-                if len(v39.rows) != len(v40.rows) or len(v39.columns) != len(v40.columns):
++                    debug_logger.debug(f'  Shape {v33} - Comparing TABLE with {len(v38.rows)} rows and {len(v38.columns)} columns')
++                    debug_logger.debug(f'  Shape {v33} - Table2 has {len(v39.rows)} rows and {len(v39.columns)} columns')
++                if len(v38.rows) != len(v39.rows) or len(v38.columns) != len(v39.columns):
+                     if v4:
+                         debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Table dimensions differ:')
+-                        debug_logger.debug(f'      Table1: {len(v39.rows)} rows x {len(v39.columns)} columns')
+-                        debug_logger.debug(f'      Table2: {len(v40.rows)} rows x {len(v40.columns)} columns')
+-                    return 0
+-                for v41 in range(len(v39.rows)):
+-                    for v45 in range(len(v39.columns)):
+-                        v54 = v39.cell(v41, v45)
+-                        v55 = v40.cell(v41, v45)
+-                        if len(v54.text_frame.paragraphs) != len(v55.text_frame.paragraphs):
++                        debug_logger.debug(f'      Table1: {len(v38.rows)} rows x {len(v38.columns)} columns')
++                        debug_logger.debug(f'      Table2: {len(v39.rows)} rows x {len(v39.columns)} columns')
++                    return 0
++                for v40 in range(len(v38.rows)):
++                    for v44 in range(len(v38.columns)):
++                        v51 = v38.cell(v40, v44)
++                        v52 = v39.cell(v40, v44)
++                        if len(v51.text_frame.paragraphs) != len(v52.text_frame.paragraphs):
+                             if v4:
+-                                debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v41},{v45}] - Different number of paragraphs:')
+-                                debug_logger.debug(f'      Cell1 paragraphs: {len(v54.text_frame.paragraphs)}')
+-                                debug_logger.debug(f'      Cell2 paragraphs: {len(v55.text_frame.paragraphs)}')
+-                            return 0
+-                        for v42, (v46, v47) in enumerate(zip(v54.text_frame.paragraphs, v55.text_frame.paragraphs)):
+-                            v48 = v46.runs
+-                            v49 = v47.runs
+-                            if (v46.text or '').strip() == '' and (v47.text or '').strip() == '':
+-                                v48 = nonempty_runs(v46)
+-                                v49 = nonempty_runs(v47)
+-                            if len(v48) != len(v49):
+-                                if v4:
+-                                    debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v41},{v45}], Para {v42} - Different number of runs:')
+-                                    debug_logger.debug(f'      Para1 runs: {len(v48)}')
+-                                    debug_logger.debug(f'      Para2 runs: {len(v49)}')
+-                                return 0
+-                            for v66, (v56, v57) in enumerate(zip(v48, v49)):
+-                                if hasattr(v56.font.color, 'rgb') and hasattr(v57.font.color, 'rgb'):
+-                                    if v56.font.color.rgb != v57.font.color.rgb and v14:
+-                                        if v4:
+-                                            debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v41},{v45}], Para {v42}, Run {v66} - Font color differs:')
+-                                            debug_logger.debug(f'      Color1: {v56.font.color.rgb} vs Color2: {v57.font.color.rgb}')
+-                                            debug_logger.debug(f"      Cell text: '{v54.text.strip()}' vs '{v55.text.strip()}'")
+-                                            debug_logger.debug(f"      Run text: '{v56.text}' vs '{v57.text}'")
+-                                        return 0
+-                                if v56.font.bold != v57.font.bold:
+-                                    if not ((v56.font.bold is None or v56.font.bold is False) and (v57.font.bold is None or v57.font.bold is False)):
+-                                        if v4:
+-                                            debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v41},{v45}], Para {v42}, Run {v66} - Font bold differs:')
+-                                            debug_logger.debug(f'      Bold1: {v56.font.bold} vs Bold2: {v57.font.bold}')
+-                                            debug_logger.debug(f"      Run text: '{v56.text}' vs '{v57.text}'")
+-                                        return 0
+-                                if v56.font.italic != v57.font.italic:
+-                                    if not ((v56.font.italic is None or v56.font.italic is False) and (v57.font.italic is None or v57.font.italic is False)):
+-                                        if v4:
+-                                            debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v41},{v45}], Para {v42}, Run {v66} - Font italic differs:')
+-                                            debug_logger.debug(f'      Italic1: {v56.font.italic} vs Italic2: {v57.font.italic}')
+-                                            debug_logger.debug(f"      Run text: '{v56.text}' vs '{v57.text}'")
+-                                        return 0
+-                                if v56.font.underline != v57.font.underline:
+-                                    if v56.font.underline is not None and v57.font.underline is not None:
+-                                        if v4:
+-                                            debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v41},{v45}], Para {v42}, Run {v66} - Font underline differs:')
+-                                            debug_logger.debug(f'      Underline1: {v56.font.underline} vs Underline2: {v57.font.underline}')
+-                                            debug_logger.debug(f"      Run text: '{v56.text}' vs '{v57.text}'")
+-                                        return 0
+-                                    if v56.font.underline is None and v57.font.underline is True or (v56.font.underline is True and v57.font.underline is None):
+-                                        if v4:
+-                                            debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v41},{v45}], Para {v42}, Run {v66} - Font underline differs (None vs True):')
+-                                            debug_logger.debug(f'      Underline1: {v56.font.underline} vs Underline2: {v57.font.underline}')
+-                                            debug_logger.debug(f"      Run text: '{v56.text}' vs '{v57.text}'")
++                                debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v40},{v44}] - Different number of paragraphs:')
++                                debug_logger.debug(f'      Cell1 paragraphs: {len(v51.text_frame.paragraphs)}')
++                                debug_logger.debug(f'      Cell2 paragraphs: {len(v52.text_frame.paragraphs)}')
++                            return 0
++                        for v41, (v45, v46) in enumerate(zip(v51.text_frame.paragraphs, v52.text_frame.paragraphs)):
++                            if len(v45.runs) != len(v46.runs):
++                                if v4:
++                                    debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v40},{v44}], Para {v41} - Different number of runs:')
++                                    debug_logger.debug(f'      Para1 runs: {len(v45.runs)}')
++                                    debug_logger.debug(f'      Para2 runs: {len(v46.runs)}')
++                                return 0
++                            for v63, (v53, v54) in enumerate(zip(v45.runs, v46.runs)):
++                                if hasattr(v53.font.color, 'rgb') and hasattr(v54.font.color, 'rgb'):
++                                    if v53.font.color.rgb != v54.font.color.rgb and v14:
++                                        if v4:
++                                            debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v40},{v44}], Para {v41}, Run {v63} - Font color differs:')
++                                            debug_logger.debug(f'      Color1: {v53.font.color.rgb} vs Color2: {v54.font.color.rgb}')
++                                            debug_logger.debug(f"      Cell text: '{v51.text.strip()}' vs '{v52.text.strip()}'")
++                                            debug_logger.debug(f"      Run text: '{v53.text}' vs '{v54.text}'")
++                                        return 0
++                                if v53.font.bold != v54.font.bold:
++                                    if not ((v53.font.bold is None or v53.font.bold is False) and (v54.font.bold is None or v54.font.bold is False)):
++                                        if v4:
++                                            debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v40},{v44}], Para {v41}, Run {v63} - Font bold differs:')
++                                            debug_logger.debug(f'      Bold1: {v53.font.bold} vs Bold2: {v54.font.bold}')
++                                            debug_logger.debug(f"      Run text: '{v53.text}' vs '{v54.text}'")
++                                        return 0
++                                if v53.font.italic != v54.font.italic:
++                                    if not ((v53.font.italic is None or v53.font.italic is False) and (v54.font.italic is None or v54.font.italic is False)):
++                                        if v4:
++                                            debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v40},{v44}], Para {v41}, Run {v63} - Font italic differs:')
++                                            debug_logger.debug(f'      Italic1: {v53.font.italic} vs Italic2: {v54.font.italic}')
++                                            debug_logger.debug(f"      Run text: '{v53.text}' vs '{v54.text}'")
++                                        return 0
++                                if v53.font.underline != v54.font.underline:
++                                    if v53.font.underline is not None and v54.font.underline is not None:
++                                        if v4:
++                                            debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v40},{v44}], Para {v41}, Run {v63} - Font underline differs:')
++                                            debug_logger.debug(f'      Underline1: {v53.font.underline} vs Underline2: {v54.font.underline}')
++                                            debug_logger.debug(f"      Run text: '{v53.text}' vs '{v54.text}'")
++                                        return 0
++                                    if v53.font.underline is None and v54.font.underline is True or (v53.font.underline is True and v54.font.underline is None):
++                                        if v4:
++                                            debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33} (TABLE) - Cell [{v40},{v44}], Para {v41}, Run {v63} - Font underline differs (None vs True):')
++                                            debug_logger.debug(f'      Underline1: {v53.font.underline} vs Underline2: {v54.font.underline}')
++                                            debug_logger.debug(f"      Run text: '{v53.text}' vs '{v54.text}'")
+                                         return 0
+@@ -226,87 +218,82 @@
+                     return 0
+-                v42 = 0
+-                for v46, v47 in zip(v36.text_frame.paragraphs, v37.text_frame.paragraphs):
+-                    v42 += 1
++                v41 = 0
++                for v45, v46 in zip(v36.text_frame.paragraphs, v37.text_frame.paragraphs):
++                    v41 += 1
+                     if v17:
+                         from pptx.enum.text import PP_ALIGN
+-                        v52 = v46.alignment
+-                        v53 = v47.alignment
++                        v49 = v45.alignment
++                        v50 = v46.alignment
+                         if v4:
+-                            v58 = 'None' if v52 is None else getattr(v52, 'name', str(v52))
+-                            v59 = 'None' if v53 is None else getattr(v53, 'name', str(v53))
+-                            debug_logger.debug(f"    Slide {v28}, Shape {v33}, Para {v42} - Alignment: '{v58}' vs '{v59}'")
+-                            debug_logger.debug(f"    Slide {v28}, Shape {v33}, Para {v42} - Text: '{v46.text}' vs '{v47.text}'")
+-                        if v52 is None:
+-                            v52 = PP_ALIGN.LEFT
+-                        if v53 is None:
+-                            v53 = PP_ALIGN.LEFT
+-                        if v52 != v53:
++                            v55 = 'None' if v49 is None else getattr(v49, 'name', str(v49))
++                            v56 = 'None' if v50 is None else getattr(v50, 'name', str(v50))
++                            debug_logger.debug(f"    Slide {v28}, Shape {v33}, Para {v41} - Alignment: '{v55}' vs '{v56}'")
++                            debug_logger.debug(f"    Slide {v28}, Shape {v33}, Para {v41} - Text: '{v45.text}' vs '{v46.text}'")
++                        if v49 is None:
++                            v49 = PP_ALIGN.LEFT
++                        if v50 is None:
++                            v50 = PP_ALIGN.LEFT
++                        if v49 != v50:
+                             if v4:
+-                                v64 = getattr(v52, 'name', str(v52))
+-                                v65 = getattr(v53, 'name', str(v53))
+-                                debug_logger.debug(f"    MISMATCH: Slide {v28}, Shape {v33}, Para {v42} - Alignment differs: '{v64}' vs '{v65}'")
+-                            return 0
+-                    if v46.text != v47.text and v8:
+-                        return 0
+-                    if v46.level != v47.level and v9:
+-                        return 0
+-                    v48 = v46.runs
+-                    v49 = v47.runs
+-                    if (v46.text or '').strip() == '' and (v47.text or '').strip() == '':
+-                        v48 = nonempty_runs(v46)
+-                        v49 = nonempty_runs(v47)
+-                    if len(v48) != len(v49):
++                                v61 = getattr(v49, 'name', str(v49))
++                                v62 = getattr(v50, 'name', str(v50))
++                                debug_logger.debug(f"    MISMATCH: Slide {v28}, Shape {v33}, Para {v41} - Alignment differs: '{v61}' vs '{v62}'")
++                            return 0
++                    if v45.text != v46.text and v8:
++                        return 0
++                    if v45.level != v46.level and v9:
++                        return 0
++                    if len(v45.runs) != len(v46.runs):
+                         if v4:
+-                            debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v42} - Different number of runs:')
+-                            debug_logger.debug(f'      Para1 runs: {len(v48)}')
+-                            debug_logger.debug(f'      Para2 runs: {len(v49)}')
+-                        return 0
+-                    for v56, v57 in zip(v48, v49):
+-                        if v56.font.name != v57.font.name and v10:
++                            debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v41} - Different number of runs:')
++                            debug_logger.debug(f'      Para1 runs: {len(v45.runs)}')
++                            debug_logger.debug(f'      Para2 runs: {len(v46.runs)}')
++                        return 0
++                    for v53, v54 in zip(v45.runs, v46.runs):
++                        if v53.font.name != v54.font.name and v10:
+                             if v4:
+-                                debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v42} - Font name differs:')
+-                                debug_logger.debug(f"      Name1: '{v56.font.name}' vs Name2: '{v57.font.name}'")
+-                                debug_logger.debug(f"      Text: '{v56.text}' vs '{v57.text}'")
+-                            return 0
+-                        if v56.font.size != v57.font.size and v11:
++                                debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v41} - Font name differs:')
++                                debug_logger.debug(f"      Name1: '{v53.font.name}' vs Name2: '{v54.font.name}'")
++                                debug_logger.debug(f"      Text: '{v53.text}' vs '{v54.text}'")
++                            return 0
++                        if v53.font.size != v54.font.size and v11:
+                             if v4:
+-                                debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v42} - Font size differs:')
+-                                debug_logger.debug(f'      Size1: {v56.font.size} vs Size2: {v57.font.size}')
+-                                debug_logger.debug(f"      Text: '{v56.text}' vs '{v57.text}'")
+-                            return 0
+-                        if v56.font.bold != v57.font.bold and v12:
+-                            if not ((v56.font.bold is None or v56.font.bold is False) and (v57.font.bold is None or v57.font.bold is False)):
+-                                if v4:
+-                                    debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v42} - Font bold differs:')
+-                                    debug_logger.debug(f'      Bold1: {v56.font.bold} vs Bold2: {v57.font.bold}')
+-                                    debug_logger.debug(f"      Text: '{v56.text}' vs '{v57.text}'")
+-                                return 0
+-                        if v56.font.italic != v57.font.italic and v13:
+-                            if not ((v56.font.italic is None or v56.font.italic is False) and (v57.font.italic is None or v57.font.italic is False)):
+-                                if v4:
+-                                    debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v42} - Font italic differs:')
+-                                    debug_logger.debug(f'      Italic1: {v56.font.italic} vs Italic2: {v57.font.italic}')
+-                                    debug_logger.debug(f"      Text: '{v56.text}' vs '{v57.text}'")
+-                                return 0
+-                        if hasattr(v56.font.color, 'rgb') and hasattr(v57.font.color, 'rgb'):
+-                            if v56.font.color.rgb != v57.font.color.rgb and v14:
+-                                if v4:
+-                                    debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v42} - Font color differs:')
+-                                    debug_logger.debug(f'      Color1: {v56.font.color.rgb} vs Color2: {v57.font.color.rgb}')
+-                                    debug_logger.debug(f"      Text: '{v56.text}' vs '{v57.text}'")
+-                                return 0
+-                        if v56.font.underline != v57.font.underline and v15:
+-                            if v56.font.underline is not None and v57.font.underline is not None:
+-                                if v4:
+-                                    debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v42} - Font underline differs:')
+-                                    debug_logger.debug(f'      Underline1: {v56.font.underline} vs Underline2: {v57.font.underline}')
+-                                    debug_logger.debug(f"      Text: '{v56.text}' vs '{v57.text}'")
+-                                return 0
+-                            if v56.font.underline is None and v57.font.underline is True or (v56.font.underline is True and v57.font.underline is None):
+-                                if v4:
+-                                    debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v42} - Font underline differs (None vs True):')
+-                                    debug_logger.debug(f'      Underline1: {v56.font.underline} vs Underline2: {v57.font.underline}')
+-                                    debug_logger.debug(f"      Text: '{v56.text}' vs '{v57.text}'")
+-                                return 0
+-                        if v56.font._element.attrib.get('strike', 'noStrike') != v57.font._element.attrib.get('strike', 'noStrike') and v16:
++                                debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v41} - Font size differs:')
++                                debug_logger.debug(f'      Size1: {v53.font.size} vs Size2: {v54.font.size}')
++                                debug_logger.debug(f"      Text: '{v53.text}' vs '{v54.text}'")
++                            return 0
++                        if v53.font.bold != v54.font.bold and v12:
++                            if not ((v53.font.bold is None or v53.font.bold is False) and (v54.font.bold is None or v54.font.bold is False)):
++                                if v4:
++                                    debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v41} - Font bold differs:')
++                                    debug_logger.debug(f'      Bold1: {v53.font.bold} vs Bold2: {v54.font.bold}')
++                                    debug_logger.debug(f"      Text: '{v53.text}' vs '{v54.text}'")
++                                return 0
++                        if v53.font.italic != v54.font.italic and v13:
++                            if not ((v53.font.italic is None or v53.font.italic is False) and (v54.font.italic is None or v54.font.italic is False)):
++                                if v4:
++                                    debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v41} - Font italic differs:')
++                                    debug_logger.debug(f'      Italic1: {v53.font.italic} vs Italic2: {v54.font.italic}')
++                                    debug_logger.debug(f"      Text: '{v53.text}' vs '{v54.text}'")
++                                return 0
++                        if hasattr(v53.font.color, 'rgb') and hasattr(v54.font.color, 'rgb'):
++                            if v53.font.color.rgb != v54.font.color.rgb and v14:
++                                if v4:
++                                    debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v41} - Font color differs:')
++                                    debug_logger.debug(f'      Color1: {v53.font.color.rgb} vs Color2: {v54.font.color.rgb}')
++                                    debug_logger.debug(f"      Text: '{v53.text}' vs '{v54.text}'")
++                                return 0
++                        if v53.font.underline != v54.font.underline and v15:
++                            if v53.font.underline is not None and v54.font.underline is not None:
++                                if v4:
++                                    debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v41} - Font underline differs:')
++                                    debug_logger.debug(f'      Underline1: {v53.font.underline} vs Underline2: {v54.font.underline}')
++                                    debug_logger.debug(f"      Text: '{v53.text}' vs '{v54.text}'")
++                                return 0
++                            if v53.font.underline is None and v54.font.underline is True or (v53.font.underline is True and v54.font.underline is None):
++                                if v4:
++                                    debug_logger.debug(f'    MISMATCH: Slide {v28}, Shape {v33}, Para {v41} - Font underline differs (None vs True):')
++                                    debug_logger.debug(f'      Underline1: {v53.font.underline} vs Underline2: {v54.font.underline}')
++                                    debug_logger.debug(f"      Text: '{v53.text}' vs '{v54.text}'")
++                                return 0
++                        if v53.font._element.attrib.get('strike', 'noStrike') != v54.font._element.attrib.get('strike', 'noStrike') and v16:
+                             return 0
+@@ -314,33 +301,33 @@
+                         def _extract_bullets(xml_data):
+-                            v60 = ET.fromstring(xml_data)
+-                            v61 = {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main', 'p': 'http://schemas.openxmlformats.org/presentationml/2006/main'}
+-                            v62 = []
+-                            for v63 in v60.findall('.//a:p', v61):
+-                                v67 = v63.find('a:pPr', v61)
+-                                if v67 is not None:
+-                                    v73 = v67.get('lvl')
+-                                    v74 = v67.find('a:buChar', v61)
+-                                    v75 = v74.get('char') if v74 is not None else 'No Bullet'
+-                                    v76 = v67.find('a:buClr/a:srgbClr', v61)
+-                                    v77 = v76.get('val') if v76 is not None else 'No Color'
++                            v57 = ET.fromstring(xml_data)
++                            v58 = {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main', 'p': 'http://schemas.openxmlformats.org/presentationml/2006/main'}
++                            v59 = []
++                            for v60 in v57.findall('.//a:p', v58):
++                                v64 = v60.find('a:pPr', v58)
++                                if v64 is not None:
++                                    v70 = v64.get('lvl')
++                                    v71 = v64.find('a:buChar', v58)
++                                    v72 = v71.get('char') if v71 is not None else 'No Bullet'
++                                    v73 = v64.find('a:buClr/a:srgbClr', v58)
++                                    v74 = v73.get('val') if v73 is not None else 'No Color'
+                                 else:
+-                                    v73 = 'No Level'
+-                                    v75 = 'No Bullet'
+-                                    v77 = 'No Color'
+-                                v68 = ''.join((v86.text for v86 in v63.findall('.//a:t', v61)))
+-                                if v68.strip():
+-                                    v62.append((v73, v75, v68, v77))
+-                            return v62
+-
+-                        def _compare_bullets_with_tolerance(v71, v72):
+-                            if len(v71) != len(v72):
++                                    v70 = 'No Level'
++                                    v72 = 'No Bullet'
++                                    v74 = 'No Color'
++                                v65 = ''.join((v83.text for v83 in v60.findall('.//a:t', v58)))
++                                if v65.strip():
++                                    v59.append((v70, v72, v65, v74))
++                            return v59
++
++                        def _compare_bullets_with_tolerance(v68, v69):
++                            if len(v68) != len(v69):
+                                 return False
+-                            for (v78, v79, v80, v81), (v82, v83, v84, v85) in zip(v71, v72):
+-                                if v80 != v84:
++                            for (v75, v76, v77, v78), (v79, v80, v81, v82) in zip(v68, v69):
++                                if v77 != v81:
+                                     return False
+-                                if v79 != v83:
++                                if v76 != v80:
+                                     return False
+-                                v69 = '0' if v78 is None else v78
+-                                v70 = '0' if v82 is None else v82
+-                                if v69 != v70:
++                                v66 = '0' if v75 is None else v75
++                                v67 = '0' if v79 is None else v79
++                                if v66 != v67:
+                                     return False
+@@ -349,5 +336,5 @@
+                             try:
+-                                v71 = _extract_bullets(v56.part.blob.decode('utf-8'))
+-                                v72 = _extract_bullets(v57.part.blob.decode('utf-8'))
+-                                if not _compare_bullets_with_tolerance(v71, v72):
++                                v68 = _extract_bullets(v53.part.blob.decode('utf-8'))
++                                v69 = _extract_bullets(v54.part.blob.decode('utf-8'))
++                                if not _compare_bullets_with_tolerance(v68, v69):
+                                     return 0
+@@ -356,30 +343,30 @@
+         if v17 and len(v31) == len(v32):
+-            for v43, (v50, v51) in enumerate(zip(v31, v32)):
++            for v42, (v47, v48) in enumerate(zip(v31, v32)):
+                 if v4:
+-                    debug_logger.debug(f"  Additional text shape check {v43 + 1}: '{v50.text.strip()[:30]}' vs '{v51.text.strip()[:30]}'")
+-                if v50.text.strip() != v51.text.strip() and v8:
+-                    if v4:
+-                        debug_logger.debug(f"    MISMATCH: Text differs - '{v50.text.strip()}' vs '{v51.text.strip()}'")
+-                    return 0
+-                if len(v50.text_frame.paragraphs) != len(v51.text_frame.paragraphs):
+-                    if v4:
+-                        debug_logger.debug(f'    MISMATCH: Different number of paragraphs - {len(v50.text_frame.paragraphs)} vs {len(v51.text_frame.paragraphs)}')
+-                    return 0
+-                for v42, (v46, v47) in enumerate(zip(v50.text_frame.paragraphs, v51.text_frame.paragraphs)):
++                    debug_logger.debug(f"  Additional text shape check {v42 + 1}: '{v47.text.strip()[:30]}' vs '{v48.text.strip()[:30]}'")
++                if v47.text.strip() != v48.text.strip() and v8:
++                    if v4:
++                        debug_logger.debug(f"    MISMATCH: Text differs - '{v47.text.strip()}' vs '{v48.text.strip()}'")
++                    return 0
++                if len(v47.text_frame.paragraphs) != len(v48.text_frame.paragraphs):
++                    if v4:
++                        debug_logger.debug(f'    MISMATCH: Different number of paragraphs - {len(v47.text_frame.paragraphs)} vs {len(v48.text_frame.paragraphs)}')
++                    return 0
++                for v41, (v45, v46) in enumerate(zip(v47.text_frame.paragraphs, v48.text_frame.paragraphs)):
+                     from pptx.enum.text import PP_ALIGN
+-                    v52 = v46.alignment
+-                    v53 = v47.alignment
+-                    if v4:
+-                        v58 = 'None' if v52 is None else getattr(v52, 'name', str(v52))
+-                        v59 = 'None' if v53 is None else getattr(v53, 'name', str(v53))
+-                        debug_logger.debug(f"    Para {v42 + 1}: Alignment '{v58}' vs '{v59}'")
+-                    if v52 is None:
+-                        v52 = PP_ALIGN.LEFT
+-                    if v53 is None:
+-                        v53 = PP_ALIGN.LEFT
+-                    if v52 != v53:
++                    v49 = v45.alignment
++                    v50 = v46.alignment
++                    if v4:
++                        v55 = 'None' if v49 is None else getattr(v49, 'name', str(v49))
++                        v56 = 'None' if v50 is None else getattr(v50, 'name', str(v50))
++                        debug_logger.debug(f"    Para {v41 + 1}: Alignment '{v55}' vs '{v56}'")
++                    if v49 is None:
++                        v49 = PP_ALIGN.LEFT
++                    if v50 is None:
++                        v50 = PP_ALIGN.LEFT
++                    if v49 != v50:
+                         if v4:
+-                            v64 = getattr(v52, 'name', str(v52))
+-                            v65 = getattr(v53, 'name', str(v53))
+-                            debug_logger.debug(f"    MISMATCH: Alignment differs - '{v64}' vs '{v65}'")
++                            v61 = getattr(v49, 'name', str(v49))
++                            v62 = getattr(v50, 'name', str(v50))
++                            debug_logger.debug(f"    MISMATCH: Alignment differs - '{v61}' vs '{v62}'")
+                         return 0
+@@ -390,3 +377,3 @@
+     if v4:
+-        debug_logger.debug(f'=== COMPARISON SUCCESSFUL - Files match ===')
++        debug_logger.debug('=== COMPARISON SUCCESSFUL - Files match ===')
+     return 1
+
+=== table.py:_load_sheet
+--- upstream
++++ cube
+@@ -7,3 +7,3 @@
+                 v4 = _safe_read_file(v3)
+-                v5 = list(itertools.dropwhile(lambda l: len(l) == 0, map(lambda l: l.strip(), reversed(v4))))
++                v5 = list(itertools.dropwhile(lambda item: len(item) == 0, map(lambda item: item.strip(), reversed(v4))))
+                 return v5
+
+=== table.py:compare_conference_city_in_order
+--- upstream
++++ cube
+@@ -6,23 +6,15 @@
+     for v6 in v4['C2:C22']:
+-        for v8 in v6:
+-            v5.append(v8.value)
++        for v7 in v6:
++            v5.append(v7.value)
+     try:
+-        for v9, v10 in enumerate(v5):
+-            v11 = _normalize_city_string(v10)
+-            v12 = v2[v9]
+-            if isinstance(v12, str):
+-                v15 = [v12]
+-            elif isinstance(v12, List):
+-                v15 = v12
++        for v8 in range(len(v5)):
++            if isinstance(v2[v8], str):
++                if v2[v8] not in v5[v8]:
++                    return 0.0
++            elif isinstance(v2[v8], List):
++                if not any((v9 in v5[v8] for v9 in v2[v8])):
++                    return 0.0
+             else:
+                 raise TypeError('Expected city should be a string or a list of strings')
+-            v13 = False
+-            for v14 in v15:
+-                v16 = _normalize_city_string(v14)
+-                if v16 and v16 in v11:
+-                    v13 = True
+-                    break
+-            if not v13:
+-                return 0.0
+-    except Exception as v7:
++    except Exception:
+         return 0.0
+
+=== utils.py:load_xlsx_styles
+--- upstream
++++ cube
+@@ -23,3 +23,3 @@
+                 try:
+-                    v26 = v7.ast('=' + v18)[1].compile()
++                    v25 = v7.ast('=' + v18)[1].compile()
+                 except Exception:
+@@ -34,3 +34,3 @@
+                         v21.append([read_cell_value(v2, v1, coordinate='{:}{:}'.format(get_column_letter(v10[1]), v10[0])) for v10 in CellRange('{:}{:}:{:}{:}'.format(v23[0], v23[1], v23[2], v23[3])).cells])
+-                v15.append(v26)
++                v15.append(v25)
+                 v16.append(v21)
+@@ -41,10 +41,14 @@
+                 v21 = v16[0]
+-                v25 = lambda v: v24(v, *v21)
++
++                def is_active(v, _condition=v24, _arguments=v21):
++                    return _condition(v, *_arguments)
+             elif v11.type == 'cellIs':
+-                v27 = v11.operator
++                v26 = v11.operator
+                 try:
+-                    v30 = [v18() for v18 in v15]
++                    v29 = [v18() for v18 in v15]
+                 except Exception:
+                     continue
+-                v25 = lambda v: _process_xlsx_cf_operator(v27, v, v30)
++
++                def is_active(v, _operator=v26, _references=v29):
++                    return _process_xlsx_cf_operator(_operator, v, _references)
+             v19 = 0
+@@ -52,5 +56,5 @@
+                 for v10 in v20.cells:
+-                    v28 = v9.cell(row=v10[0], column=v10[1])
+-                    v29 = read_cell_value(v2, v1, coordinate='{:}{:d}'.format(get_column_letter(v10[1]), v10[0]))
+-                    if v29 is None:
++                    v27 = v9.cell(row=v10[0], column=v10[1])
++                    v28 = read_cell_value(v2, v1, coordinate='{:}{:d}'.format(get_column_letter(v10[1]), v10[0]))
++                    if v28 is None:
+                         v19 += 1
+@@ -61,7 +65,7 @@
+                         try:
+-                            v31 = v25(v29)
++                            v30 = is_active(v28)
+                         except Exception:
+-                            v31 = False
+-                        if v31:
+-                            v14.append(v28)
++                            v30 = False
++                        if v30:
++                            v14.append(v27)
+             for v10 in v14:
+
+=== vlc.py:compare_audios
+--- upstream
++++ cube
+@@ -3,5 +3,5 @@
+         return 0
+-    v9, v10 = (None, None)
++    v8, v9 = (None, None)
+     try:
+-        v9, v14 = librosa.load(v0)
++        v8, v13 = librosa.load(v0)
+     except Exception:
+@@ -9,7 +9,7 @@
+     try:
+-        v10, v15 = librosa.load(v1)
++        v9, v14 = librosa.load(v1)
+     except Exception:
+         pass
+-    v2 = v9 is None or v9.shape[0] == 0
+-    v3 = v10 is None or v10.shape[0] == 0
++    v2 = v8 is None or v8.shape[0] == 0
++    v3 = v9 is None or v9.shape[0] == 0
+     if v2 and v3:
+@@ -19,4 +19,4 @@
+     try:
+-        v5 = librosa.feature.mfcc(y=v9, sr=v14)
+-        v6 = librosa.feature.mfcc(y=v10, sr=v15)
++        v5 = librosa.feature.mfcc(y=v8, sr=v13)
++        v6 = librosa.feature.mfcc(y=v9, sr=v14)
+     except Exception as v4:
+@@ -25,9 +25,11 @@
+     v6 = librosa.util.normalize(v6, axis=1)
+-    v7 = lambda x, y: cosine(x, y)
+-    v11, v12 = fastdtw(v5.T, v6.T, dist=v7)
+-    if len(v12) == 0:
+-        v13 = np.inf
++
++    def dist_func(x, y):
++        return cosine(x, y)
++    v10, v11 = fastdtw(v5.T, v6.T, dist=dist_func)
++    if len(v11) == 0:
++        v12 = np.inf
+     else:
+-        v13 = v11 / len(v12)
+-    v8 = np.exp(-v13)
+-    return v8
++        v12 = v10 / len(v11)
++    v7 = np.exp(-v12)
++    return v7
+
+=== vscode.py:compare_config
+--- upstream
++++ cube
+@@ -3,25 +3,6 @@
+         return 0.0
+-    v2 = v1.get('expected')
+-    if not v2:
+-        return 0.0
+-    with open(v0, 'r', encoding='utf-8') as v4:
+-        v5 = v4.read()
+-    v3 = options.get('containment_ok', True)
+-    if v3:
+-        try:
+-            v6 = json.loads(v5)
+-            v7 = json.loads(v2)
+-            if _is_subset(v7, v6):
+-                return 1.0
+-        except Exception:
+-            if v2.strip() in v5:
+-                return 1.0
+-        return 0.0
+-    if v5 == v2:
++    with open(v0) as v2:
++        v3 = v2.read()
++    if v3 == v1['expected']:
+         return 1.0
+-    try:
+-        if json.loads(v5) == json.loads(v2):
+-            return 1.0
+-    except Exception:
+-        pass
+     return 0.0

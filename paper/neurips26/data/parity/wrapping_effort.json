@@ -1,0 +1,74 @@
+[
+  {
+    "cube": "WorkArena",
+    "package_dir": "workarena",
+    "authored": 358,
+    "vendored": 0,
+    "debug": 33,
+    "files": 6
+  },
+  {
+    "cube": "WebArena-Verified",
+    "package_dir": "webarena-verified",
+    "authored": 545,
+    "vendored": 0,
+    "debug": 37,
+    "files": 7
+  },
+  {
+    "cube": "MiniWoB",
+    "package_dir": "miniwob",
+    "authored": 331,
+    "vendored": 0,
+    "debug": 67,
+    "files": 5
+  },
+  {
+    "cube": "BrowseComp",
+    "package_dir": "browsercomp",
+    "authored": 366,
+    "vendored": 0,
+    "debug": 113,
+    "files": 7
+  },
+  {
+    "cube": "OSWorld",
+    "package_dir": "osworld-cube",
+    "authored": 942,
+    "vendored": 8225,
+    "debug": 144,
+    "files": 40
+  },
+  {
+    "cube": "Windows Agent Arena",
+    "package_dir": "windows-agent-arena-cube",
+    "authored": 656,
+    "vendored": 8771,
+    "debug": 85,
+    "files": 44
+  },
+  {
+    "cube": "SWE-bench Verified",
+    "package_dir": "swebench-verified-cube",
+    "authored": 485,
+    "vendored": 0,
+    "debug": 38,
+    "files": 9
+  },
+  {
+    "cube": "SWE-bench Live",
+    "package_dir": "swebench-live-cube",
+    "authored": 599,
+    "vendored": 0,
+    "debug": 38,
+    "files": 10
+  },
+  {
+    "cube": "Terminal-Bench",
+    "package_dir": "terminalbench2-cube",
+    "authored": 666,
+    "vendored": 0,
+    "debug": 73,
+    "files": 7
+  }
+]
