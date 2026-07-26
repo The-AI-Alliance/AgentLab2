@@ -38,9 +38,9 @@ table: `paper/neurips26/REBUTTAL.md`.
 ## 1. Setup
 
 ```bash
-git clone <cube-harness remote> && cd cube-harness
+git clone git@github.com:silverstream-ai/cube-harness.git && cd cube-harness
 
-# The rebuttal work is NOT on dev. Use the branch:
+# The rebuttal work is NOT on dev — dev is deliberately untouched. Use the branch:
 git checkout paper/neurips26-rebuttal
 
 # Fallback if that branch has not reached your remote — apply the bundle on dev:
