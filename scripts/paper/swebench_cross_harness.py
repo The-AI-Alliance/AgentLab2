@@ -37,21 +37,51 @@ from typing import Annotated, Any
 import typer
 
 from cube_harness.analyze.investigator.episode_discovery import discover_episodes
+from cube_harness.storage import FileStorage
 
 app = typer.Typer(add_completion=False, help=__doc__)
 
 MODEL_FIELD = "model_name_or_path"
 
 
+def _eval_info(storage: FileStorage, trajectory_id: str) -> dict[str, Any]:
+    """The terminal evaluation event's ``info`` for one episode.
+
+    This is where the SWE-bench task actually puts ``model_patch`` / ``resolved``
+    (see ``swebench_verified_cube.task``). Two wrong-looking places to avoid:
+
+    * ``EpisodeRecord`` has no ``reward_info`` field at all, so the previous
+      ``getattr(record, "reward_info", {})`` silently returned ``{}`` for every
+      episode. That did not just empty the export — ``compare`` derives CUBE's
+      verdict from the same dict, so every CUBE verdict became ``False`` and the
+      regrade would have reported a fabricated pile of "upstream-only"
+      disagreements, i.e. exactly the signal that means "our evaluator is
+      broken". Silence here produces a *wrong parity claim*, not a missing one.
+    * ``FileStorage.load_trajectory`` is lossy for event-format episodes: the
+      event→trajectory synthesis drops ``reward``/``info`` (its own docstring
+      says so), returning reward 0.0 and an empty info even when the event on
+      disk has reward 1.0 and a full patch.
+    """
+    try:
+        view = storage.load_episode(trajectory_id)
+    except (OSError, ValueError, KeyError):  # unreadable/partial episode — reported as missing
+        return {}
+    for event in reversed(list(view.iter_events())):
+        info = getattr(getattr(event, "output", None), "info", None)
+        if info:
+            return dict(info)
+    return {}
+
+
 def _episodes(run_dir: Path) -> list[tuple[str, dict[str, Any]]]:
     """Yield (instance_id, reward_info) for every completed episode in a run."""
+    storage = FileStorage(run_dir)
     out: list[tuple[str, dict[str, Any]]] = []
     for ref in discover_episodes(run_dir):
         record = ref.record
         if record is None:
             continue
-        info = dict(getattr(record, "reward_info", {}) or {})
-        out.append((record.sample_id, info))
+        out.append((record.sample_id, _eval_info(storage, ref.trajectory_id)))
     return out
 
 
