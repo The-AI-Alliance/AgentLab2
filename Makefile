@@ -47,15 +47,21 @@ update:
 	uv sync --all-extras --upgrade
 	uv run playwright install chromium --with-deps
 
+# Resolve ruff from the dev group in uv.lock, so CI and laptops run the same version. `uvx ruff`
+# floated to whatever was newest, which is how 0.16.0's expanded default rule set turned every
+# open PR red at once — 1937 findings on an unchanged tree, in files nobody had touched.
+# --only-group dev: lint needs ruff, not playwright and ray.
+RUFF := uv run --only-group dev ruff
+
 lint:
 	@echo "🧹 Linting code"
-	uvx ruff check --fix .
-	uvx ruff format .
+	$(RUFF) check --fix .
+	$(RUFF) format .
 
 lint-check:
 	@echo "🧹 Checking lint"
-	uvx ruff check --diff .
-	uvx ruff format --diff .
+	$(RUFF) check --diff .
+	$(RUFF) format --diff .
 
 test: install
 	@echo "🧪 Running unit tests"
