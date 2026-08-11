@@ -25,6 +25,7 @@ jobs:
       workarena: ${{ steps.filter.outputs.workarena }}
       timewarp: ${{ steps.filter.outputs.timewarp }}
       has-hf-token: ${{ steps.secrets.outputs.has-hf-token }}
+      has-workarena-access: ${{ steps.workarena-access.outputs.has-workarena-access }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
       - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36  # v3.0.2
@@ -48,6 +49,24 @@ jobs:
             echo "has-hf-token=true" >> "$GITHUB_OUTPUT"
           else
             echo "has-hf-token=false" >> "$GITHUB_OUTPUT"
+          fi
+      - id: workarena-access
+        env:
+          HF_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+        run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "has-workarena-access=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          status_code="$(curl -sS -L -o /dev/null -w '%{http_code}' \
+            --oauth2-bearer "$HF_TOKEN" \
+            "https://huggingface.co/datasets/ServiceNow/WorkArena-Instances/resolve/main/instances_v2.json")"
+
+          if [ "$status_code" = "200" ]; then
+            echo "has-workarena-access=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-workarena-access=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping WorkArena debug suite: token cannot access gated dataset (HTTP $status_code)."
           fi
 
   miniwob:
@@ -102,9 +121,9 @@ jobs:
   workarena:
     name: WorkArena debug suite
     needs: changes
-    # Skip if HF token is not configured (e.g. external fork PRs) or workarena unchanged
+    # Skip if HF token cannot access the gated WorkArena dataset or workarena is unchanged.
     if: >-
-      needs.changes.outputs.has-hf-token == 'true' &&
+      needs.changes.outputs.has-workarena-access == 'true' &&
       (needs.changes.outputs.workarena == 'true' || github.event_name == 'push')
     runs-on: ubuntu-22.04  # Pin to 22.04 — ubuntu-latest (24.04) has libasound2 issues with Playwright
 
