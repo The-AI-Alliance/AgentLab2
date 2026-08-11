@@ -522,6 +522,73 @@ class TestStatusBasedSelection:
             assert storage.read_episode_status(traj_id).status == initial_status
 
     # ------------------------------------------------------------------
+    # QUEUED orphan reclamation by driver identity (process_start_s)
+    # ------------------------------------------------------------------
+
+    def _seed_queued(self, tmp_dir: "Path", mock_agent_config: "MockAgentConfig", started_age: float) -> tuple:
+        """Seed a single QUEUED episode aged `started_age` seconds; return (storage, traj_id, now)."""
+        benchmark_config = _make_benchmark(1)
+        exp = Experiment(
+            name="test_q_orphan", output_dir=tmp_dir, agent_config=mock_agent_config, benchmark_config=benchmark_config
+        )
+        with benchmark_config.make() as benchmark:
+            episodes = exp.get_episodes_to_run(benchmark)
+        traj_id = f"{episodes[0].config.task_config.task_id}_ep{episodes[0].config.id}"
+        storage = FileStorage(tmp_dir)
+        now = time.time()
+        storage.write_episode_status(
+            traj_id,
+            EpisodeStatus(
+                status="QUEUED",
+                task_id=episodes[0].config.task_config.task_id,
+                episode_id=episodes[0].config.id,
+                started_at=now - started_age,
+                last_heartbeat_at=None,
+                current_step=0,
+            ),
+        )
+        return storage, traj_id, now
+
+    def test_sweep_queued_orphan_by_process_start(self, tmp_dir: "Path", mock_agent_config: "MockAgentConfig") -> None:
+        """A QUEUED claim from a prior, now-dead driver is reclaimed on resume.
+
+        The claim is only 30s old — far under the 3600s orphan_threshold — but it
+        predates `process_start_s` (this driver started 10s ago). Before the fix the
+        age-only QUEUED rule left it QUEUED; QUEUED is not in RETRIABLE_STATUSES, so a
+        crash-then-prompt-resume silently dropped it. Identity (predates this driver),
+        not age, is the signal.
+        """
+        storage, traj_id, now = self._seed_queued(tmp_dir, mock_agent_config, started_age=30.0)
+        swept = sweep_stale_statuses(
+            storage,
+            step_timeout_s=1800.0,
+            cancel_grace_s=120.0,
+            orphan_threshold_s=3600.0,
+            process_start_s=now - 10.0,  # claim's started_at (now-30) predates this driver
+        )
+        assert swept == [traj_id]
+        assert storage.read_episode_status(traj_id).status == "STALE"
+
+    def test_sweep_queued_live_claim_not_swept(self, tmp_dir: "Path", mock_agent_config: "MockAgentConfig") -> None:
+        """A QUEUED claim made by THIS driver is left alone (no #458-style false-cancel).
+
+        started_at (now-5) is AFTER process_start_s (now-10), i.e. the current driver
+        pre-claimed it this round and Ray simply hasn't dispatched it yet. It is under
+        orphan_threshold, so it must NOT be swept — the legitimately-waiting-behind-busy-
+        workers case that got the live-loop time timeout reverted (#445 → #458).
+        """
+        storage, traj_id, now = self._seed_queued(tmp_dir, mock_agent_config, started_age=5.0)
+        swept = sweep_stale_statuses(
+            storage,
+            step_timeout_s=1800.0,
+            cancel_grace_s=120.0,
+            orphan_threshold_s=3600.0,
+            process_start_s=now - 10.0,  # this driver started before the claim → live
+        )
+        assert swept == []
+        assert storage.read_episode_status(traj_id).status == "QUEUED"
+
+    # ------------------------------------------------------------------
     # Parametrized table: resume=True selection by status
     # ------------------------------------------------------------------
 
