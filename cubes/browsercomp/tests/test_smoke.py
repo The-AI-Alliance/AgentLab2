@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from browsercomp_cube import BrowseCompBenchmarkConfig
+from browsercomp_cube import BROWSECOMP_CONFIGS, BrowseCompBenchmarkConfig
 from browsercomp_cube.crypto import decrypt, derive_key, encrypt
 from browsercomp_cube.debug import DebugBrowseCompBenchmark, DebugBrowseCompBenchmarkConfig, get_debug_benchmark
 from browsercomp_cube.task import BrowseCompExecutionInfo, BrowseCompTask, BrowseCompTaskConfig, BrowseCompTaskMetadata
@@ -22,6 +22,12 @@ def test_browsecomp_benchmark_config_constructs() -> None:
     first_id = next(iter(bench.task_metadata))
     assert first_id.startswith("browsecomp-")
     assert bench.scorer_model == "gpt-5.4-mini"
+
+
+def test_browsecomp_configs_has_default() -> None:
+    # Every cube exposes <NAME>_CONFIGS["default"] (recipe-template contract).
+    assert "default" in list(BROWSECOMP_CONFIGS.keys())
+    assert BROWSECOMP_CONFIGS["default"].scorer_model == "openai/gpt-4o"
 
 
 def test_browsecomp_benchmark_config_round_trip() -> None:
