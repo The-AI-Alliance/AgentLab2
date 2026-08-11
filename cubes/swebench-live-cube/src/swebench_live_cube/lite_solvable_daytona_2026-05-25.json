@@ -2,7 +2,8 @@
   "date": "2026-05-25",
   "source_set": "swe-bench-live/lite",
   "infra": "daytona (root)",
-  "description": "Task IDs from swe-bench-live's 'lite' (300-task) subset that resolved (reward == 1.0) under the gold-patch oracle on Daytona (root-running). Supersedes lite_solvable_2026-05-12.json (223, generated on the non-root EAI Toolkit): root infra recovers ~62 tasks whose gold patch or eval requires root. Regenerate via `python -m swebench_live_cube.gold_patch.recipe --subset lite --daytona --n-parallel 20 --dump-solvable <path>` then update the filename's date.",
+  "description": "Task IDs from swe-bench-live's 'lite' (300-task) subset that resolved (reward == 1.0) under the gold-patch oracle on Daytona (root-running). Supersedes lite_solvable_2026-05-12.json (223, generated on the non-root EAI Toolkit): root infra recovers ~62 tasks whose gold patch or eval requires root. Regenerate by running `python -m swebench_live_cube.gold_patch.recipe --experiment daytona --ray 20` (one or more times), then post-hoc `gold_patch.extract_solvable(run_dir)` (one run) or `gold_patch.intersect_solvable(run_dirs)` (stable across N runs); update the filename's date.",
+  "notes": "See lite_solvable_daytona_2026-05-25.NOTES.md (next to this file) for the forensic record on the 25 tasks NOT in this snapshot — investigated in PR #473 (closed unmerged) and judged not worth shipping for the ~6 recoveries it'd add.",
   "n_tasks": 275,
   "task_ids": [
     "aiogram__aiogram-1594",
